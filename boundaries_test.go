@@ -26,6 +26,8 @@ const module = "github.com/sweeney/tanktemp"
 var core = []string{
 	"internal/config",
 	"internal/reading",
+	"internal/startup",
+	"internal/sweep",
 	"internal/reading/readingtest",
 }
 

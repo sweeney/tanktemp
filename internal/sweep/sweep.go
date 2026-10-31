@@ -1,0 +1,146 @@
+// Package sweep turns the config and a reading.Source into one sweep: every
+// configured sensor of every tank, in order, calibrated, with its quality.
+// It is pure business logic: the sensors come through reading.Source and
+// time through injected functions, so it is tested with readingtest.Fake.
+package sweep
+
+import (
+	"context"
+	"errors"
+	"math"
+	"sort"
+	"time"
+
+	"github.com/sweeney/tanktemp/internal/config"
+	"github.com/sweeney/tanktemp/internal/reading"
+)
+
+// ErrCancelled: the sweep was cancelled (shutdown) part-way. Its readings
+// are incomplete and must not be published.
+var ErrCancelled = errors.New("sweep cancelled")
+
+// Sweeper reads every configured sensor.
+type Sweeper struct {
+	Tanks  []config.Tank // sensors sorted by order, as config.Load returns them
+	Source reading.Source
+	Now    func() time.Time
+	Synced func() bool // whether the system clock is NTP-synced
+}
+
+// Sweep is one complete read of every configured sensor.
+type Sweep struct {
+	At            time.Time     // when the sweep started (UTC)
+	Duration      time.Duration // how long it took
+	ClockSynced   bool
+	Tanks         []Tank   // in config order
+	Unexpected    []string // thermometers on a bus but not in config, sorted
+	DiscoverError string   // set if discovery failed; every sensor then reads not_present
+}
+
+// Tank is one tank's readings.
+type Tank struct {
+	DeviceID string
+	Sensors  []Sensor // in order: 1 = top
+}
+
+// Sensor is one probe's outcome: the config facts, the raw and calibrated
+// values (nil unless Code is OK), and its quality.
+type Sensor struct {
+	Position string
+	Order    int
+	HeightMM *int
+	ROM      string
+	OffsetC  float64
+	RawC     *float64
+	TempC    *float64 // RawC + OffsetC
+	Code     reading.Code
+	Suspect  string
+	Attempts int
+	Bus      string // "" when not on any bus
+}
+
+// Counts returns how many sensors read OK and how many failed.
+func (s Sweep) Counts() (ok, failed int) {
+	for _, t := range s.Tanks {
+		for _, x := range t.Sensors {
+			if x.Code == reading.OK {
+				ok++
+			} else {
+				failed++
+			}
+		}
+	}
+	return ok, failed
+}
+
+// Sweep reads every configured sensor once (with the Source's retries).
+func (s *Sweeper) Sweep(ctx context.Context) (Sweep, error) {
+	start := s.Now().UTC()
+	out := Sweep{At: start, ClockSynced: s.Synced()}
+
+	top, err := s.Source.Discover(ctx)
+	if err != nil {
+		out.DiscoverError = err.Error()
+		top = reading.Topology{}
+	}
+
+	configured := map[string]bool{}
+	var roms []string
+	for _, t := range s.Tanks {
+		for _, x := range t.Sensors {
+			configured[x.ROM] = true
+			roms = append(roms, x.ROM)
+		}
+	}
+	readings := s.Source.Read(ctx, top, roms)
+
+	for _, t := range s.Tanks {
+		tank := Tank{DeviceID: t.DeviceID}
+		for _, x := range t.Sensors {
+			r := readings[x.ROM]
+			if r.Code == reading.Cancelled || ctx.Err() != nil {
+				return Sweep{}, ErrCancelled
+			}
+			tank.Sensors = append(tank.Sensors, sensorFrom(x, r))
+		}
+		out.Tanks = append(out.Tanks, tank)
+	}
+	for _, rom := range top.ROMs() {
+		if !configured[rom] {
+			out.Unexpected = append(out.Unexpected, rom)
+		}
+	}
+	sort.Strings(out.Unexpected)
+	out.Duration = s.Now().UTC().Sub(start)
+	return out, nil
+}
+
+func sensorFrom(c config.Sensor, r reading.Reading) Sensor {
+	s := Sensor{
+		Position: c.Position,
+		Order:    c.Order,
+		HeightMM: c.HeightMM,
+		ROM:      c.ROM,
+		OffsetC:  c.OffsetC,
+		Code:     r.Code,
+		Suspect:  r.Suspect,
+		Attempts: r.Attempts,
+		Bus:      r.Bus,
+	}
+	if s.Code == "" {
+		s.Code = reading.ReadError // the Source broke its contract; say so
+	}
+	if r.Code == reading.OK && r.MilliC != nil {
+		raw := float64(*r.MilliC) / 1000
+		t := calibrate(*r.MilliC, c.OffsetC)
+		s.RawC, s.TempC = &raw, &t
+	}
+	return s
+}
+
+// calibrate applies the offset and rounds to 4 decimals, so a published
+// value never carries float noise (61.375 - 0.19 is 61.185, not
+// 61.18499999999999).
+func calibrate(milliC int, offsetC float64) float64 {
+	return math.Round((float64(milliC)/1000+offsetC)*1e4) / 1e4
+}
