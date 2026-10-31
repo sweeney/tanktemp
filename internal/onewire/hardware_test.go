@@ -4,9 +4,8 @@ package onewire
 
 // The hardware check: run on the Pi, read-only, never in CI. It reads the
 // real sensors through the real Source and checks every configured ROM is
-// present, reads OK first time, is in powered mode and at 12-bit.
-// through deploy/hardware-check.sh, which builds it, copies it over and
-// passes the ROMs:
+// present, reads OK first time, is in powered mode and at 12-bit. See the
+// README ("Hardware check") for building and running it:
 //
 //	TANKTEMP_ROMS=28-…,28-… ./onewire.test -test.run Hardware -test.v
 
