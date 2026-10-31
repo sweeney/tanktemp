@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tanktemp</title>
+<style>
+:root {
+  --bg: #f6f5f2; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a66; --line: #e2e0da;
+  --ok: #2f7d4f; --warn: #b26b00; --bad: #b3261e; --cold: #3b6fb6; --hot: #c4452c;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #161615; --panel: #20201e; --ink: #ecebe7; --muted: #9b9a95; --line: #34332f;
+          --ok: #5fbf85; --warn: #e3a440; --bad: #f07167; --cold: #7aa5e6; --hot: #f08a6c; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+       font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 960px; margin: 0 auto; padding: 20px 16px 40px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 16px; }
+h1 { font-size: 20px; margin: 0; }
+.pill { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+        padding: 2px 8px; border-radius: 999px; border: 1px solid currentColor; }
+.ok { color: var(--ok); } .starting { color: var(--warn); } .degraded { color: var(--bad); }
+.meta { color: var(--muted); font-size: 13px; }
+.notes { margin: 0 0 16px; padding: 10px 12px; border-left: 3px solid var(--warn);
+         background: var(--panel); border-radius: 4px; font-size: 13px; }
+.notes:empty { display: none; }
+.notes li { margin: 2px 0; }
+.tanks { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+.tank { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+.tank h2 { font-size: 15px; margin: 0 0 10px; overflow-wrap: anywhere; }
+.sensor { display: grid; grid-template-columns: 10px 1fr auto; gap: 10px; align-items: center;
+          padding: 8px 0; border-top: 1px solid var(--line); }
+.sensor:first-of-type { border-top: 0; }
+.swatch { width: 10px; height: 34px; border-radius: 3px; background: var(--line); }
+.pos { font-weight: 600; }
+.sub { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.temp { font-variant-numeric: tabular-nums; font-size: 20px; font-weight: 600; text-align: right; }
+.err { color: var(--bad); font-size: 13px; font-weight: 600; text-align: right; }
+.flag { color: var(--warn); font-size: 12px; text-align: right; }
+footer { margin-top: 24px; color: var(--muted); font-size: 12px; }
+code { font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>tanktemp</h1>
+    <span id="status" class="pill starting">loading</span>
+    <span class="meta" id="when"></span>
+  </header>
+  <ul class="notes" id="notes"></ul>
+  <section class="tanks" id="tanks"></section>
+  <footer>
+    Build <code>{{.Version}}</code> · <span id="prefix"></span> ·
+    <a href="/healthz">/healthz</a> · <a href="/api/status">/api/status</a>
+  </footer>
+</main>
+<script>
+"use strict";
+const interval = {{.IntervalMS}};
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+// 10 °C (cold feed) to 65 °C (top of a hot cylinder), cold to hot.
+function colour(t) {
+  const f = Math.max(0, Math.min(1, (t - 10) / 55));
+  return "color-mix(in srgb, var(--hot) " + Math.round(f * 100) + "%, var(--cold))";
+}
+
+function render(s) {
+  const st = document.getElementById("status");
+  st.textContent = s.health.status;
+  st.className = "pill " + s.health.status;
+  document.getElementById("prefix").textContent = "MQTT " + s.topic_prefix + (s.mqtt_connected ? "" : " (disconnected)");
+
+  const notes = document.getElementById("notes");
+  notes.replaceChildren();
+  for (const d of s.health.detail) notes.appendChild(el("li", "", d));
+  if (!s.calibrated && s.tanks.length) {
+    notes.appendChild(el("li", "", "Uncalibrated: readings are ±0.5 °C absolute (offset_c is 0 for every sensor)."));
+  }
+  for (const r of (s.unexpected || [])) notes.appendChild(el("li", "", "Unconfigured sensor on a bus: " + r));
+
+  const tanks = document.getElementById("tanks");
+  tanks.replaceChildren();
+  let newest = null;
+  for (const t of s.tanks) {
+    newest = t.timestamp;
+    const card = el("article", "tank");
+    card.appendChild(el("h2", "", t.device_id));
+    for (const x of t.sensors) {
+      const row = el("div", "sensor");
+      const sw = el("div", "swatch");
+      if (x.temp_c !== null) sw.style.background = colour(x.temp_c);
+      row.appendChild(sw);
+      const name = el("div");
+      name.appendChild(el("div", "pos", x.position));
+      const where = (x.height_mm !== null ? x.height_mm + " mm · " : "") + x.rom;
+      name.appendChild(el("div", "sub", where));
+      row.appendChild(name);
+      const val = el("div");
+      if (x.temp_c !== null) {
+        val.appendChild(el("div", "temp", x.temp_c.toFixed(2) + " °C"));
+        if (x.suspect) val.appendChild(el("div", "flag", "85 °C, unverified"));
+      } else {
+        val.appendChild(el("div", "err", x.error.replace(/_/g, " ")));
+      }
+      row.appendChild(val);
+      card.appendChild(row);
+    }
+    tanks.appendChild(card);
+  }
+  document.getElementById("when").textContent = newest
+    ? "last sweep " + new Date(newest).toLocaleTimeString()
+    : "waiting for the first sweep";
+}
+
+async function poll() {
+  try {
+    const r = await fetch("/api/status", {cache: "no-store"});
+    render(await r.json());
+  } catch (e) {
+    const st = document.getElementById("status");
+    st.textContent = "unreachable";
+    st.className = "pill degraded";
+  }
+}
+poll();
+setInterval(poll, Math.max(5000, interval));
+</script>
+</body>
+</html>
