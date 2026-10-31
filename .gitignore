@@ -1,0 +1,6 @@
+/go.work
+/go.work.sum
+/tanktemp
+/tanktemp-*
+/w1capture
+/dist/
