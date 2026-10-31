@@ -28,6 +28,7 @@ var core = []string{
 	"internal/payload",
 	"internal/reading",
 	"internal/startup",
+	"internal/status",
 	"internal/sweep",
 	"internal/reading/readingtest",
 }
