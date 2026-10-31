@@ -529,6 +529,12 @@ old logger, before filtering).
   unknown, and the datasheet's ±0.5 °C only holds up to 85 °C.
 - **The power-on-reset scratchpad (byte 6 = 0x0C).** It comes from the
   datasheet; we've never captured one.
+  On 2026-10-31 a capture of all ten rig sensors
+  (`internal/onewire/testdata/sysfs/rig-steady`) confirmed the
+  `0x10 − (byte0 & 0x0F)` pattern again. It also showed that **a real reading
+  can have byte 6 = 0x0C**, whenever the LSB's low nibble is 4 (for example
+  `04 01 … 0c 10` = 16.25 °C). So byte 6 alone can't identify a reset: the
+  check must also require raw = 0x0550, as `Scratchpad.Check` does.
 - **Waterproof probes and clones.** Check any new batch against
   `TestRealCaptures` and the ROM pattern.
 - **Long cables, daisy-chain topology, and lower pull-up values.**
