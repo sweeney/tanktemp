@@ -57,6 +57,18 @@ GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o w1capture ./cmd/w1capture
 # copy to the Pi, then:  ./w1capture -out /tmp/<scenario> [-steps 6 -interval 10s]
 ```
 
+### Hardware check
+
+A read-only test against the real sensors (build tag `hardware`, never run in
+CI). It checks that every configured ROM is present, reads OK first time, is
+in powered mode and is at 12-bit:
+
+```sh
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go test -c -tags hardware -o onewire.test ./internal/onewire/
+scp onewire.test user@host:/tmp/
+ssh user@host 'TANKTEMP_ROMS=28-…,28-… /tmp/onewire.test -test.run Hardware -test.v; rm /tmp/onewire.test'
+```
+
 Until `lifecycle`, `health` and `mqttpub` are tagged in `sweeney/common`, the
 build uses a gitignored `go.work` pointing at local checkouts of them.
 
