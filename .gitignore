@@ -4,3 +4,6 @@
 /tanktemp-*
 /w1capture
 /dist/
+/deploy/config.local.yaml
+/deploy/host
+/bin/

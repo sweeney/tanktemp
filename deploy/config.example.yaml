@@ -1,0 +1,31 @@
+# tanktemp config: /etc/tanktemp/config.yaml on the Pi.
+#
+# Copy this to deploy/config.local.yaml (gitignored), fill in your broker and
+# your sensors' ROM IDs, and run ./setup-pi.sh, which validates it and
+# installs it. Every key except mqtt.broker and tanks has a default (shown).
+
+# w1_root: /sys/bus/w1/devices
+# sweep:
+#   interval: 30s      # at least 0.8 s per configured sensor
+#   attempts: 3        # reads per sensor before giving up (1..10)
+# clock_sync_wait: 2m  # wait this long for NTP at boot, then sweep anyway
+# heartbeat: 15m
+# http:
+#   listen: ":80"
+
+mqtt:
+  broker: tcp://broker.example:1883
+  # client_id: tanktemp-<hostname>
+  # topic_prefix: energy/hot_water   # use test/energy/hot_water while testing
+  # username: ""
+  # password_file: /etc/tanktemp/mqtt-password
+
+tanks:
+  # device_id is the tank's key in devices_<site>, and its MQTT topic segment.
+  - device_id: hot-water-cylinder
+    sensors:
+      # order: 1 is the top. height_mm and offset_c are optional; offset_c
+      # (calibration, added to the raw reading) defaults to 0.
+      - {rom: 28-000000000001, position: top, order: 1, height_mm: 1500}
+      - {rom: 28-000000000002, position: middle, order: 2, height_mm: 800}
+      - {rom: 28-000000000003, position: bottom, order: 3, height_mm: 100}

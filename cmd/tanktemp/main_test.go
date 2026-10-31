@@ -236,7 +236,7 @@ func TestCheckConfig(t *testing.T) {
 	_ = os.WriteFile(good, []byte("mqtt: {broker: tcp://b:1883}\ntanks:\n  - device_id: t\n    sensors:\n      - {rom: 28-0000117287e6, position: top, order: 1}\n"), 0o644)
 	_ = os.WriteFile(bad, []byte("tanks: []\n"), 0o644)
 	var out strings.Builder
-	if code := realMain([]string{"-config", good, "-check-config"}, &out); code != 0 || !strings.Contains(out.String(), "1 tank, 1 sensor") {
+	if code := realMain([]string{"-config", good, "-check-config"}, &out); code != 0 || !strings.Contains(out.String(), "1 tank, 1 sensor, publishing to energy/hot_water on tcp://b:1883") {
 		t.Errorf("good: code %d, out %q", code, out.String())
 	}
 	out.Reset()

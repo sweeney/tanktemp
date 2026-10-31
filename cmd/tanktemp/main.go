@@ -78,8 +78,8 @@ func realMain(args []string, out io.Writer) int {
 		for _, t := range cfg.Tanks {
 			n += len(t.Sensors)
 		}
-		fmt.Fprintf(out, "%s: ok: %d tank%s, %d sensor%s, publishing to %s\n",
-			*path, len(cfg.Tanks), plural(len(cfg.Tanks)), n, plural(n), cfg.MQTT.TopicPrefix)
+		fmt.Fprintf(out, "%s: ok: %d tank%s, %d sensor%s, publishing to %s on %s\n",
+			*path, len(cfg.Tanks), plural(len(cfg.Tanks)), n, plural(n), cfg.MQTT.TopicPrefix, cfg.MQTT.Broker)
 		return 0
 	}
 	if err := serve(cfg); err != nil {
