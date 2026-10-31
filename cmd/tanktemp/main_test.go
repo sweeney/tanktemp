@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -20,31 +19,6 @@ import (
 	"github.com/sweeney/tanktemp/internal/reading"
 	rt "github.com/sweeney/tanktemp/internal/reading/readingtest"
 )
-
-// lockedPub makes mqttpubtest.Fake safe to share: run publishes from the
-// lifecycle loop and from the sweep goroutine.
-type lockedPub struct {
-	mu sync.Mutex
-	f  mqttpubtest.Fake
-}
-
-func (p *lockedPub) Publish(m mqttpub.Message) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.f.Publish(m)
-}
-
-func (p *lockedPub) Connected() bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.f.Connected()
-}
-
-func (p *lockedPub) messages() []mqttpub.Message {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return append([]mqttpub.Message(nil), p.f.Messages...)
-}
 
 const (
 	top    = "28-0000117287e6"
@@ -70,7 +44,7 @@ tanks:
 }
 
 type rig struct {
-	pub   *lockedPub
+	pub   *mqttpubtest.Fake
 	src   *rt.Fake
 	tick  chan time.Time
 	hb    chan time.Time
@@ -84,7 +58,7 @@ var t0 = time.Date(2026, 11, 2, 21, 0, 0, 0, time.UTC)
 func startRig(t *testing.T, src *rt.Fake) *rig {
 	t.Helper()
 	r := &rig{
-		pub:  &lockedPub{},
+		pub:  &mqttpubtest.Fake{},
 		src:  src,
 		tick: make(chan time.Time),
 		hb:   make(chan time.Time),
@@ -110,12 +84,12 @@ func (r *rig) waitFor(t *testing.T, n int) []mqttpub.Message {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if m := r.pub.messages(); len(m) >= n {
+		if m := r.pub.Snapshot(); len(m) >= n {
 			return m
 		}
 		time.Sleep(time.Millisecond)
 	}
-	t.Fatalf("got %d messages, want %d: %v", len(r.pub.messages()), n, r.pub.messages())
+	t.Fatalf("got %d messages, want %d: %v", len(r.pub.Snapshot()), n, r.pub.Snapshot())
 	return nil
 }
 
@@ -175,7 +149,7 @@ func TestLifecycleWiring(t *testing.T) {
 	if err := <-r.done; err != nil {
 		t.Fatal(err)
 	}
-	msgs = r.pub.messages()
+	msgs = r.pub.Snapshot()
 	last := msgs[len(msgs)-1]
 	if last.Topic != statusTopic || event(t, last) != "SHUTDOWN" || !strings.Contains(last.Payload, `"reason":"SIGTERM"`) ||
 		!strings.Contains(last.Payload, `"online":false`) {
@@ -199,12 +173,12 @@ func TestShutdownMidSweepIsPromptAndPublishesNoPartialSweep(t *testing.T) {
 	if took := time.Since(begin); took > 400*time.Millisecond {
 		t.Errorf("shutdown took %v: it should stop within one read", took)
 	}
-	for _, m := range r.pub.messages() {
+	for _, m := range r.pub.Snapshot() {
 		if strings.HasSuffix(m.Topic, "/state") {
 			t.Errorf("published a cancelled sweep: %s", m.Payload)
 		}
 	}
-	if msgs := r.pub.messages(); event(t, msgs[len(msgs)-1]) != "SHUTDOWN" {
+	if msgs := r.pub.Snapshot(); event(t, msgs[len(msgs)-1]) != "SHUTDOWN" {
 		t.Errorf("last = %+v", msgs[len(msgs)-1])
 	}
 }
