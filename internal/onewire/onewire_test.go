@@ -3,12 +3,10 @@ package onewire
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"strings"
 	"testing"
 	"testing/fstest"
-	"time"
 )
 
 // slave renders w1_slave text for the 8 given bytes, with a correct CRC and
@@ -173,69 +171,5 @@ func TestBusesAndThermometers(t *testing.T) {
 	}
 	if len(th["w1_bus_master2"]) != 1 {
 		t.Errorf("bus 2 = %v", th["w1_bus_master2"])
-	}
-}
-
-func TestReadChecked(t *testing.T) {
-	s := SysFS{FS: fixture()}
-
-	r := s.ReadChecked("28-00001171f570", 3)
-	if r.Err != nil || r.MilliC != 17000 || r.Attempts != 1 {
-		t.Errorf("good sensor: %+v", r)
-	}
-
-	r = s.ReadChecked("28-000011721aa5", 3)
-	if !errors.Is(r.Err, ErrBusLow) || r.Attempts != 3 {
-		t.Errorf("bus-low sensor should fail all 3 attempts: %+v", r)
-	}
-
-	r = s.ReadChecked("28-0000deadbeef", 3)
-	if !errors.Is(r.Err, ErrNotPresent) || r.Attempts != 1 {
-		t.Errorf("missing sensor should fail fast: %+v", r)
-	}
-}
-
-// seqFS serves a different w1_slave body on each read, like a real sensor
-// recovering from a power-on reset.
-type seqFS struct {
-	bodies []string
-	n      int
-}
-
-func (f *seqFS) Open(name string) (fs.File, error) {
-	body := f.bodies[min(f.n, len(f.bodies)-1)]
-	f.n++
-	return fstest.MapFS{name: {Data: []byte(body)}}.Open(name)
-}
-
-func TestReadCheckedRecoversAfterReset(t *testing.T) {
-	f := &seqFS{bodies: []string{
-		slave(0x50, 0x05, 0x4b, 0x46, 0x7f, 0xff, 0x0c, 0x10), // power-on reset 85
-		slave(0x2d, 0x01, 0x4b, 0x46, 0x7f, 0xff, 0x03, 0x10), // 18.812
-	}}
-	r := SysFS{FS: f}.ReadChecked("28-00001171f570", 3)
-	if r.Err != nil || r.MilliC != 18812 || r.Attempts != 2 {
-		t.Errorf("want recovery on 2nd attempt, got %+v", r)
-	}
-}
-
-func TestReadAll(t *testing.T) {
-	s := SysFS{FS: fixture()}
-	th, _ := s.Thermometers()
-	for _, parallel := range []bool{false, true} {
-		got := s.ReadAll(th, 2, parallel)
-		if len(got) != 3 {
-			t.Fatalf("parallel=%v: %d readings", parallel, len(got))
-		}
-		if got["28-000011721ce9"].MilliC != 17000 || got["28-000011721aa5"].Err == nil {
-			t.Errorf("parallel=%v: %+v", parallel, got)
-		}
-	}
-}
-
-func TestReadingCelsius(t *testing.T) {
-	r := Reading{MilliC: -10125, Took: time.Second}
-	if r.Celsius() != -10.125 {
-		t.Errorf("Celsius = %v", r.Celsius())
 	}
 }

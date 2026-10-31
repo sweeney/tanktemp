@@ -1,0 +1,253 @@
+{
+  "attempts": 3,
+  "description": "Bus numbers swap between sweeps (seen after a reboot): readings follow the ROM, not the bus.",
+  "request": [
+    "28-00001171f570",
+    "28-000011721aa5",
+    "28-000011721ab6",
+    "28-000011721ce9",
+    "28-000011721d36",
+    "28-0000117287e6",
+    "28-00001172de60",
+    "28-00001173563c",
+    "28-00001173588d",
+    "28-000011737d92",
+    "28-0000deadbeef"
+  ],
+  "source": "rig-steady twice, with the two buses' device lists swapped in the second",
+  "steps": [
+    {
+      "info": {
+        "28-00001171f570": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011721aa5": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011721ab6": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011721ce9": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011721d36": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-0000117287e6": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-00001172de60": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-00001173563c": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-00001173588d": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011737d92": {
+          "ext_power": true,
+          "resolution": 12
+        }
+      },
+      "readings": {
+        "28-00001171f570": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 16562
+        },
+        "28-000011721aa5": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 16187
+        },
+        "28-000011721ab6": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 17000
+        },
+        "28-000011721ce9": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 16000
+        },
+        "28-000011721d36": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 16500
+        },
+        "28-0000117287e6": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 16250
+        },
+        "28-00001172de60": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 16250
+        },
+        "28-00001173563c": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 16062
+        },
+        "28-00001173588d": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 15875
+        },
+        "28-000011737d92": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 15687
+        },
+        "28-0000deadbeef": {
+          "attempts": 1,
+          "code": "not_present"
+        }
+      },
+      "topology": {
+        "w1_bus_master1": [
+          "28-00001171f570",
+          "28-000011721aa5",
+          "28-000011721ab6",
+          "28-00001172de60",
+          "28-00001173588d"
+        ],
+        "w1_bus_master2": [
+          "28-000011721ce9",
+          "28-000011721d36",
+          "28-0000117287e6",
+          "28-00001173563c",
+          "28-000011737d92"
+        ]
+      }
+    },
+    {
+      "info": {
+        "28-00001171f570": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011721aa5": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011721ab6": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011721ce9": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011721d36": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-0000117287e6": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-00001172de60": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-00001173563c": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-00001173588d": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011737d92": {
+          "ext_power": true,
+          "resolution": 12
+        }
+      },
+      "readings": {
+        "28-00001171f570": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 16562
+        },
+        "28-000011721aa5": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 16187
+        },
+        "28-000011721ab6": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 17000
+        },
+        "28-000011721ce9": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 16000
+        },
+        "28-000011721d36": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 16500
+        },
+        "28-0000117287e6": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 16250
+        },
+        "28-00001172de60": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 16250
+        },
+        "28-00001173563c": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 16062
+        },
+        "28-00001173588d": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 15875
+        },
+        "28-000011737d92": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 15687
+        },
+        "28-0000deadbeef": {
+          "attempts": 1,
+          "code": "not_present"
+        }
+      },
+      "topology": {
+        "w1_bus_master1": [
+          "28-000011721ce9",
+          "28-000011721d36",
+          "28-0000117287e6",
+          "28-00001173563c",
+          "28-000011737d92"
+        ],
+        "w1_bus_master2": [
+          "28-00001171f570",
+          "28-000011721aa5",
+          "28-000011721ab6",
+          "28-00001172de60",
+          "28-00001173588d"
+        ]
+      }
+    }
+  ],
+  "synthetic": true
+}

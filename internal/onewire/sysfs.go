@@ -7,8 +7,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"sync"
-	"time"
 )
 
 // DevicesDir is where the w1 subsystem exposes buses and devices.
@@ -49,17 +47,24 @@ func (s SysFS) Buses() ([]Bus, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read %s slaves: %w", m, err)
 		}
-		b := Bus{Name: m}
-		for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
-			// The kernel prints "not found." when a bus has no devices.
-			if line = strings.TrimSpace(line); line != "" && line != "not found." {
-				b.Devices = append(b.Devices, line)
-			}
-		}
-		sort.Strings(b.Devices)
-		buses = append(buses, b)
+		buses = append(buses, Bus{Name: m, Devices: parseMasterSlaves(data)})
 	}
 	return buses, nil
+}
+
+// parseMasterSlaves reads a w1_master_slaves file: one device ID per line,
+// or the kernel's "not found." when the bus is empty. IDs come back sorted.
+func parseMasterSlaves(data []byte) []string {
+	var ids []string
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(line) == "not found." {
+			continue
+		}
+		// IDs never contain whitespace, so any (a stray \r, say) separates.
+		ids = append(ids, strings.Fields(line)...)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 // Thermometers returns DS18B20 IDs grouped by bus, ignoring anything else
@@ -101,79 +106,4 @@ func (s SysFS) Read(id string) (W1Slave, error) {
 		return w, fmt.Errorf("%s: %w", id, err)
 	}
 	return w, nil
-}
-
-// Reading is the outcome of reading one sensor, after retries.
-type Reading struct {
-	ID       string
-	MilliC   int           // valid only when Err == nil
-	Attempts int           // reads performed (1 = first read was good)
-	Took     time.Duration // wall time including retries
-	Err      error         // last error if every attempt failed
-}
-
-// Celsius is MilliC as a float.
-func (r Reading) Celsius() float64 { return float64(r.MilliC) / 1000 }
-
-// ReadChecked reads id up to attempts times, stopping at the first reading that
-// passes every check. Retrying is cheap and effective: each read is a fresh
-// conversion, so a CRC glitch or a power-on-reset 85 °C is gone on the next try.
-// Persistent faults (unplugged, bus held low) fail all attempts.
-func (s SysFS) ReadChecked(id string, attempts int) Reading {
-	if attempts < 1 {
-		attempts = 1
-	}
-	start := time.Now()
-	r := Reading{ID: id}
-	for r.Attempts < attempts {
-		r.Attempts++
-		w, err := s.Read(id)
-		if err == nil {
-			err = w.Check()
-		}
-		if err == nil {
-			r.MilliC, r.Err = w.Scratchpad.MilliC(), nil
-			break
-		}
-		r.Err = err
-		if errors.Is(err, ErrNotPresent) {
-			break // retrying won't make it appear
-		}
-	}
-	r.Took = time.Since(start)
-	return r
-}
-
-// ReadAll reads every id. With parallel, each bus is read in its own goroutine
-// (devices on one bus are always serialised by the kernel). Measured on a Pi
-// Zero 2 W with 2×5 sensors: 8.9 s sequential, 7.2 s parallel.
-func (s SysFS) ReadAll(byBus map[string][]string, attempts int, parallel bool) map[string]Reading {
-	out := map[string]Reading{}
-	var mu sync.Mutex
-	readBus := func(ids []string) {
-		for _, id := range ids {
-			r := s.ReadChecked(id, attempts)
-			mu.Lock()
-			out[id] = r
-			mu.Unlock()
-		}
-	}
-	buses := make([]string, 0, len(byBus))
-	for b := range byBus {
-		buses = append(buses, b)
-	}
-	sort.Strings(buses)
-	if !parallel {
-		for _, b := range buses {
-			readBus(byBus[b])
-		}
-		return out
-	}
-	var wg sync.WaitGroup
-	for _, b := range buses {
-		wg.Add(1)
-		go func(ids []string) { defer wg.Done(); readBus(ids) }(byBus[b])
-	}
-	wg.Wait()
-	return out
 }
