@@ -753,3 +753,36 @@ the pattern of its `boiler`, `ups` and `climate` adapters.
 ## Open questions
 
 None open as of 2026-10-31. Questions that turn up during the build go here.
+
+## Build status (2026-10-31, overnight)
+
+Everything is local. Nothing is pushed, tagged or merged.
+
+| Phase | State |
+|---|---|
+| 0 Repo | done |
+| 1 config | done |
+| 2 reading + onewire | done. Real rig captures plus 12 synthetic faults; fuzzing; the contract suite runs against both the fake and the real handler |
+| 3 sweep + startup | done |
+| 4 wire contract | done, **not reviewed by you** (GUESSES G13). `docs/WIRE.md`, goldens |
+| 5 lifecycle | built in common. **`iot` is not rebuilt on it**: two test incompatibilities, see `lifecycle-DESIGN.md` in common |
+| 6 health | built in common, with `sysinfo` |
+| 7 mqttpub | built in common (extracted from ups-mqtt/netmon by an agent, plus a lock on the Fake). **ups-mqtt and netmon are not migrated** |
+| 8 web + main | done; run end to end on the Mac against Mosquitto, including the last will |
+| 9 deploy | done: `setup-pi.sh`, `deploy.sh`, 267 stub tests |
+| 10 devices follow-up | built in common: asset fields, `cylinder`, `part_of`, `telemetry` |
+| 11 the rig | **running on the rig Pi**, publishing under `test/energy/hot_water`, with `templog` stopped. The hardware check passes. Not done: real power-on-reset and data-line captures (they need your hands), and the water-bath calibration |
+| 12 hand-off | `docs/STATEHOUSE.md` written |
+
+Local branches in `sweeney/common`, one worktree each:
+
+| Worktree | Branch | Commits | What |
+|---|---|---|---|
+| `../common-tanktemp` | `feat/tanktemp-modules` | 2 | `lifecycle`, `health`, design docs, PLAN/README rows |
+| `../common-mqttpub` | `feat/mqttpub` | 10 | `mqttpub` |
+| `../common-devices` | `feat/devices-assets` | 1 | `devices` v0.2.0 |
+
+tanktemp's gitignored `go.work` points at all three. Before pushing
+anything: settle the commit dates, then push and tag the modules, pin them
+in `go.mod`, and redeploy, because the Pi's build is stamped with a commit
+hash that rewriting dates would change.
