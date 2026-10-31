@@ -1,10 +1,10 @@
 # tanktemp: plan
 
-Status: **plan, nothing built.** Written 2026-10-31 from the prototype in
-`prototype/` (with `prototype/ONEWIRE.md`, a month of rig experiments), a
-read of `sweeney/common` `main` and PR #7 (`devices`), and a survey of
-boiler-sensor, ups-mqtt, netmon, tempest-mqtt, pi-price-screen, pi-helper,
-asterisk-mqtt, power-monitor and statehouse.
+Status: **first version built overnight on 2026-10-31, local only** (nothing
+pushed). Phases 0–8 and 10 are done; phase 9 (deploy) and phase 11 (the rig)
+are under way. See "Build status" at the end, and `GUESSES.md` for every
+choice made without asking. The plan below is as agreed, with the decisions
+taken during the build folded in.
 
 ## What it is
 
