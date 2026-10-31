@@ -5,8 +5,10 @@ Pi Zero 2 W: one sensor, then three on a breadboard, then ten on a PCB across
 two buses. About 87,000 logged sweeps. Written so tanktemp can be built without
 re-learning any of it.
 
-Prototype code is in this directory (`onewire/`, `cmd/tankprobe/`); real data
-excerpts are in `samples/`. See [Prototype](#prototype) and [Samples](#samples).
+The prototype's `onewire` package now lives at `internal/onewire`; the
+throwaway `tankprobe` CLI is in git history (the first commit). Real data
+excerpts are in `samples/` beside this file. See [Prototype](#prototype) and
+[Samples](#samples).
 
 > **Scope warning.** Every reading we took was between 12 °C and 31 °C. A hot
 > water cylinder runs from ~10 °C at the cold feed to 60–65 °C at the top
@@ -411,11 +413,11 @@ independent apart from shared 3.3 V and GND.
 ## Prototype
 
 ```
-onewire/           package: parse + check w1_slave, discover buses, read with retries
+onewire/           package (now internal/onewire): parse + check w1_slave, discover buses, read with retries
   scratchpad.go    Scratchpad, CRC8, ParseW1Slave, Check() → typed errors
   sysfs.go         SysFS{fs.FS}: Buses, Thermometers, Read, ReadChecked, ReadAll
   onewire_test.go  table tests; fixtures include the real captures in testdata/
-cmd/tankprobe/     CLI: one JSON line per sweep
+cmd/tankprobe/     CLI: one JSON line per sweep (removed; see the first commit)
 sites.example.conf ID → name, height
 samples/           real data (below)
 ```
