@@ -25,6 +25,7 @@ const module = "github.com/sweeney/tanktemp"
 // doesn't exist fails the test, so the list can't silently go stale.
 var core = []string{
 	"internal/config",
+	"internal/payload",
 	"internal/reading",
 	"internal/startup",
 	"internal/sweep",
