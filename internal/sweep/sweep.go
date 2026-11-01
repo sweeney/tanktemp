@@ -9,6 +9,7 @@ import (
 	"errors"
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/sweeney/tanktemp/internal/config"
@@ -71,6 +72,36 @@ func (s Sweep) Counts() (ok, failed int) {
 		}
 	}
 	return ok, failed
+}
+
+// Faults names every probe that failed or read a suspect value, grouped by
+// code in the order first seen, as "code: tank/position, …; code: …". It is
+// empty for a clean sweep.
+func (s Sweep) Faults() string {
+	var order []string
+	byCode := map[string][]string{}
+	add := func(code, where string) {
+		if _, seen := byCode[code]; !seen {
+			order = append(order, code)
+		}
+		byCode[code] = append(byCode[code], where)
+	}
+	for _, t := range s.Tanks {
+		for _, x := range t.Sensors {
+			where := t.DeviceID + "/" + x.Position
+			switch {
+			case x.Code != reading.OK:
+				add(string(x.Code), where)
+			case x.Suspect != "":
+				add(x.Suspect, where)
+			}
+		}
+	}
+	parts := make([]string, 0, len(order))
+	for _, code := range order {
+		parts = append(parts, code+": "+strings.Join(byCode[code], ", "))
+	}
+	return strings.Join(parts, "; ")
 }
 
 // Sweep reads every configured sensor once (with the Source's retries).

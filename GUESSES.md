@@ -24,6 +24,10 @@ G10, G14, G15 and G19. One change: `attempts` and `bus` are off the wire.
 They're on tanktemp's status page and `/api/status` only (WIRE.md,
 "Changes").
 
+Since then: G20's log line names each fault, e.g. `sweep: 5 ok, 5 failed,
+4.81s: bus_low: rig-bus-a/a1, rig-bus-a/a2, …`. A sweep whose only problem
+is a suspect 85 °C gets a line too, because it now degrades health (G16).
+
 The table below is the original record of each guess.
 
 | # | Guess | Why | To change |

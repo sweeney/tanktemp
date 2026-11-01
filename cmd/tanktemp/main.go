@@ -285,8 +285,9 @@ func run(ctx context.Context, cfg config.Config, d deps) error {
 					errs = append(errs, fmt.Errorf("publish %s: %w", t.DeviceID, err))
 				}
 			}
-			if ok, failed := sw.Counts(); failed > 0 {
-				d.Logger.Printf("sweep: %d ok, %d failed, %v", ok, failed, sw.Duration.Truncate(time.Millisecond))
+			if faults := sw.Faults(); faults != "" {
+				ok, failed := sw.Counts()
+				d.Logger.Printf("sweep: %d ok, %d failed, %v: %s", ok, failed, sw.Duration.Truncate(time.Millisecond), faults)
 			}
 			return errors.Join(errs...)
 		},

@@ -223,3 +223,27 @@ func copysign(v, s float64) float64 {
 	}
 	return v
 }
+
+// Faults names what went wrong, for the log: grouped by code in the order
+// first seen, each probe as tank/position, suspect values included.
+func TestFaults(t *testing.T) {
+	sw := Sweep{Tanks: []Tank{
+		{DeviceID: "cyl", Sensors: []Sensor{
+			{Position: "top", Code: reading.BusLow},
+			{Position: "middle", Code: reading.OK, Suspect: reading.Suspect85},
+			{Position: "bottom", Code: reading.BusLow},
+		}},
+		{DeviceID: "store", Sensors: []Sensor{
+			{Position: "top", Code: reading.CRC},
+			{Position: "bottom", Code: reading.OK},
+		}},
+	}}
+	want := "bus_low: cyl/top, cyl/bottom; 85c_unverified: cyl/middle; crc: store/top"
+	if got := sw.Faults(); got != want {
+		t.Errorf("Faults() = %q\nwant      %q", got, want)
+	}
+	clean := Sweep{Tanks: []Tank{{DeviceID: "cyl", Sensors: []Sensor{{Position: "top", Code: reading.OK}}}}}
+	if got := clean.Faults(); got != "" {
+		t.Errorf("a clean sweep = %q, want empty", got)
+	}
+}

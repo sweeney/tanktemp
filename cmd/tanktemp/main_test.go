@@ -3,11 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -51,6 +51,25 @@ type rig struct {
 	sig   chan os.Signal
 	done  chan error
 	clock time.Time
+	logs  *syncBuf
+}
+
+// syncBuf is a log destination the test can read while run writes to it.
+type syncBuf struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *syncBuf) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuf) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
 }
 
 var t0 = time.Date(2026, 11, 2, 21, 0, 0, 0, time.UTC)
@@ -64,6 +83,7 @@ func startRig(t *testing.T, src *rt.Fake) *rig {
 		hb:   make(chan time.Time),
 		sig:  make(chan os.Signal, 1),
 		done: make(chan error, 1),
+		logs: &syncBuf{},
 	}
 	d := deps{
 		Source:        src,
@@ -73,7 +93,7 @@ func startRig(t *testing.T, src *rt.Fake) *rig {
 		Tick:          r.tick,
 		HeartbeatTick: r.hb,
 		Signals:       r.sig,
-		Logger:        log.New(io.Discard, "", 0),
+		Logger:        log.New(r.logs, "", 0),
 		Version:       "abc1234",
 	}
 	go func() { r.done <- run(context.Background(), testConfig(t), d) }()
@@ -194,6 +214,20 @@ func TestStartupProblemsAreInTheStartupMessage(t *testing.T) {
 	}
 	r.sig <- syscall.SIGTERM
 	<-r.done
+}
+
+func TestSweepLogNamesTheFaults(t *testing.T) {
+	src := rt.NewFake(map[string][]string{"w1_bus_master1": {top}}). // bottom unplugged
+										Script(top, rt.OK(61375))
+	src.Infos = map[string]reading.Info{top: {ExtPower: rt.Bool(true), Resolution: rt.Int(12)}}
+	r := startRig(t, src)
+	r.waitFor(t, 2) // STARTUP and the first state
+	r.sig <- syscall.SIGTERM
+	<-r.done
+	want := "sweep: 1 ok, 1 failed, 0s: not_present: hot-water-cylinder/bottom\n"
+	if !strings.Contains(r.logs.String(), want) {
+		t.Errorf("log lacks %q:\n%s", want, r.logs.String())
+	}
 }
 
 func TestEmitMapsEveryKind(t *testing.T) {
