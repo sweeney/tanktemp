@@ -7,9 +7,14 @@
 # its own. Tests: ./deploy_test.sh, through both scripts and directly.
 
 SERVICE=tanktemp
-PI_DIR=tanktemp # under the remote user's home
-LINK=tanktemp-bin # ~/tanktemp/<LINK> -> the running build
-UNITS=.units      # ~/tanktemp/.units/<build>.service: each build's unit file
+SVC_USER=tanktemp # the system user the service runs as (setup-pi.sh makes it)
+# The builds, the link to the running one, the unit file and .previous. Owned
+# by the deploy user (so a deploy uploads without sudo), mode 0755 (so
+# SVC_USER can run what is there). tanktemp.service runs PI_DIR/LINK.
+PI_DIR="${DEPLOY_PI_DIR:-/opt/tanktemp}"
+OLD_PI_DIR=tanktemp # under the deploy user's home: the first install's layout, which setup-pi.sh moves
+LINK=tanktemp-bin   # PI_DIR/<LINK> -> the running build
+UNITS=.units        # PI_DIR/.units/<build>.service: each build's unit file
 BIN_LINK="${DEPLOY_BIN_LINK:-/usr/local/bin/tanktemp}"
 UNIT_LINK="${DEPLOY_UNIT_LINK:-/etc/systemd/system/tanktemp.service}"
 CONFIG_PATH="${DEPLOY_CONFIG_PATH:-/etc/tanktemp/config.yaml}"
@@ -198,7 +203,7 @@ build_host() {
     CGO_ENABLED=0 go build -trimpath -o "$HOST_BIN" ./cmd/$SERVICE || refuse "go build (for this machine) failed"
 }
 
-# upload_build NAME FAIL: put LOCAL_BIN on the Pi as ~/tanktemp/NAME, through
+# upload_build NAME FAIL: put LOCAL_BIN on the Pi as PI_DIR/NAME, through
 # a staging name so a partial upload is never mistaken for a build, with
 # retries and a sha256 check. If a step fails, it removes the staged file if
 # it can and calls FAIL with the step, which must not return.
@@ -209,28 +214,28 @@ upload_build() {
         rsync -z --partial --timeout=45 -e "ssh ${SSHOPTS[*]}" "$LOCAL_BIN" "$REMOTE:$PI_DIR/$stage" && break
         warn "upload attempt $attempt failed"
         if [ "$attempt" -eq 3 ]; then
-            r "rm -f ~/$PI_DIR/$stage" 2>/dev/null || true
+            r "rm -f $PI_DIR/$stage" 2>/dev/null || true
             "$fail" "the upload (three attempts)"
         fi
         sleep 2
     done
     local_sum=$(shasum -a 256 "$LOCAL_BIN" | cut -d' ' -f1)
-    remote_sum=$(r "sha256sum ~/$PI_DIR/$stage" | cut -d' ' -f1) || "$fail" "checking its sha256"
+    remote_sum=$(r "sha256sum $PI_DIR/$stage" | cut -d' ' -f1) || "$fail" "checking its sha256"
     if [ "$local_sum" != "$remote_sum" ]; then
-        r "rm -f ~/$PI_DIR/$stage" 2>/dev/null || true
+        r "rm -f $PI_DIR/$stage" 2>/dev/null || true
         "$fail" "the sha256 check (the upload arrived corrupted: $remote_sum, expected $local_sum)"
     fi
-    r "chmod 0755 ~/$PI_DIR/$stage && mv ~/$PI_DIR/$stage ~/$PI_DIR/$name" || "$fail" "moving it into place"
+    r "chmod 0755 $PI_DIR/$stage && mv $PI_DIR/$stage $PI_DIR/$name" || "$fail" "moving it into place"
     info "sha256 verified"
 }
 
 # pi_check_config NAME: run build NAME on the Pi against the installed
-# config; its answer (tanktemp prints it on stderr) in CHECK_OUT. 0 if the
-# config is valid, 1 if not, 255 if ssh failed.
+# config, as SVC_USER (the config is root:SVC_USER 0640, and this also shows
+# that SVC_USER can run the build); its answer (tanktemp prints it on
+# stderr) in CHECK_OUT. 0 if the config is valid, 1 if not, 255 if ssh failed.
 pi_check_config() {
     local rc=0
-    # shellcheck disable=SC2088 # ~ is for the Pi's shell to expand
-    CHECK_OUT=$(r "~/$PI_DIR/$1 -check-config -config $CONFIG_PATH 2>&1") || rc=$?
+    CHECK_OUT=$(r "sudo -n -u $SVC_USER $PI_DIR/$1 -check-config -config $CONFIG_PATH 2>&1") || rc=$?
     return $rc
 }
 

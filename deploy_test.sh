@@ -2,9 +2,12 @@
 # Tests for deploy.sh and setup-pi.sh. Each case runs the real script in a
 # throwaway git repo against stubs: ssh runs the "remote" commands locally with
 # HOME pointed at a fake Pi home, and curl, mosquitto_sub, rsync, go,
-# systemctl, journalctl, sudo and install are scripted from that fake Pi's
-# state. A "build" is a small shell script that answers -version and
-# -check-config the way tanktemp does. No network, no Pi.
+# systemctl, journalctl, sudo, install, chown, stat, id, useradd and ps are
+# scripted from that fake Pi's state. A "build" is a small shell script that
+# answers -version and -check-config the way tanktemp does. File owners are
+# recorded in $FAKE_STATE/owners (the stubs cannot chown), and a build run as
+# the tanktemp user, or a unit started as it, fails the way the Pi would on a
+# file that user cannot read or a path through the 0700 home. No network, no Pi.
 #
 # Usage: ./deploy_test.sh
 set -euo pipefail
@@ -41,8 +44,18 @@ while [ $# -gt 0 ]; do
     shift
 done
 [ "$check" = 1 ] || { echo "fake tanktemp: only -version and -check-config" >&2; exit 1; }
-[ -z "${FAKE_STATE:-}" ] || echo "check-config $ver $cfg" >>"$FAKE_STATE/checks"
+who="${FAKE_RUN_AS:-}"
+[ -n "$who" ] || { [ "${FAKE_AS_ROOT:-0}" = 1 ] && who=root || who=$(id -un); }
+[ -z "${FAKE_STATE:-}" ] || echo "check-config $ver $cfg as $who" >>"$FAKE_STATE/checks"
+# The Pi's home is 0700: only its owner can run a build from under it.
+if [ "$who" = tanktemp ] && [ -n "${FAKE_HOME:-}" ]; then
+    case "$0" in "$FAKE_HOME"/*) echo "bash: $0: Permission denied" >&2; exit 126 ;; esac
+fi
 [ -r "$cfg" ] || { echo "tanktemp: open $cfg: no such file or directory" >&2; exit 1; }
+if [ -n "${RSTUBS:-}" ] && ! "$RSTUBS/fake_can_read" "$who" "$cfg"; then
+    echo "tanktemp: open $cfg: permission denied" >&2
+    exit 1
+fi
 if [ "${FAKE_REJECT_VERSION:-}" = "$ver" ] || grep -q '^INVALID' "$cfg"; then
     echo "tanktemp: $cfg: mqtt.broker: required" >&2
     exit 1
@@ -85,8 +98,10 @@ EOF
 cat >"$STUBS/rsync" <<'EOF'
 #!/usr/bin/env bash
 [ "${FAKE_RSYNC_FAIL:-0}" = 1 ] && exit 12
-src="${*: -2:1}" dest="${*: -1}"
-cp "$src" "$FAKE_HOME/${dest#*:}"
+src="${*: -2:1}" dest="${*: -1}" path="${*: -1}"
+path="${path#*:}"
+case "$path" in /*) ;; *) path="$FAKE_HOME/$path" ;; esac
+cp "$src" "$path"
 case "$dest" in *.incoming-*) [ -n "${FAKE_SSH_DROP_AFTER_UPLOAD:-}" ] && echo "$FAKE_SSH_DROP_AFTER_UPLOAD" >"$FAKE_STATE/ssh_down" ;; esac
 true
 EOF
@@ -121,7 +136,7 @@ cat >"$STUBS/curl" <<'EOF'
 url="${*: -1}" path="/${url#http://*/}"
 running=$(cat "$FAKE_STATE/running")
 [ "$running" = DOWN ] && exit 7
-ver=$(sed -n '2s/^# FAKEBIN version=//p' "$FAKE_HOME/tanktemp/$running")
+ver=$(sed -n '2s/^# FAKEBIN version=//p' "$(cat "$FAKE_STATE/running_path")")
 started=$(cat "$FAKE_STATE/started")
 status=ok ready=true mqtt=true sensors="${FAKE_SENSORS:-10}" detail=""
 [ "${FAKE_MQTT_DOWN:-0}" = 1 ] && mqtt=false
@@ -159,7 +174,7 @@ echo "mosquitto_sub $*" >>"$FAKE_STATE/mosq"
 [ "${FAKE_NO_BROKER:-0}" = 1 ] && exit 5
 running=$(cat "$FAKE_STATE/running")
 if [ "$running" = DOWN ]; then echo '{"online":false,"event":"LWT"}'; exit 0; fi
-ver=$(sed -n '2s/^# FAKEBIN version=//p' "$FAKE_HOME/tanktemp/$running")
+ver=$(sed -n '2s/^# FAKEBIN version=//p' "$(cat "$FAKE_STATE/running_path")")
 event=HEARTBEAT
 [ -n "${FAKE_HB_VERSION:-}" ] && ver="$FAKE_HB_VERSION"
 [ -n "${FAKE_HB_EVENT:-}" ] && event="$FAKE_HB_EVENT"
@@ -170,13 +185,29 @@ EOF
 
 cat >"$RSTUBS/sudo" <<'EOF'
 #!/usr/bin/env bash
-[ "$1" = -n ] && shift
+as=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -n) shift ;;
+        -u) as="$2"; shift 2 ;;
+        *) break ;;
+    esac
+done
 [ "${FAKE_SUDO_PW:-0}" = 1 ] && exit 1
+if [ -n "$as" ]; then
+    id "$as" >/dev/null 2>&1 || { echo "sudo: unknown user $as" >&2; exit 1; }
+    FAKE_RUN_AS="$as" exec "$@"
+fi
 FAKE_AS_ROOT=1 exec "$@"
 EOF
 
 # systemctl, for two units: tanktemp and templog. State in
 # $FAKE_STATE/{active,enabled}.<unit>; "not-found" means no such unit.
+# tanktemp's unit as systemd last loaded it is $FAKE_STATE/loaded_unit
+# (daemon-reload copies it from the unit link); starting it runs its
+# ExecStart (/opt/tanktemp/... is DEPLOY_PI_DIR, /usr/local/bin/tanktemp is
+# DEPLOY_BIN_LINK) as its User=, and fails as systemd would (203/EXEC) when
+# that user cannot reach the build, or cannot read the config.
 cat >"$RSTUBS/systemctl" <<'EOF'
 #!/usr/bin/env bash
 echo "systemctl $*" >>"$FAKE_STATE/log"
@@ -190,8 +221,28 @@ for a in "$@"; do
 done
 cmd="${args[0]}" unit="${args[${#args[@]}-1]}"
 unit="${unit%.service}"
+down() { echo DOWN >"$FAKE_STATE/running"; echo "$1" >&2; exit 1; }
 start() {
-    target=$(basename "$(readlink "$HOME/tanktemp/tanktemp-bin")")
+    [ -f "$FAKE_STATE/loaded_unit" ] || { echo "Unit tanktemp.service not found." >&2; exit 5; }
+    exe=$(sed -n 's/^ExecStart=\([^ ]*\).*/\1/p' "$FAKE_STATE/loaded_unit")
+    user=$(sed -n 's/^User=//p' "$FAKE_STATE/loaded_unit")
+    user="${user:-root}"
+    case "$exe" in
+        /opt/tanktemp/*) exe="$DEPLOY_PI_DIR/${exe#/opt/tanktemp/}" ;;
+        /usr/local/bin/tanktemp) exe="$DEPLOY_BIN_LINK" ;;
+    esac
+    p="$exe" via_home=0 n=0
+    while :; do
+        case "$p" in "$HOME"/*) via_home=1 ;; esac
+        [ -L "$p" ] && [ $n -lt 10 ] || break
+        t=$(readlink "$p") n=$((n + 1))
+        case "$t" in /*) p="$t" ;; *) p="$(dirname "$p")/$t" ;; esac
+    done
+    target=$(basename "$p")
+    if [ ! -f "$p" ] || { [ "$user" = tanktemp ] && [ $via_home = 1 ]; }; then
+        down "tanktemp.service: Main process exited, code=exited, status=203/EXEC"
+    fi
+    "$RSTUBS/fake_can_read" "$user" "$DEPLOY_CONFIG_PATH" || down "tanktemp: open $DEPLOY_CONFIG_PATH: permission denied"
     # FAKE_RESTART_FAIL=GLOB: starting a build that matches fails.
     # shellcheck disable=SC2053 # a glob on purpose
     if [ -n "${FAKE_RESTART_FAIL:-}" ] && [[ "$target" == $FAKE_RESTART_FAIL ]]; then
@@ -200,6 +251,8 @@ start() {
         exit 1
     fi
     echo "$target" >"$FAKE_STATE/running"
+    echo "$p" >"$FAKE_STATE/running_path"
+    echo "$user" >"$FAKE_STATE/running_user"
     echo active >"$FAKE_STATE/active.tanktemp"
     inv="inv$(wc -l <"$FAKE_STATE/log" | tr -d ' ')"
     echo "$inv" >"$FAKE_STATE/invocation"
@@ -222,9 +275,23 @@ case "$cmd" in
         echo disabled >"$FAKE_STATE/enabled.$unit"
         [ $now = 0 ] || echo inactive >"$FAKE_STATE/active.$unit" ;;
     stop) echo inactive >"$FAKE_STATE/active.$unit" ;;
-    show) cat "$FAKE_STATE/invocation" ;;
+    show)
+        prop="" prev=""
+        for a in "$@"; do [ "$prev" = -p ] && prop="$a"; prev="$a"; done
+        case "$prop" in
+            InvocationID) cat "$FAKE_STATE/invocation" ;;
+            MainPID) [ "$(cat "$FAKE_STATE/active.$unit")" = active ] && echo 4242 || echo 0 ;;
+            NeedDaemonReload)
+                if [ -f "$FAKE_STATE/loaded_unit" ] && [ -e "$DEPLOY_UNIT_LINK" ] && ! cmp -s "$FAKE_STATE/loaded_unit" "$DEPLOY_UNIT_LINK"; then
+                    echo yes
+                else
+                    echo no
+                fi ;;
+        esac ;;
     status) echo "tanktemp.service - fake" ;;
-    daemon-reload) [ "${FAKE_RELOAD_FAIL:-0}" = 1 ] && exit 1; true ;;
+    daemon-reload)
+        [ "${FAKE_RELOAD_FAIL:-0}" = 1 ] && exit 1
+        if [ -e "$DEPLOY_UNIT_LINK" ]; then cp "$DEPLOY_UNIT_LINK" "$FAKE_STATE/loaded_unit"; else rm -f "$FAKE_STATE/loaded_unit"; fi ;;
     restart | start) start ;;
 esac
 EOF
@@ -241,18 +308,109 @@ done <"$FAKE_STATE/journal"
 true
 EOF
 
-# install: as root it could chown; here it only logs that it was asked to.
+# install: as root it could chown; here it logs that it was asked to and
+# records the owner in $FAKE_STATE/owners ("<path> <user>:<group>" lines,
+# the last one for a path wins; a path with none is the deploy user's).
 cat >"$RSTUBS/install" <<'EOF'
 #!/usr/bin/env bash
 echo "install $*" >>"$FAKE_STATE/log"
-args=()
+args=() o="" g="" dirs=0
 while [ $# -gt 0 ]; do
     case "$1" in
-        -o | -g) shift 2 ;;
+        -o) o="$2"; shift 2 ;;
+        -g) g="$2"; shift 2 ;;
+        -d) dirs=1; args+=("$1"); shift ;;
         *) args+=("$1"); shift ;;
     esac
 done
-PATH="${PATH#*:}" exec install "${args[@]}"
+PATH="${PATH//$RSTUBS:/}" install "${args[@]}" || exit
+if [ -n "$o$g" ]; then
+    if [ $dirs = 1 ]; then
+        for a in "${args[@]}"; do case "$a" in -* | 0[0-7]*) ;; *) echo "$a ${o:-root}:${g:-root}" >>"$FAKE_STATE/owners" ;; esac; done
+    else
+        echo "${args[${#args[@]}-1]} ${o:-root}:${g:-root}" >>"$FAKE_STATE/owners"
+    fi
+fi
+EOF
+
+cat >"$RSTUBS/chown" <<'EOF'
+#!/usr/bin/env bash
+echo "chown $*" >>"$FAKE_STATE/log"
+[ "${FAKE_AS_ROOT:-0}" = 1 ] || { echo "chown: Operation not permitted" >&2; exit 1; }
+og="$1"; shift
+case "$og" in *:*) ;; *) og="$og:root" ;; esac
+for f; do [ -e "$f" ] || { echo "chown: $f: No such file" >&2; exit 1; }; echo "$f $og" >>"$FAKE_STATE/owners"; done
+EOF
+
+# owner_of PATH: user:group, from $FAKE_STATE/owners or else the deploy user.
+cat >"$RSTUBS/owner_of" <<'EOF'
+#!/usr/bin/env bash
+og=$(awk -v f="$1" '$1 == f {r = $2} END {print r}' "$FAKE_STATE/owners" 2>/dev/null)
+echo "${og:-$(PATH="${PATH//$RSTUBS:/}" id -un):$(PATH="${PATH//$RSTUBS:/}" id -gn)}"
+EOF
+
+# stat -c FORMAT FILE, for %U %G %a: the owner as recorded, the real mode.
+cat >"$RSTUBS/stat" <<'EOF'
+#!/usr/bin/env bash
+real() { PATH="${PATH//$RSTUBS:/}" "$@"; }
+[ "$1" = -c ] || { real stat "$@"; exit; }
+fmt="$2" f="$3"
+[ -e "$f" ] || { echo "stat: cannot statx '$f': No such file or directory" >&2; exit 1; }
+og=$("$RSTUBS/owner_of" "$f")
+mode=$(real stat -f %Lp "$f" 2>/dev/null || real stat -c %a "$f")
+out="${fmt//%U/${og%%:*}}"
+out="${out//%G/${og#*:}}"
+echo "${out//%a/$mode}"
+EOF
+
+# fake_can_read USER FILE: could USER read FILE on the Pi, by its recorded
+# owner and its real mode?
+cat >"$RSTUBS/fake_can_read" <<'EOF'
+#!/usr/bin/env bash
+user="$1" f="$2"
+[ "$user" != root ] || exit 0
+[ -e "$f" ] || exit 1
+og=$(awk -v f="$f" '$1 == f {r = $2} END {print r}' "$FAKE_STATE/owners" 2>/dev/null)
+[ -n "$og" ] || exit 0
+mode=$(PATH="${PATH//$RSTUBS:/}" stat -f %Lp "$f" 2>/dev/null || PATH="${PATH//$RSTUBS:/}" stat -c %a "$f")
+mode="${mode: -3}"
+if [ "$user" = "${og%%:*}" ]; then d="${mode:0:1}"
+elif [ "$user" = tanktemp ] && [ "${og#*:}" = tanktemp ]; then d="${mode:1:1}"
+else d="${mode:2:1}"; fi
+[ $((d & 4)) -ne 0 ]
+EOF
+
+# id: the tanktemp user exists once $FAKE_STATE/user.tanktemp does (its
+# content is its group); anyone else is the real id.
+cat >"$RSTUBS/id" <<'EOF'
+#!/usr/bin/env bash
+if [ "${*: -1}" = tanktemp ]; then
+    [ -f "$FAKE_STATE/user.tanktemp" ] || { echo "id: 'tanktemp': no such user" >&2; exit 1; }
+    g=$(cat "$FAKE_STATE/user.tanktemp")
+    case "$1" in
+        -un) echo tanktemp ;;
+        -gn | -Gn) echo "$g" ;;
+        -u) echo 990 ;;
+        *) echo "uid=990(tanktemp) gid=990($g) groups=990($g)" ;;
+    esac
+    exit 0
+fi
+PATH="${PATH//$RSTUBS:/}" exec id "$@"
+EOF
+
+cat >"$RSTUBS/useradd" <<'EOF'
+#!/usr/bin/env bash
+echo "useradd $*" >>"$FAKE_STATE/log"
+[ "${FAKE_AS_ROOT:-0}" = 1 ] || { echo "useradd: Permission denied." >&2; exit 1; }
+[ "${FAKE_USERADD_FAIL:-0}" != 1 ] || { echo "useradd: cannot lock /etc/passwd" >&2; exit 1; }
+[ ! -f "$FAKE_STATE/user.${*: -1}" ] || { echo "useradd: user '${*: -1}' already exists" >&2; exit 9; }
+echo "${*: -1}" >"$FAKE_STATE/user.${*: -1}"
+EOF
+
+# ps -o user= -p PID: who the running tanktemp runs as.
+cat >"$RSTUBS/ps" <<'EOF'
+#!/usr/bin/env bash
+cat "$FAKE_STATE/running_user"
 EOF
 
 for cmd in reboot shutdown; do
@@ -301,13 +459,18 @@ tanks:
 EOF
 }
 
-# fresh: a fake Pi set up and running $CUR healthily, templog off, and a
-# clean, pushed checkout whose deploy/host names the Pi.
+ME=$(id -un) MYGROUP=$(id -gn)
+
+# fresh: a fake Pi set up and running $CUR healthily as the tanktemp user
+# from /opt/tanktemp (here $CASE/opt/tanktemp, owned by the deploy user),
+# with its config root:tanktemp 0640, templog off, and a clean, pushed
+# checkout whose deploy/host names the Pi.
 fresh() {
     rm -rf "$CASE"
-    mkdir -p "$CASE"/{home/tanktemp,state,bin,etc/tanktemp,boot,w1/w1_bus_master1,w1/w1_bus_master2}
+    mkdir -p "$CASE"/{home,opt/tanktemp,state,bin,etc/tanktemp,boot,w1/w1_bus_master1,w1/w1_bus_master2}
     FAKE_HOME="$CASE/home" FAKE_STATE="$CASE/state"
-    PI="$FAKE_HOME/tanktemp"
+    PI="$CASE/opt/tanktemp" OLDPI="$FAKE_HOME/tanktemp"
+    CFG="$CASE/etc/tanktemp/config.yaml"
     local b n=1
     for b in "$OLD1" "$OLD2" "$CUR"; do
         ln "$TPL/$b" "$PI/$b"
@@ -318,7 +481,13 @@ fresh() {
     cp "$HERE/tanktemp.service" "$PI/tanktemp.service"
     ln -s "$PI/tanktemp-bin" "$CASE/bin/tanktemp"
     ln -s "$PI/tanktemp.service" "$CASE/etc/tanktemp.service"
-    config_yaml >"$CASE/etc/tanktemp/config.yaml"
+    config_yaml >"$CFG"
+    chmod 0640 "$CFG"
+    echo "$CFG root:tanktemp" >"$FAKE_STATE/owners"
+    echo tanktemp >"$FAKE_STATE/user.tanktemp"
+    cp "$HERE/tanktemp.service" "$FAKE_STATE/loaded_unit"
+    echo tanktemp >"$FAKE_STATE/running_user"
+    echo "$PI/$CUR" >"$FAKE_STATE/running_path"
     printf '[all]\ndtparam=audio=on\ndtoverlay=w1-gpio,gpiopin=4\ndtoverlay=w1-gpio,gpiopin=17\n' >"$CASE/boot/config.txt"
     echo active >"$FAKE_STATE/active.tanktemp"
     echo enabled >"$FAKE_STATE/enabled.tanktemp"
@@ -351,10 +520,41 @@ fresh() {
     config_yaml >"$REPO/deploy/config.local.yaml"
 }
 
+# old_unit: the unit the first install ran under: as the deploy user, from
+# /usr/local/bin/tanktemp, with ProtectHome=read-only.
+old_unit() {
+    sed -e "s/^User=tanktemp\$/User=$ME/" -e '/^Group=/d' -e 's/^ProtectHome=yes$/ProtectHome=read-only/' \
+        -e 's#^ExecStart=/opt/tanktemp/tanktemp-bin #ExecStart=/usr/local/bin/tanktemp #' "$HERE/tanktemp.service"
+}
+
+# old_layout: the Pi as the first install left it: the builds, the link, the
+# unit and .units in ~/tanktemp, /usr/local/bin/tanktemp and the systemd unit
+# linked into it, tanktemp running $CUR as the deploy user, no tanktemp user,
+# no /opt/tanktemp and the config root:root 0644.
+old_layout() {
+    fresh
+    mv "$PI" "$OLDPI"
+    rmdir "$CASE/opt"
+    old_unit >"$OLDPI/tanktemp.service"
+    mkdir "$OLDPI/.units"
+    cp "$OLDPI/tanktemp.service" "$OLDPI/.units/$CUR.service"
+    echo "$OLD2" >"$OLDPI/.previous"
+    ln -sfn "$OLDPI/tanktemp-bin" "$CASE/bin/tanktemp"
+    ln -sfn "$OLDPI/tanktemp.service" "$CASE/etc/tanktemp.service"
+    chmod 0644 "$CFG"
+    echo "$CFG root:root" >"$FAKE_STATE/owners"
+    rm "$FAKE_STATE/user.tanktemp"
+    cp "$OLDPI/tanktemp.service" "$FAKE_STATE/loaded_unit"
+    echo "$ME" >"$FAKE_STATE/running_user"
+    echo "$OLDPI/$CUR" >"$FAKE_STATE/running_path"
+}
+
 # bare: a Pi with 1-Wire set up and templog running, nothing of tanktemp.
 bare() {
     fresh
-    rm -rf "$PI" "$CASE/bin/tanktemp" "$CASE/etc/tanktemp.service" "$CASE/etc/tanktemp"
+    rm -rf "$CASE/opt" "$CASE/bin/tanktemp" "$CASE/etc/tanktemp.service" "$CASE/etc/tanktemp"
+    rm -f "$FAKE_STATE/user.tanktemp" "$FAKE_STATE/loaded_unit" "$FAKE_STATE/running_user"
+    : >"$FAKE_STATE/owners"
     echo DOWN >"$FAKE_STATE/running"
     echo not-found >"$FAKE_STATE/active.tanktemp"
     echo not-found >"$FAKE_STATE/enabled.tanktemp"
@@ -374,7 +574,7 @@ run() {
     while [ $# -gt 0 ] && [ "$1" != "--" ]; do envs+=("$1"); shift; done
     [ $# -gt 0 ] && shift
     OUT=$(env PATH="$STUBS:$PATH" RSTUBS="$RSTUBS" MKFAKEBIN="$MKFAKEBIN" FAKE_HOME="$FAKE_HOME" FAKE_STATE="$FAKE_STATE" \
-        DEPLOY_BIN_LINK="$CASE/bin/tanktemp" DEPLOY_UNIT_LINK="$CASE/etc/tanktemp.service" \
+        DEPLOY_PI_DIR="$PI" DEPLOY_BIN_LINK="$CASE/bin/tanktemp" DEPLOY_UNIT_LINK="$CASE/etc/tanktemp.service" \
         DEPLOY_CONFIG_PATH="$CASE/etc/tanktemp/config.yaml" DEPLOY_BOOT_CONFIG="$CASE/boot/config.txt" \
         DEPLOY_W1_DEVICES="$CASE/w1" DEPLOY_HTTP_HOST=pi.test DEPLOY_VERIFY_TIMEOUT=2 DEPLOY_SETTLE=0 \
         DEPLOY_POLL=0.1 DEPLOY_BROKER_TIMEOUT=1 ${envs[@]+"${envs[@]}"} \
@@ -383,7 +583,7 @@ run() {
 deploy() { run deploy.sh "$@"; }
 setup() { run setup-pi.sh "$@"; }
 
-# count GLOB: how many entries in the fake Pi's ~/tanktemp match.
+# count GLOB: how many entries in the fake Pi's /opt/tanktemp match.
 count() { find "$PI" -mindepth 1 -maxdepth 1 -name "$1" | wc -l | tr -d ' '; }
 link() { readlink "$PI/tanktemp-bin"; }
 restarts() { grep -c 'systemctl restart' "$FAKE_STATE/log" || true; }
@@ -394,10 +594,11 @@ unit_is() { cmp -s "$PI/tanktemp.service" "$1"; }
 pi_link() { readlink "$1" || echo MISSING; }
 # snapshot: everything on the fake Pi that a read-only run must not change.
 snapshot() {
-    (cd "$CASE" && find home etc bin boot w1 -print 2>/dev/null | sort | while read -r f; do
-        if [ -L "$f" ]; then echo "$f -> $(readlink "$f")"; elif [ -f "$f" ]; then shasum "$f"; else echo "$f/"; fi
+    (cd "$CASE" && find home etc bin boot w1 opt -print 2>/dev/null | sort | while read -r f; do
+        if [ -L "$f" ]; then echo "$f -> $(readlink "$f")"; elif [ -f "$f" ]; then echo "$(stat -f %Lp "$f" 2>/dev/null || stat -c %a "$f") $(shasum "$f")"; else echo "$f/"; fi
     done
-    cat state/active.* state/enabled.* state/running)
+    cat state/active.* state/enabled.* state/running state/owners
+    cat state/loaded_unit state/running_user state/user.* 2>/dev/null || true)
 }
 change_unit() {
     echo "# changed" >>"$REPO/tanktemp.service"
@@ -413,10 +614,20 @@ orphan_units_none() {
     done
 }
 nothing_set_up() {
-    [ ! -e "$PI" ] && [ "$(pi_link "$CASE/bin/tanktemp")" = MISSING ] &&
+    [ ! -e "$PI" ] && [ ! -e "$FAKE_STATE/user.tanktemp" ] && [ "$(pi_link "$CASE/bin/tanktemp")" = MISSING ] &&
         [ "$(pi_link "$CASE/etc/tanktemp.service")" = MISSING ] &&
         [ "$(cat "$FAKE_STATE/enabled.tanktemp")" = not-found ] && [ ! -e "$CASE/etc/tanktemp/config.yaml" ]
 }
+# owner_is PATH USER:GROUP MODE: as the stubs recorded it, and its real mode.
+owner_is() { [ "$(env RSTUBS="$RSTUBS" FAKE_STATE="$FAKE_STATE" PATH="$RSTUBS:$PATH" stat -c '%U:%G %a' "$1")" = "$2 $3" ]; }
+runs_as() { [ "$(cat "$FAKE_STATE/running_user")" = "$1" ]; }
+runs_from_opt() { [ "$(cat "$FAKE_STATE/running_path")" = "$PI/$(running)" ]; }
+runs_as_tanktemp_from_opt() { runs_as tanktemp && runs_from_opt; }
+old_runs_untouched() { runs_as "$ME" && [ "$(restarts)" -eq 0 ]; }
+restarted_once_as_tanktemp() { runs_as tanktemp && [ "$(restarts)" -eq 1 ]; }
+builds_copied() { local b; for b in "$OLD1" "$OLD2" "$CUR"; do cmp -s "$OLDPI/$b" "$PI/$b" || return 1; done; }
+config_unchanged() { config_yaml | cmp -s - "$CFG"; }
+newest_build() { find "$PI" -maxdepth 1 -name 'tanktemp-2*' -print0 | xargs -0 ls -1t | head -1 | xargs basename; }
 templog_on() { [ "$(cat "$FAKE_STATE/active.templog")" = active ] && [ "$(cat "$FAKE_STATE/enabled.templog")" = enabled ]; }
 
 check() { # check NAME CONDITION...
@@ -456,6 +667,7 @@ case_01() {
     check "--check builds nothing" [ "$(grep -c '^go build' "$FAKE_STATE/go")" -eq 0 ]
     check "--check changes nothing on the Pi" [ "$(snapshot)" = "$before" ]
     check "--check restarts nothing" [ "$(restarts)" -eq 0 ]
+    check "the running build checks the config as tanktemp (it is root:tanktemp 0640)" grep -q "check-config 0ld0003 $CFG as tanktemp" "$FAKE_STATE/checks"
 }
 
 case_02() {
@@ -467,7 +679,9 @@ case_02() {
     check "the build is for linux/arm64 (aarch64), static" grep -qE "^go build .*GOOS=linux GOARCH=arm64 GOARM= CGO_ENABLED=0" "$FAKE_STATE/go"
     check "the build is -trimpath and stamped -s -w -X main.version" grep -qE -- "-trimpath -ldflags -s -w -X main.version=$VERSION " "$FAKE_STATE/go"
     check "the build uses go.work (GOWORK is not off)" not grep -q 'GOWORK=off' "$FAKE_STATE/go"
-    check "the new build checks the Pi's config before the switch" grep -q "check-config $VERSION $CASE/etc/tanktemp/config.yaml" "$FAKE_STATE/checks"
+    check "the new build checks the Pi's config before the switch, as tanktemp" grep -q "check-config $VERSION $CFG as tanktemp" "$FAKE_STATE/checks"
+    check "the new build runs as tanktemp" runs_as tanktemp
+    check "from /opt/tanktemp" runs_from_opt
     check "deploy records the previous build" [ "$(cat "$PI/.previous")" = "$CUR" ]
     check "deploy restarts once" [ "$(restarts)" -eq 1 ]
     check "deploy confirms the broker heartbeat" says 'broker holds a HEARTBEAT from'
@@ -500,6 +714,7 @@ case_02() {
     check "--rollback succeeds" rc_is 0
     check "--rollback switches to the previous build" link_is "$first"
     check "--rollback runs it" [ "$(running)" = "$first" ]
+    check "--rollback runs it as tanktemp, from /opt/tanktemp" runs_as_tanktemp_from_opt
     check "--rollback records the build it left" [ "$(cat "$PI/.previous")" = "$second" ]
 }
 
@@ -950,16 +1165,17 @@ case_51() {
 
 case_52() {
     bare
-    INPUT=$'y\nn\n' setup --
+    INPUT=$'y\ny\nn\n' setup --
     check "declining the config prompt stops there" rc_is 2
     check "after templog was stopped (it was agreed)" not templog_on
+    check "and the tanktemp user was made (it was agreed)" [ -f "$FAKE_STATE/user.tanktemp" ]
     check "and says what was done stays" says 're-run'
     check "no config is installed" [ ! -e "$CASE/etc/tanktemp/config.yaml" ]
 }
 
 case_53() {
     bare
-    INPUT=$'y\ny\ny\n' setup --
+    INPUT=$'y\ny\ny\ny\n' setup --
     check "answering yes to each prompt sets up" rc_is 0
     check "templog was disabled" [ "$(cat "$FAKE_STATE/enabled.templog")" = disabled ]
 }
@@ -972,7 +1188,16 @@ case_54() {
     check "templog is off" not templog_on
     check "it prints how to bring templog back" says 'sudo systemctl enable --now templog'
     check "the config is installed" cmp -s "$CASE/etc/tanktemp/config.yaml" "$REPO/deploy/config.local.yaml"
-    check "as root:root 0644" logged 'install -o root -g root -m 0644'
+    check "as root:tanktemp 0640" logged 'install -o root -g tanktemp -m 0640'
+    check "so tanktemp can read it, and only root write it" owner_is "$CFG" root:tanktemp 640
+    check "it makes the tanktemp system user" logged 'useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin tanktemp'
+    check "before it installs the config" [ "$(grep -n useradd "$FAKE_STATE/log" | cut -d: -f1)" -lt "$(grep -n 'install -o root -g tanktemp' "$FAKE_STATE/log" | cut -d: -f1)" ]
+    check "it makes /opt/tanktemp, the deploy user's, 0755" logged "install -d -o $ME -g $MYGROUP -m 0755 $PI"
+    check "/opt/tanktemp is the deploy user's, 0755" owner_is "$PI" "$ME:$MYGROUP" 755
+    check "the first build is checked as tanktemp" grep -q "check-config $VERSION $CFG as tanktemp" "$FAKE_STATE/checks"
+    check "tanktemp runs as tanktemp" runs_as tanktemp
+    check "from /opt/tanktemp (setup)" runs_from_opt
+    check "nothing is put in the home" [ ! -e "$OLDPI" ]
     check "it links a first build, named by commit" new_build_is_running
     check "the new build checked the config on the Pi" grep -q "check-config $VERSION $CASE/etc/tanktemp/config.yaml" "$FAKE_STATE/checks"
     check "it installs the unit file" unit_is "$HERE/tanktemp.service"
@@ -1147,6 +1372,226 @@ case_71() {
     fresh
     setup -- --bogus
     check "setup: an unknown option is refused" rc_is 2
+}
+
+# ---------------------------------------------------------------- the tanktemp user, /opt/tanktemp
+
+case_72() {
+    unit="$HERE/tanktemp.service"
+    check "the unit runs as User=tanktemp" grep -qx 'User=tanktemp' "$unit"
+    check "and Group=tanktemp" grep -qx 'Group=tanktemp' "$unit"
+    check "not as the deploy user, nor a DynamicUser" not grep -qE '^(User=sweeney|DynamicUser=)' "$unit"
+    check "from /opt/tanktemp/tanktemp-bin" grep -qx 'ExecStart=/opt/tanktemp/tanktemp-bin -config /etc/tanktemp/config.yaml' "$unit"
+    check "with the home hidden (ProtectHome=yes)" grep -qx 'ProtectHome=yes' "$unit"
+    for line in AmbientCapabilities=CAP_NET_BIND_SERVICE CapabilityBoundingSet=CAP_NET_BIND_SERVICE NoNewPrivileges=true \
+        ProtectSystem=strict PrivateTmp=true PrivateDevices=true ProtectKernelTunables=true ProtectKernelModules=true \
+        ProtectKernelLogs=true ProtectControlGroups=true 'RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX' \
+        RestrictNamespaces=true LockPersonality=true MemoryDenyWriteExecute=true MemoryMax=64M; do
+        check "the unit keeps $line" grep -qx "$line" "$unit"
+    done
+    # shellcheck disable=SC2016
+    OUT=$(cd "$HERE" && env -u DEPLOY_PI_DIR bash -c 'source deploy/lib.sh; echo "$PI_DIR $LINK $SVC_USER"')
+    check "lib: the builds live in /opt/tanktemp, where the unit runs them from, as tanktemp" [ "$OUT" = "/opt/tanktemp tanktemp-bin tanktemp" ]
+}
+
+case_73() {
+    old_layout
+    before=$(snapshot)
+    setup -- --check
+    check "migrate --check passes" rc_is 0
+    check "it would make the tanktemp user" says 'create the tanktemp system user'
+    check "it would make the config root:tanktemp 0640" says "make $CFG root:tanktemp 0640"
+    check "it would make /opt/tanktemp" says "create $PI \\($ME:$MYGROUP 0755\\)"
+    check "it would copy the 3 builds there" says "copy the 3 build\\(s\\) in $OLDPI to $PI"
+    check "and link the running one" says "link $PI/tanktemp-bin to $CUR"
+    check "it would install the new unit file" says "install the unit file as $PI/tanktemp.service"
+    check "and repoint /usr/local/bin" says "link $CASE/bin/tanktemp -> $PI/tanktemp-bin \\(now $OLDPI/tanktemp-bin\\)"
+    check "and the systemd unit" says "link $CASE/etc/tanktemp.service -> $PI/tanktemp.service \\(now $OLDPI/tanktemp.service\\)"
+    check "and restart it as tanktemp" says "restart tanktemp as tanktemp \\(it runs as $ME now\\)"
+    check "it says the old builds are left" says "$OLDPI is left as it is"
+    check "migrate --check changes nothing" [ "$(snapshot)" = "$before" ]
+    check "and restarts nothing (migrate --check)" [ "$(restarts)" -eq 0 ]
+    check "and builds nothing (migrate --check)" [ "$(grep -c "^go build .*GOOS=linux" "$FAKE_STATE/go")" -eq 0 ]
+}
+
+case_74() {
+    old_layout
+    old_before=$(cd "$OLDPI" && find . -print | sort | while read -r f; do [ -L "$f" ] && echo "$f -> $(readlink "$f")" || { [ -f "$f" ] && shasum "$f"; } || echo "$f/"; done)
+    setup -- --yes
+    check "migrate --yes succeeds" rc_is 0
+    check "the tanktemp user is made" [ -f "$FAKE_STATE/user.tanktemp" ]
+    check "the config is root:tanktemp 0640 (migrated)" owner_is "$CFG" root:tanktemp 640
+    check "and its content is the same" config_unchanged
+    check "/opt/tanktemp is the deploy user's, 0755 (migrated)" owner_is "$PI" "$ME:$MYGROUP" 755
+    check "the 3 builds are in /opt/tanktemp" [ "$(count 'tanktemp-2*')" -eq 3 ]
+    check "byte for byte" builds_copied
+    check "keeping their order by mtime (for pruning)" [ "$(newest_build)" = "$CUR" ]
+    check "the link is to the build that ran" link_is "$CUR"
+    check ".previous comes too (for --rollback)" [ "$(cat "$PI/.previous")" = "$OLD2" ]
+    check "the old units do not (they run as the deploy user)" [ ! -e "$PI/.units/$CUR.service" ]
+    check "the new unit file is installed" unit_is "$HERE/tanktemp.service"
+    check "/usr/local/bin is repointed" [ "$(pi_link "$CASE/bin/tanktemp")" = "$PI/tanktemp-bin" ]
+    check "the systemd unit is repointed" [ "$(pi_link "$CASE/etc/tanktemp.service")" = "$PI/tanktemp.service" ]
+    check "systemd is reloaded once (migrate)" [ "$(reloads)" -eq 1 ]
+    check "tanktemp is restarted once" [ "$(restarts)" -eq 1 ]
+    check "and runs as tanktemp (migrated)" runs_as tanktemp
+    check "from /opt/tanktemp (migrated)" runs_from_opt
+    check "the same build" [ "$(running)" = "$CUR" ]
+    check "the build was checked as tanktemp before the restart" grep -q "check-config 0ld0003 $CFG as tanktemp" "$FAKE_STATE/checks"
+    check "it says it is healthy" says 'is running on'
+    check "nothing is built (migrate)" [ "$(grep -c "^go build .*GOOS=linux" "$FAKE_STATE/go")" -eq 0 ]
+    old_after=$(cd "$OLDPI" && find . -print | sort | while read -r f; do [ -L "$f" ] && echo "$f -> $(readlink "$f")" || { [ -f "$f" ] && shasum "$f"; } || echo "$f/"; done)
+    check "the old ~/tanktemp is left untouched" [ "$old_after" = "$old_before" ]
+    check "and it says how to remove it" says "rm -rf $OLDPI"
+
+    before=$(snapshot)
+    setup -- --yes
+    check "setup after the migration succeeds" rc_is 0
+    check "and has nothing to do (migrated)" says 'already set up: nothing to do'
+    check "and changes nothing (migrated)" [ "$(snapshot)" = "$before" ]
+    check "no second restart" [ "$(restarts)" -eq 1 ]
+    check "it still mentions the old builds" says "$OLDPI is left as it is"
+
+    deploy -- --yes
+    check "deploy after the migration succeeds" rc_is 0
+    check "and the new build runs" new_build_is_running
+    check "as tanktemp from /opt (deployed)" runs_as_tanktemp_from_opt
+    check "the build it left gets the unit it ran under" cmp -s "$PI/.units/$CUR.service" "$HERE/tanktemp.service"
+    check "deploy prunes in /opt/tanktemp: 3 builds kept" [ "$(count 'tanktemp-2*')" -eq 3 ]
+    check "the oldest of them pruned" [ ! -e "$PI/$OLD1" ]
+    check "and never the home's" [ -e "$OLDPI/$OLD1" ]
+    deploy -- --rollback --yes
+    check "--rollback after the migration succeeds" rc_is 0
+    check "back to the migrated build" link_is "$CUR"
+    check "running it" [ "$(running)" = "$CUR" ]
+    check "as tanktemp, from /opt (rolled back)" runs_as_tanktemp_from_opt
+}
+
+case_75() {
+    old_layout
+    before=$(snapshot)
+    deploy -- --yes
+    check "deploy on the old layout is refused" rc_is 2
+    check "pointing at setup-pi.sh to move the builds" says "setup-pi.sh.*$PI"
+    check "having changed nothing (old layout)" [ "$(snapshot)" = "$before" ]
+}
+
+case_76() {
+    old_layout
+    setup FAKE_RELOAD_FAIL=1 -- --yes
+    check "a migration whose daemon-reload fails stops (3)" rc_is 3
+    check "the old process still runs, untouched" old_runs_untouched
+    setup -- --check
+    check "--check after it says what is left: reload" says 'reload systemd'
+    check "and restart as tanktemp (interrupted)" says "restart tanktemp as tanktemp"
+    setup -- --yes
+    check "re-running carries on" rc_is 0
+    check "and reloads" [ "$(grep -c 'systemctl daemon-reload' "$FAKE_STATE/log")" -ge 2 ]
+    check "and runs as tanktemp (after the interruption)" runs_as_tanktemp_from_opt
+    setup -- --yes
+    check "and then has nothing to do (interrupted)" says 'already set up: nothing to do'
+}
+
+case_77() {
+    old_layout
+    # Stopped after the builds were copied, before the link: a partial copy
+    # is left under its staging name, a whole one under its own.
+    mkdir -p "$PI"
+    cp -p "$OLDPI/$OLD1" "$PI/$OLD1"
+    head -c 10 "$OLDPI/$CUR" >"$PI/.incoming-$CUR"
+    setup -- --yes
+    check "a migration stopped part way carries on" rc_is 0
+    check "copying what was missing" builds_copied
+    check "leaving no staged copy" [ "$(count '.incoming-*')" -eq 0 ]
+    check "running as tanktemp (part way)" runs_as tanktemp
+}
+
+case_78() {
+    old_layout
+    INPUT=$'n\n' setup --
+    check "declining the user prompt stops (2)" rc_is 2
+    check "no user is made" [ ! -f "$FAKE_STATE/user.tanktemp" ]
+    check "and the old service runs on" old_runs_untouched
+}
+
+case_79() {
+    old_layout
+    INPUT=$'y\nn\n' setup --
+    check "declining the migration stops (2)" rc_is 2
+    check "the old service is not restarted" old_runs_untouched
+    check "and nothing is moved" [ ! -e "$PI" ]
+    check "the links are as they were" [ "$(pi_link "$CASE/bin/tanktemp")" = "$OLDPI/tanktemp-bin" ]
+    check "the config is as it was: the old service can still read it" owner_is "$CFG" root:root 644
+    check "one prompt covers the config and the move" says 'Make the config readable by tanktemp, move tanktemp'
+    INPUT=$'y\n' setup --
+    check "agreeing to it migrates" rc_is 0
+    check "as tanktemp (one prompt)" runs_as_tanktemp_from_opt
+}
+
+case_80() {
+    fresh
+    chmod 0600 "$CFG"
+    echo "$CFG root:root" >>"$FAKE_STATE/owners"
+    before=$(snapshot)
+    setup -- --check
+    check "a config tanktemp cannot read is reported" says "make $CFG root:tanktemp 0640 \\(it is root:root 600\\)"
+    check "and not changed by --check" [ "$(snapshot)" = "$before" ]
+    setup -- --yes
+    check "setup fixes its owner and mode" owner_is "$CFG" root:tanktemp 640
+    check "with chown and chmod, not a copy" logged "chown root:tanktemp $CFG"
+    check "without a restart (it has read its config already)" [ "$(restarts)" -eq 0 ]
+    check "and exits 0 (config perms)" rc_is 0
+}
+
+case_81() {
+    fresh
+    pw="$CASE/etc/tanktemp/mqtt-password"
+    echo secret >"$pw" && chmod 0600 "$pw"
+    echo "$pw root:root" >>"$FAKE_STATE/owners"
+    for f in "$CFG" "$REPO/deploy/config.local.yaml"; do
+        sed -i.bak "s#^  topic_prefix:#  password_file: $pw\\n  topic_prefix:#" "$f" && rm -f "$f.bak"
+    done
+    setup -- --check
+    check "a password_file tanktemp cannot read is reported" says "make $pw root:tanktemp 0640"
+    setup -- --yes
+    check "and fixed" owner_is "$pw" root:tanktemp 640
+    check "its content kept" [ "$(cat "$pw")" = secret ]
+    setup -- --yes
+    check "then nothing to do (password_file)" says 'already set up: nothing to do'
+}
+
+case_82() {
+    fresh
+    echo "$PI root:root" >>"$FAKE_STATE/owners"
+    setup -- --check
+    check "a /opt/tanktemp the deploy user does not own is reported" says "make $PI $ME:$MYGROUP 0755 \\(it is root:root 755\\)"
+    setup -- --yes
+    check "and fixed (/opt)" owner_is "$PI" "$ME:$MYGROUP" 755
+    check "without a restart" [ "$(restarts)" -eq 0 ]
+}
+
+case_83() {
+    fresh
+    echo users >"$FAKE_STATE/user.tanktemp"
+    setup -- --check
+    check "a tanktemp user without its own group is refused" rc_is 2
+    check "naming its group" says "group is users"
+}
+
+case_84() {
+    bare
+    setup FAKE_USERADD_FAIL=1 -- --yes
+    check "a useradd that fails stops (3)" rc_is 3
+    check "before the config is installed" [ ! -e "$CFG" ]
+}
+
+case_85() {
+    fresh
+    echo "$ME" >"$FAKE_STATE/running_user"
+    setup -- --check
+    check "a tanktemp running as someone else would be restarted" says "restart tanktemp as tanktemp \\(it runs as $ME now\\)"
+    setup -- --yes
+    check "and is (as tanktemp)" restarted_once_as_tanktemp
 }
 
 case_99() {
