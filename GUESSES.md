@@ -24,6 +24,8 @@ G10, G14, G15 and G19. One change: `attempts` and `bus` are off the wire.
 They're on tanktemp's status page and `/api/status` only (WIRE.md,
 "Changes").
 
+G1 is done: the modules are tagged and pinned, tanktemp is pushed, and CI runs on GitHub.
+
 Since then: G20's log line names each fault, e.g. `sweep: 5 ok, 5 failed,
 4.81s: bus_low: rig-bus-a/a1, rig-bus-a/a2, …`. A sweep whose only problem
 is a suspect 85 °C gets a line too, because it now degrades health (G16).

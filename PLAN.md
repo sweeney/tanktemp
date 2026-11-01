@@ -775,15 +775,8 @@ Everything is local. Nothing is pushed, tagged or merged.
 | follow-up (2026-11-01) | **Remove templog** (G24) once tanktemp has run for a week, from 2026-11-08 at the earliest. Until then it stays disabled, as the fallback |
 | 12 hand-off | `docs/STATEHOUSE.md` written |
 
-Local branches in `sweeney/common`, one worktree each:
-
-| Worktree | Branch | Commits | What |
-|---|---|---|---|
-| `../common-tanktemp` | `feat/tanktemp-modules` | 2 | `lifecycle`, `health`, design docs, PLAN/README rows |
-| `../common-mqttpub` | `feat/mqttpub` | 10 | `mqttpub` |
-| `../common-devices` | `feat/devices-assets` | 1 | `devices` v0.2.0 |
-
-tanktemp's gitignored `go.work` points at all three. Before pushing
-anything: settle the commit dates, then push and tag the modules, pin them
-in `go.mod`, and redeploy, because the Pi's build is stamped with a commit
-hash that rewriting dates would change.
+Released on 2026-11-01. The three branches were merged into
+`sweeney/common` (#8 `lifecycle` and `health`, #9 `mqttpub`, #10 `devices`)
+and tagged `lifecycle/v0.1.0`, `health/v0.1.0`, `mqttpub/v0.1.0` and
+`devices/v0.2.0`. tanktemp pins the first three in `go.mod` and no longer
+uses a `go.work`. tanktemp is public at `sweeney/tanktemp`.

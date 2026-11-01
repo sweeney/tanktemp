@@ -33,5 +33,6 @@ Read `PLAN.md` (decisions), `docs/WIRE.md` (the contract) and
   commit hash, so settle dates before deploying.
 - **The Pi:** use `./deploy.sh` and `./setup-pi.sh`, `--check` first. Never
   edit `/boot/firmware/config.txt` and never reboot without asking.
-- The common modules come from a gitignored `go.work` until they are tagged.
-  Never put a `go.work` at `~/src/github.com/sweeney/`.
+- The common modules are pinned in `go.mod` to their tags. To try an
+  unreleased change in common, use a gitignored `go.work` in this repo,
+  never at `~/src/github.com/sweeney/`, and pin the new tag before pushing.

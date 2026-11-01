@@ -84,8 +84,8 @@ scp onewire.test user@host:/tmp/
 ssh user@host 'TANKTEMP_ROMS=28-…,28-… /tmp/onewire.test -test.run Hardware -test.v; rm /tmp/onewire.test'
 ```
 
-Until `lifecycle`, `health` and `mqttpub` are tagged in `sweeney/common`, the
-build uses a gitignored `go.work` pointing at local checkouts of them.
+The common modules (`lifecycle`, `health`, `mqttpub`) are pinned in `go.mod`
+to their tags in `sweeney/common`.
 
 ## Watching it live
 
