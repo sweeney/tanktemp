@@ -57,6 +57,21 @@ GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o w1capture ./cmd/w1capture
 # copy to the Pi, then:  ./w1capture -out /tmp/<scenario> [-steps 6 -interval 10s]
 ```
 
+### Capturing a fault
+
+`deploy/capture.sh` walks you through reproducing a fault on the rig and
+capturing it as a fixture: it tells you what to do with your hands, captures
+while you do it, copies the run back to
+`internal/onewire/testdata/sysfs/rig-<scenario>-<date>/`, and says whether
+the fault was caught. It's read-only on the Pi, and tanktemp keeps running.
+
+```sh
+deploy/capture.sh --check --host user@host power-on-reset   # preflight only
+deploy/capture.sh --host user@host power-on-reset   # pull one probe's VDD for ~1 s, a few times
+deploy/capture.sh --host user@host bus-low          # unplug one bus's pull-up for ~15 s
+deploy/capture_test.sh                              # the script's tests
+```
+
 ### Hardware check
 
 A read-only test against the real sensors (build tag `hardware`, never run in
@@ -72,6 +87,26 @@ ssh user@host 'TANKTEMP_ROMS=28-…,28-… /tmp/onewire.test -test.run Hardware 
 Until `lifecycle`, `health` and `mqttpub` are tagged in `sweeney/common`, the
 build uses a gitignored `go.work` pointing at local checkouts of them.
 
+## Watching it live
+
+`tools/live.html` is a single page that subscribes to `{prefix}/+/state` and
+`{prefix}/status` over MQTT-over-WebSockets and draws each cylinder, the
+publisher's status and the flow of messages. It only reads. The broker needs
+a websockets listener (mosquitto: `listener 9001` with `protocol websockets`).
+
+```sh
+./tools/live.sh --check   # print the URL from deploy/config.local.yaml, probe the port
+./tools/live.sh           # open it
+./tools/live.sh --demo    # made-up data, no broker
+./tools/live_test.sh      # the script's tests
+```
+
+## Reviewing the guesses
+
+`go run ./tools/guessreview -open` serves a local page (loopback only, port
+8741) for answering `GUESSES.md` one guess at a time. Each answer is saved
+as it's given to `tools/guessreview/answers.json`, which is gitignored.
+
 ## Deploying
 
 ```sh
@@ -81,6 +116,18 @@ build uses a gitignored `go.work` pointing at local checkouts of them.
 ./deploy.sh user@host             # build, upload, switch, verify, roll back on failure
 ./deploy.sh --rollback user@host
 ```
+
+tanktemp runs as the `tanktemp` system user (no home, no login), which
+`setup-pi.sh` creates. Builds live in `/opt/tanktemp`, owned by the deploy
+user with mode 0755. That directory holds the timestamped builds, the
+`tanktemp-bin` link to the running one, the unit file, `.units/` and
+`.previous`, and the unit runs `/opt/tanktemp/tanktemp-bin`.
+`/etc/tanktemp/config.yaml` (and any `password_file`) is root:tanktemp 0640,
+so `deploy.sh` runs `-check-config` through `sudo -u tanktemp`.
+
+A Pi set up before this keeps its builds in `~/tanktemp`. To move it, run
+`./setup-pi.sh --check`, then `./setup-pi.sh`: it copies the builds, repoints
+the links and restarts once. It leaves `~/tanktemp` for you to remove.
 
 The host can also go in `deploy/host` (gitignored). The config comes from
 `deploy/config.local.yaml` (gitignored; start from

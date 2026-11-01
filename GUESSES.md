@@ -5,6 +5,21 @@ These are the choices I made without asking, while building overnight on
 guessed, why, and what it would take to change it. Anything the plan already
 decided isn't listed here.
 
+## Your answers (2026-11-01)
+
+You kept 19 of the 25 as they are. The other six:
+
+| # | Your answer | Status |
+|---|---|---|
+| G5 | Talk me through capturing them, and keep the synthetic ones as well | `deploy/capture.sh` guides a capture of each fault (README, "Capturing a fault"). The synthetic fixtures stay |
+| G7 | Tighten the offset limit to ±2 °C | done: `config.MaxOffsetC` = 2 |
+| G13 | Walk me through the wire contract, with a page of charts and flow diagrams | `docs/wire-walkthrough.html`. Building it found ten places where the docs and code disagreed, all now fixed. One was a real bug: `raw_c` was the kernel's truncated value (12.062 for 12.0625), not exact as WIRE.md promised. The goldens didn't change |
+| G16 | A suspect 85 °C degrades health | done: `/healthz` is `degraded` while any probe is suspect. The value is still published |
+| G24 | Remove templog after the cutover | after tanktemp has run for a week, from 2026-11-08 at the earliest (PLAN.md, build status) |
+| G25 | A dedicated `tanktemp` system user | done in the scripts; the Pi isn't migrated yet. tanktemp runs as the `tanktemp` user from `/opt/tanktemp`, with `ProtectHome=yes` back on. The config is root:tanktemp 0640. No extra group is needed, because the 1-Wire files are world-readable. `setup-pi.sh` creates the user and moves an existing install over (README, "Deploying") |
+
+The table below is the original record of each guess.
+
 | # | Guess | Why | To change |
 |---|---|---|---|
 | G1 | CI (`.github/workflows/ci.yml`) is written but can't pass on GitHub until `lifecycle`, `health` and `mqttpub` are tagged in common. The local build uses a gitignored `go.work`. | Nothing is pushed yet, and the tags wait for tanktemp to run on the Pi. | Tag the modules, pin them in `go.mod`, then push. |
