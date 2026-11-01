@@ -11,7 +11,7 @@ You kept 19 of the 25 as they are. The other six:
 
 | # | Your answer | Status |
 |---|---|---|
-| G5 | Talk me through capturing them, and keep the synthetic ones as well | `deploy/capture.sh` guides a capture of each fault (README, "Capturing a fault"). The synthetic fixtures stay |
+| G5 | Talk me through capturing them, and keep the synthetic ones as well | done, 2026-11-01. Both faults are captured for real: `rig-power-on-reset-2026-11-01` (bytes `50 05 … 0c`, as the datasheet says) and `rig-bus-low-2026-11-01` (all `00`, `crc=00 YES`). The handler already classified every reading correctly. The synthetic fixtures stay as the minimal cases. `deploy/capture.sh` can capture more |
 | G7 | Tighten the offset limit to ±2 °C | done: `config.MaxOffsetC` = 2 |
 | G13 | Walk me through the wire contract, with a page of charts and flow diagrams | `docs/wire-walkthrough.html`. Building it found ten places where the docs and code disagreed, all now fixed. One was a real bug: `raw_c` was the kernel's truncated value (12.062 for 12.0625), not exact as WIRE.md promised. The goldens didn't change |
 | G16 | A suspect 85 °C degrades health | done: `/healthz` is `degraded` while any probe is suspect. The value is still published |

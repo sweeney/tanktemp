@@ -52,11 +52,13 @@ case "$SCENARIO" in
         ;;
     bus-low)
         PLAN_STEPS=8 PLAN_INTERVAL=5s
-        DOING="unplug the 4.7 kΩ pull-up (or the jumper feeding it) on ONE bus"
+        DOING="unplug ONE bus's data jumper (Pi GPIO to the board), or its pull-up if that isn't soldered"
         HOW="After the 2nd 'captured' line, $DOING.
-   Plug it back after the 5th. This reproduces the data-line fault of
-   2026-09-28: all bytes 00 (t=0), then the sensors drop off the bus.
-   Don't short the data line to ground to fake it."
+   Keep the loose end clear of other pins. Plug it back after the 5th.
+   This reproduces the data-line fault of 2026-09-28 (the pull-up contact
+   failed): all bytes 00 (t=0), then the sensors drop off the bus. The line
+   may float high instead (all ff, crc NO); that's worth having too. Don't
+   short the data line to ground to fake it."
         ;;
     "") usage >&2; exit 2 ;;
     *) die "unknown scenario '$SCENARIO' (power-on-reset or bus-low)" ;;

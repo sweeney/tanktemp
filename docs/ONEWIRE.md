@@ -368,6 +368,7 @@ Both kinds seen for real. Sample files show them row by row.
 |---|---|---|
 | All sensors fail for one read, then one reads 85.000 | **3.3 V lost briefly**, so the sensors reset | `fault-power-loss-3v3.csv`: the jumper wobbled when the Pi was lifted (2026-09-28 11:05) |
 | 0.000 on all, then all missing, back after minutes with **no** 85 | **Data line or pull-up contact.** The sensors kept power | `fault-data-line.csv` (10 min, 2026-09-28 16:53); `fault-rewire-to-pcb.csv` (2026-10-18 10:42) |
+| All bytes 00 on one bus for ~35 s, sensors still listed, normal on the next read | **Data line cut** (bus 1's data jumper pulled, 2026-11-01). `crc=00 YES`, `t=0`; no reset afterwards. Too short for the kernel's searches to drop the sensors, unlike the 10 minutes of 2026-09-28 | `testdata/sysfs/rig-bus-low-2026-11-01` |
 | Fake `00-…` devices, `w1_search: max_slave_count 64 reached` in dmesg | Bus search reading noise from half-made connections | during every rewiring session. Harmless; they disappear on their own |
 | One sensor fails once, then recovers | A transient glitch (the old logger didn't record which kind) | once in 3 weeks (2026-09-30 12:55:30) |
 | Unexplained reboot | Unknown; no persistent journal | 2026-10-08 10:48. Consider enabling a persistent journal |

@@ -1,0 +1,934 @@
+{
+  "attempts": 3,
+  "description": "A real data line held low: bus 1's data jumper (Pi GPIO to the board) pulled for ~35 s. Every read on that bus was nine 00 bytes, crc=00 YES, t=0; bus 2 was unaffected. The sensors stayed listed on the bus throughout and read normally as soon as it was plugged back, with no power-on reset.",
+  "request": [
+    "28-00001171f570",
+    "28-000011721aa5",
+    "28-000011721ab6",
+    "28-000011721ce9",
+    "28-000011721d36",
+    "28-0000117287e6",
+    "28-00001172de60",
+    "28-00001173563c",
+    "28-00001173588d",
+    "28-000011737d92",
+    "28-0000deadbeef"
+  ],
+  "source": "captured from the rig with deploy/capture.sh bus-low (w1capture -steps 8 -interval 5s) on 2026-11-01",
+  "steps": [
+    {
+      "info": {
+        "28-00001171f570": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011721aa5": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011721ab6": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011721ce9": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011721d36": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-0000117287e6": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-00001172de60": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-00001173563c": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-00001173588d": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011737d92": {
+          "ext_power": true,
+          "resolution": 12
+        }
+      },
+      "readings": {
+        "28-00001171f570": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 15375
+        },
+        "28-000011721aa5": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 14937
+        },
+        "28-000011721ab6": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 15125
+        },
+        "28-000011721ce9": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 15187
+        },
+        "28-000011721d36": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 18375
+        },
+        "28-0000117287e6": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 16812
+        },
+        "28-00001172de60": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 14937
+        },
+        "28-00001173563c": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 19125
+        },
+        "28-00001173588d": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 15062
+        },
+        "28-000011737d92": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 17812
+        },
+        "28-0000deadbeef": {
+          "attempts": 1,
+          "code": "not_present"
+        }
+      },
+      "topology": {
+        "w1_bus_master1": [
+          "28-00001171f570",
+          "28-000011721aa5",
+          "28-000011721ab6",
+          "28-00001172de60",
+          "28-00001173588d"
+        ],
+        "w1_bus_master2": [
+          "28-000011721ce9",
+          "28-000011721d36",
+          "28-0000117287e6",
+          "28-00001173563c",
+          "28-000011737d92"
+        ]
+      }
+    },
+    {
+      "info": {
+        "28-00001171f570": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011721aa5": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011721ab6": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011721ce9": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011721d36": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-0000117287e6": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-00001172de60": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-00001173563c": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-00001173588d": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011737d92": {
+          "ext_power": true,
+          "resolution": 12
+        }
+      },
+      "readings": {
+        "28-00001171f570": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 15375
+        },
+        "28-000011721aa5": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 15000
+        },
+        "28-000011721ab6": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 15062
+        },
+        "28-000011721ce9": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 15187
+        },
+        "28-000011721d36": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 18562
+        },
+        "28-0000117287e6": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 16625
+        },
+        "28-00001172de60": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 14937
+        },
+        "28-00001173563c": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 19250
+        },
+        "28-00001173588d": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 15125
+        },
+        "28-000011737d92": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 17812
+        },
+        "28-0000deadbeef": {
+          "attempts": 1,
+          "code": "not_present"
+        }
+      },
+      "topology": {
+        "w1_bus_master1": [
+          "28-00001171f570",
+          "28-000011721aa5",
+          "28-000011721ab6",
+          "28-00001172de60",
+          "28-00001173588d"
+        ],
+        "w1_bus_master2": [
+          "28-000011721ce9",
+          "28-000011721d36",
+          "28-0000117287e6",
+          "28-00001173563c",
+          "28-000011737d92"
+        ]
+      }
+    },
+    {
+      "info": {
+        "28-00001171f570": {
+          "ext_power": false,
+          "resolution": 9
+        },
+        "28-000011721aa5": {
+          "ext_power": false,
+          "resolution": 9
+        },
+        "28-000011721ab6": {
+          "ext_power": false,
+          "resolution": 9
+        },
+        "28-000011721ce9": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011721d36": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-0000117287e6": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-00001172de60": {
+          "ext_power": false,
+          "resolution": 9
+        },
+        "28-00001173563c": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-00001173588d": {
+          "ext_power": false,
+          "resolution": 9
+        },
+        "28-000011737d92": {
+          "ext_power": true,
+          "resolution": 12
+        }
+      },
+      "readings": {
+        "28-00001171f570": {
+          "attempts": 3,
+          "code": "bus_low"
+        },
+        "28-000011721aa5": {
+          "attempts": 3,
+          "code": "bus_low"
+        },
+        "28-000011721ab6": {
+          "attempts": 3,
+          "code": "bus_low"
+        },
+        "28-000011721ce9": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 15187
+        },
+        "28-000011721d36": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 18500
+        },
+        "28-0000117287e6": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 16437
+        },
+        "28-00001172de60": {
+          "attempts": 3,
+          "code": "bus_low"
+        },
+        "28-00001173563c": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 19187
+        },
+        "28-00001173588d": {
+          "attempts": 3,
+          "code": "bus_low"
+        },
+        "28-000011737d92": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 17687
+        },
+        "28-0000deadbeef": {
+          "attempts": 1,
+          "code": "not_present"
+        }
+      },
+      "topology": {
+        "w1_bus_master1": [
+          "28-00001171f570",
+          "28-000011721aa5",
+          "28-000011721ab6",
+          "28-00001172de60",
+          "28-00001173588d"
+        ],
+        "w1_bus_master2": [
+          "28-000011721ce9",
+          "28-000011721d36",
+          "28-0000117287e6",
+          "28-00001173563c",
+          "28-000011737d92"
+        ]
+      }
+    },
+    {
+      "info": {
+        "28-00001171f570": {
+          "ext_power": false,
+          "resolution": 9
+        },
+        "28-000011721aa5": {
+          "ext_power": false,
+          "resolution": 9
+        },
+        "28-000011721ab6": {
+          "ext_power": false,
+          "resolution": 9
+        },
+        "28-000011721ce9": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011721d36": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-0000117287e6": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-00001172de60": {
+          "ext_power": false,
+          "resolution": 9
+        },
+        "28-00001173563c": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-00001173588d": {
+          "ext_power": false,
+          "resolution": 9
+        },
+        "28-000011737d92": {
+          "ext_power": true,
+          "resolution": 12
+        }
+      },
+      "readings": {
+        "28-00001171f570": {
+          "attempts": 3,
+          "code": "bus_low"
+        },
+        "28-000011721aa5": {
+          "attempts": 3,
+          "code": "bus_low"
+        },
+        "28-000011721ab6": {
+          "attempts": 3,
+          "code": "bus_low"
+        },
+        "28-000011721ce9": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 15187
+        },
+        "28-000011721d36": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 18062
+        },
+        "28-0000117287e6": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 16375
+        },
+        "28-00001172de60": {
+          "attempts": 3,
+          "code": "bus_low"
+        },
+        "28-00001173563c": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 19125
+        },
+        "28-00001173588d": {
+          "attempts": 3,
+          "code": "bus_low"
+        },
+        "28-000011737d92": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 17625
+        },
+        "28-0000deadbeef": {
+          "attempts": 1,
+          "code": "not_present"
+        }
+      },
+      "topology": {
+        "w1_bus_master1": [
+          "28-00001171f570",
+          "28-000011721aa5",
+          "28-000011721ab6",
+          "28-00001172de60",
+          "28-00001173588d"
+        ],
+        "w1_bus_master2": [
+          "28-000011721ce9",
+          "28-000011721d36",
+          "28-0000117287e6",
+          "28-00001173563c",
+          "28-000011737d92"
+        ]
+      }
+    },
+    {
+      "info": {
+        "28-00001171f570": {
+          "ext_power": false,
+          "resolution": 9
+        },
+        "28-000011721aa5": {
+          "ext_power": false,
+          "resolution": 9
+        },
+        "28-000011721ab6": {
+          "ext_power": false,
+          "resolution": 9
+        },
+        "28-000011721ce9": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011721d36": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-0000117287e6": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-00001172de60": {
+          "ext_power": false,
+          "resolution": 9
+        },
+        "28-00001173563c": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-00001173588d": {
+          "ext_power": false,
+          "resolution": 9
+        },
+        "28-000011737d92": {
+          "ext_power": true,
+          "resolution": 12
+        }
+      },
+      "readings": {
+        "28-00001171f570": {
+          "attempts": 3,
+          "code": "bus_low"
+        },
+        "28-000011721aa5": {
+          "attempts": 3,
+          "code": "bus_low"
+        },
+        "28-000011721ab6": {
+          "attempts": 3,
+          "code": "bus_low"
+        },
+        "28-000011721ce9": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 15187
+        },
+        "28-000011721d36": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 18062
+        },
+        "28-0000117287e6": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 16312
+        },
+        "28-00001172de60": {
+          "attempts": 3,
+          "code": "bus_low"
+        },
+        "28-00001173563c": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 19062
+        },
+        "28-00001173588d": {
+          "attempts": 3,
+          "code": "bus_low"
+        },
+        "28-000011737d92": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 17562
+        },
+        "28-0000deadbeef": {
+          "attempts": 1,
+          "code": "not_present"
+        }
+      },
+      "topology": {
+        "w1_bus_master1": [
+          "28-00001171f570",
+          "28-000011721aa5",
+          "28-000011721ab6",
+          "28-00001172de60",
+          "28-00001173588d"
+        ],
+        "w1_bus_master2": [
+          "28-000011721ce9",
+          "28-000011721d36",
+          "28-0000117287e6",
+          "28-00001173563c",
+          "28-000011737d92"
+        ]
+      }
+    },
+    {
+      "info": {
+        "28-00001171f570": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011721aa5": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011721ab6": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011721ce9": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011721d36": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-0000117287e6": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-00001172de60": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-00001173563c": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-00001173588d": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011737d92": {
+          "ext_power": true,
+          "resolution": 12
+        }
+      },
+      "readings": {
+        "28-00001171f570": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 15375
+        },
+        "28-000011721aa5": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 15000
+        },
+        "28-000011721ab6": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 15062
+        },
+        "28-000011721ce9": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 15187
+        },
+        "28-000011721d36": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 17812
+        },
+        "28-0000117287e6": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 16250
+        },
+        "28-00001172de60": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 14937
+        },
+        "28-00001173563c": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 19062
+        },
+        "28-00001173588d": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 15125
+        },
+        "28-000011737d92": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 17562
+        },
+        "28-0000deadbeef": {
+          "attempts": 1,
+          "code": "not_present"
+        }
+      },
+      "topology": {
+        "w1_bus_master1": [
+          "28-00001171f570",
+          "28-000011721aa5",
+          "28-000011721ab6",
+          "28-00001172de60",
+          "28-00001173588d"
+        ],
+        "w1_bus_master2": [
+          "28-000011721ce9",
+          "28-000011721d36",
+          "28-0000117287e6",
+          "28-00001173563c",
+          "28-000011737d92"
+        ]
+      }
+    },
+    {
+      "info": {
+        "28-00001171f570": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011721aa5": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011721ab6": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011721ce9": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011721d36": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-0000117287e6": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-00001172de60": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-00001173563c": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-00001173588d": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011737d92": {
+          "ext_power": true,
+          "resolution": 12
+        }
+      },
+      "readings": {
+        "28-00001171f570": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 15375
+        },
+        "28-000011721aa5": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 15000
+        },
+        "28-000011721ab6": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 15125
+        },
+        "28-000011721ce9": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 15187
+        },
+        "28-000011721d36": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 17687
+        },
+        "28-0000117287e6": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 16125
+        },
+        "28-00001172de60": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 14937
+        },
+        "28-00001173563c": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 18625
+        },
+        "28-00001173588d": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 15125
+        },
+        "28-000011737d92": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 17375
+        },
+        "28-0000deadbeef": {
+          "attempts": 1,
+          "code": "not_present"
+        }
+      },
+      "topology": {
+        "w1_bus_master1": [
+          "28-00001171f570",
+          "28-000011721aa5",
+          "28-000011721ab6",
+          "28-00001172de60",
+          "28-00001173588d"
+        ],
+        "w1_bus_master2": [
+          "28-000011721ce9",
+          "28-000011721d36",
+          "28-0000117287e6",
+          "28-00001173563c",
+          "28-000011737d92"
+        ]
+      }
+    },
+    {
+      "info": {
+        "28-00001171f570": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011721aa5": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011721ab6": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011721ce9": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011721d36": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-0000117287e6": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-00001172de60": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-00001173563c": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-00001173588d": {
+          "ext_power": true,
+          "resolution": 12
+        },
+        "28-000011737d92": {
+          "ext_power": true,
+          "resolution": 12
+        }
+      },
+      "readings": {
+        "28-00001171f570": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 15437
+        },
+        "28-000011721aa5": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 15000
+        },
+        "28-000011721ab6": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 15125
+        },
+        "28-000011721ce9": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 15187
+        },
+        "28-000011721d36": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 17375
+        },
+        "28-0000117287e6": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 16000
+        },
+        "28-00001172de60": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 15000
+        },
+        "28-00001173563c": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 18000
+        },
+        "28-00001173588d": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 15125
+        },
+        "28-000011737d92": {
+          "attempts": 1,
+          "code": "ok",
+          "milli_c": 17187
+        },
+        "28-0000deadbeef": {
+          "attempts": 1,
+          "code": "not_present"
+        }
+      },
+      "topology": {
+        "w1_bus_master1": [
+          "28-00001171f570",
+          "28-000011721aa5",
+          "28-000011721ab6",
+          "28-00001172de60",
+          "28-00001173588d"
+        ],
+        "w1_bus_master2": [
+          "28-000011721ce9",
+          "28-000011721d36",
+          "28-0000117287e6",
+          "28-00001173563c",
+          "28-000011737d92"
+        ]
+      }
+    }
+  ],
+  "synthetic": false
+}

@@ -209,12 +209,18 @@ def main():
         "captured from the rig with deploy/capture.sh power-on-reset (w1capture -steps 15 -interval 0s) on 2026-11-01",
     )
 
+    real_fault_capture(
+        "rig-bus-low-2026-11-01",
+        "A real data line held low: bus 1's data jumper (Pi GPIO to the board) pulled for ~35 s. Every read on that bus was nine 00 bytes, crc=00 YES, t=0; bus 2 was unaffected. The sensors stayed listed on the bus throughout and read normally as soon as it was plugged back, with no power-on reset.",
+        "captured from the rig with deploy/capture.sh bus-low (w1capture -steps 8 -interval 5s) on 2026-11-01",
+    )
+
     def put(rom, text):
         return lambda tree: write(os.path.join(tree, rom, "w1_slave"), text)
 
     synth(
         "bus-low",
-        "Data line held low: all nine bytes 0x00, which the kernel passes as crc=00 YES, t=0.",
+        "Data line held low: all nine bytes 0x00, which the kernel passes as crc=00 YES, t=0. Captured for real as rig-bus-low-2026-11-01; kept as the minimal case.",
         put("28-000011721aa5", w1_slave([0] * 8)),
         {"28-000011721aa5": fail("bus_low")},
     )

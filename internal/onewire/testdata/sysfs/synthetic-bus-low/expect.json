@@ -1,6 +1,6 @@
 {
   "attempts": 3,
-  "description": "Data line held low: all nine bytes 0x00, which the kernel passes as crc=00 YES, t=0.",
+  "description": "Data line held low: all nine bytes 0x00, which the kernel passes as crc=00 YES, t=0. Captured for real as rig-bus-low-2026-11-01; kept as the minimal case.",
   "request": [
     "28-00001171f570",
     "28-000011721aa5",
