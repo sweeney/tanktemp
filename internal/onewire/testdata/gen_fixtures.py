@@ -109,6 +109,34 @@ def ok_step(tree, overrides=None):
     return {"topology": top, "readings": readings, "info": infos}
 
 
+def classify(tree, rom):
+    """What a real captured w1_slave shows, by docs/ONEWIRE.md's failure
+    table, decided from the bytes alone (not by our parser). A fixture step
+    is static, so a retry re-reads the same bytes: a failure takes every
+    attempt."""
+    lines = read(os.path.join(tree, rom, "w1_slave")).splitlines()
+    first = lines[0].split(":")[0].split()
+    b = [int(x, 16) for x in first]
+    if not lines[0].rstrip().endswith("YES"):
+        return fail("crc")
+    if b == [0] * 9:
+        return fail("bus_low")
+    if b[0] == 0x50 and b[1] == 0x05 and b[6] == 0x0C:
+        return fail("power_on_reset")
+    return None  # OK: ok_step takes the kernel's t=
+
+
+def real_fault_capture(name, description, source):
+    d = os.path.join(ROOT, name)
+    steps = sorted(x for x in os.listdir(d) if x.startswith("step-"))
+    out = []
+    for s in steps:
+        tree = os.path.join(d, s)
+        overrides = {r: c for r in all_roms(tree) if (c := classify(tree, r))}
+        out.append(ok_step(tree, overrides))
+    expect(name, description, False, source, out, all_roms(os.path.join(d, steps[0])) + [GHOST])
+
+
 def fail(code, attempts=ATTEMPTS):
     return {"code": code, "attempts": attempts}
 
@@ -175,6 +203,12 @@ def main():
         all_roms(os.path.join(seq, steps[0])) + [GHOST],
     )
 
+    real_fault_capture(
+        "rig-power-on-reset-2026-11-01",
+        "A real power-on reset: one probe's VDD pulled for ~1 s, five or six times. Every read after power returned gave 50 05 .. 0c (raw 0x0550, byte 6 = 0x0C), exactly the datasheet pattern.",
+        "captured from the rig with deploy/capture.sh power-on-reset (w1capture -steps 15 -interval 0s) on 2026-11-01",
+    )
+
     def put(rom, text):
         return lambda tree: write(os.path.join(tree, rom, "w1_slave"), text)
 
@@ -186,7 +220,7 @@ def main():
     )
     synth(
         "power-on-reset",
-        "Power-on reset: raw 0x0550 (85 C) with byte 6 = 0x0C (datasheet; not yet captured for real).",
+        "Power-on reset: raw 0x0550 (85 C) with byte 6 = 0x0C (datasheet; captured for real as rig-power-on-reset-2026-11-01, kept as the minimal case).",
         put("28-0000117287e6", w1_slave([0x50, 0x05, 0x4B, 0x46, 0x7F, 0xFF, 0x0C, 0x10])),
         {"28-0000117287e6": fail("power_on_reset")},
     )

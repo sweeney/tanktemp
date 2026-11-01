@@ -251,11 +251,15 @@ disappears after a few failed searches, and until then reads of it fail.
 **Why 85 °C matters here.** The obvious filter, "reject exactly 85.000", is
 what our room logger uses. On a hot water cylinder 85 °C is a plausible fault
 condition, and exactly the kind of reading tanktemp exists to catch. The byte
-6 check separates the two cases. **We haven't actually seen a power-on-reset
-scratchpad**: the logger only recorded `t=`. The `0x0C` value comes from the
-datasheet. Before relying on it, verify on the real hardware (power-cycle one
-sensor and capture `w1_slave`). Until then, a safe policy is: retry on 85.000,
-and if it persists, publish it with a "suspect" flag rather than dropping it.
+6 check separates the two cases. **The `0x0C` pattern is confirmed on the
+real hardware** (2026-11-01, `testdata/sysfs/rig-power-on-reset-2026-11-01`).
+One probe's VDD was pulled for about a second, five or six times, during a
+continuous capture. Every read after power returned was
+`50 05 4b 46 7f ff 0c 10 1c : crc=1c YES`, `t=85000`, which is exactly the
+datasheet's power-up scratchpad, and the CRC passes. The probe never left the
+bus, and its next read after that was a normal value. The policy stays: retry
+on 85.000, and if it persists, publish it with a "suspect" flag rather than
+dropping it.
 
 ### The read algorithm (`onewire.SysFS.ReadChecked`)
 
@@ -527,8 +531,8 @@ old logger, before filtering).
 
 - **Anything above 31 °C.** Accuracy, offsets and stability at 50–70 °C are
   unknown, and the datasheet's ±0.5 °C only holds up to 85 °C.
-- **The power-on-reset scratchpad (byte 6 = 0x0C).** It comes from the
-  datasheet; we've never captured one.
+- **The power-on-reset scratchpad (byte 6 = 0x0C)** was verified on
+  2026-11-01 (see [Taking a reading correctly](#taking-a-reading-correctly)).
   On 2026-10-31 a capture of all ten rig sensors
   (`internal/onewire/testdata/sysfs/rig-steady`) confirmed the
   `0x10 − (byte0 & 0x0F)` pattern again. It also showed that **a real reading

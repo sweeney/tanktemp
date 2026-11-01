@@ -1,6 +1,6 @@
 {
   "attempts": 3,
-  "description": "Power-on reset: raw 0x0550 (85 C) with byte 6 = 0x0C (datasheet; not yet captured for real).",
+  "description": "Power-on reset: raw 0x0550 (85 C) with byte 6 = 0x0C (datasheet; captured for real as rig-power-on-reset-2026-11-01, kept as the minimal case).",
   "request": [
     "28-00001171f570",
     "28-000011721aa5",
