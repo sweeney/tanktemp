@@ -8,7 +8,7 @@ set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 SYSFS="$HERE/../internal/onewire/testdata/sysfs"
-WORK=$(mktemp -d)
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/capture-test.XXXXXX") # honours TMPDIR on macOS too
 trap 'rm -rf "$WORK"' EXIT
 STUBS="$WORK/stubs"
 mkdir -p "$STUBS"
@@ -20,8 +20,9 @@ cat >"$STUBS/ssh" <<'EOF'
 [ -z "${FAKE_SSH_FAIL:-}" ] || exit 255
 shift # host
 cmd="$*"
+# Only the capture's own /tmp paths: the fake Pi may itself be under /tmp.
+cmd=${cmd//\/tmp\/tanktemp-capture/$FAKE_PI/tmp/tanktemp-capture}
 cmd=${cmd//\/sys\/bus\/w1\/devices/$FAKE_PI/sys}
-cmd=${cmd//\/tmp\//$FAKE_PI/tmp/}
 echo "ssh: $*" >>"$FAKE_LOG"
 bash -c "$cmd"
 EOF
@@ -29,7 +30,7 @@ cat >"$STUBS/scp" <<'EOF'
 #!/usr/bin/env bash
 [ "$1" = -q ] && shift
 dst=${2#*:}
-dst=${dst//\/tmp\//$FAKE_PI/tmp/}
+dst=${dst//\/tmp\/tanktemp-capture/$FAKE_PI/tmp/tanktemp-capture}
 echo "scp: $*" >>"$FAKE_LOG"
 cp "$1" "$dst"
 EOF
