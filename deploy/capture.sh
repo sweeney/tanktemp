@@ -65,7 +65,9 @@ case "$SCENARIO" in
 esac
 STEPS=${STEPS:-$PLAN_STEPS}
 INTERVAL=${INTERVAL:-$PLAN_INTERVAL}
-[[ "$STEPS" =~ ^[0-9]+$ ]] && [ "$STEPS" -ge 2 ] || die "--steps must be a number, at least 2"
+if ! [[ "$STEPS" =~ ^[0-9]+$ ]] || [ "$STEPS" -lt 2 ]; then
+    die "--steps must be a number, at least 2"
+fi
 [[ "$INTERVAL" =~ ^[0-9]+(ms|s|m)$ ]] || die "--interval must look like 0s, 500ms, 5s or 1m"
 
 if [ -z "$HOST" ]; then
