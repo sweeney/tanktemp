@@ -135,7 +135,7 @@ while [ "$COUNT" -eq 0 ] || [ "$polls" -lt "$COUNT" ]; do
     # Probes still to tell apart: whichever has warmed is in your hand.
     if [ ${#BASE[@]} -gt 0 ]; then
         while read -r rom kind milli; do
-            [ "$kind" = ok ] && [ -n "${BASE[$rom]:-}" ] || continue
+            if [ "$kind" != ok ] || [ -z "${BASE[$rom]:-}" ]; then continue; fi
             rise=$(awk -v a="$milli" -v b="${BASE[$rom]}" 'BEGIN { printf "%.1f", (a - b) / 1000 }')
             if awk -v r="$rise" -v w="$WARM_C" 'BEGIN { exit !(r >= w) }'; then
                 echo "$(now) ↑ $rom is warming (+$rise °C): it's the one in your hand ($(where "$rom"))"
