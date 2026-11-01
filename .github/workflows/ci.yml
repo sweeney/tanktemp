@@ -60,5 +60,7 @@ jobs:
         run: ./deploy_test.sh
       - name: capture tests
         run: ./deploy/capture_test.sh
+      - name: probes tests
+        run: ./deploy/probes_test.sh
       - name: live view tests
         run: ./tools/live_test.sh

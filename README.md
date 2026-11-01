@@ -57,6 +57,25 @@ GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o w1capture ./cmd/w1capture
 # copy to the Pi, then:  ./w1capture -out /tmp/<scenario> [-steps 6 -interval 10s]
 ```
 
+### Fitting probes
+
+`deploy/probes.sh` shows what's on the Pi's buses right now: each probe's
+bus, temperature, and where the config puts it. It's read-only on the Pi.
+
+```sh
+deploy/probes.sh --host user@host            # the list
+deploy/probes.sh --host user@host --watch    # a line as each probe arrives or leaves
+deploy/probes_test.sh                        # the script's tests
+```
+
+To fit probes, disconnect them all, then connect them one or two at a time
+with `--watch` running. Each arrival prints its ROM and temperature. A probe
+appears up to ~10 s after it's connected, when the kernel next searches the
+bus. When two arrive together, hold one in your hand: watch names the one
+that warms by 0.5 °C. Note each probe's tank and height above the base as it
+arrives; the config's `order` follows from the heights. While probes are
+missing, tanktemp keeps running and reports them as `not_present`.
+
 ### Capturing a fault
 
 `deploy/capture.sh` walks you through reproducing a fault on the rig and

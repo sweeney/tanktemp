@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 620" width="800" height="620" font-family="Helvetica, Arial, sans-serif">
+  <rect width="800" height="620" fill="#ffffff"/>
+  <text x="400" y="40" text-anchor="middle" font-size="22" font-weight="bold" fill="#111">Cat5 to DS18B20 wiring (2 sensors per cable)</text>
+  <text x="130" y="95" text-anchor="middle" font-size="13" font-weight="bold" fill="#444">HUB END</text>
+  <text x="380" y="95" text-anchor="middle" font-size="13" font-weight="bold" fill="#444">CAT5 WIRE</text>
+  <text x="680" y="95" text-anchor="middle" font-size="13" font-weight="bold" fill="#444">SENSOR END</text>
+  <rect x="40" y="112" width="180" height="426" rx="8" fill="#f4f4f4" stroke="#111" stroke-width="2"/>
+  <rect x="590" y="132" width="180" height="156" rx="8" fill="#fff7ee" stroke="#111" stroke-width="2"/>
+  <text transform="translate(746,210) rotate(90)" text-anchor="middle" font-size="16" font-weight="bold" fill="#111">SENSOR A</text>
+  <rect x="590" y="292" width="180" height="156" rx="8" fill="#eef6ff" stroke="#111" stroke-width="2"/>
+  <text transform="translate(746,370) rotate(90)" text-anchor="middle" font-size="16" font-weight="bold" fill="#111">SENSOR B</text>
+  <!-- Orange -->
+  <text x="208" y="165" text-anchor="end" font-size="14" font-weight="bold" fill="#111">Data</text>
+  <line x1="220" y1="160" x2="540" y2="160" stroke="#111" stroke-width="16"/>
+  <line x1="220" y1="160" x2="540" y2="160" stroke="#F28C28" stroke-width="12"/>
+  <text x="380" y="145" text-anchor="middle" font-size="13" font-weight="bold" fill="#111">Orange</text>
+  <line x1="540" y1="160" x2="595" y2="160" stroke="#111" stroke-width="10"/>
+  <line x1="540" y1="160" x2="595" y2="160" stroke="#F2C200" stroke-width="7"/>
+  <circle cx="540" cy="160" r="6" fill="#111"/>
+  <text x="604" y="165" font-size="14" font-weight="bold" fill="#111">Yellow (data)</text>
+  <!-- White/orange -->
+  <text x="208" y="215" text-anchor="end" font-size="14" font-weight="bold" fill="#111">GND</text>
+  <line x1="220" y1="210" x2="540" y2="210" stroke="#111" stroke-width="16"/>
+  <line x1="220" y1="210" x2="540" y2="210" stroke="#F28C28" stroke-width="12"/>
+  <line x1="220" y1="210" x2="540" y2="210" stroke="#ffffff" stroke-width="12" stroke-dasharray="14 10"/>
+  <text x="380" y="195" text-anchor="middle" font-size="13" font-weight="bold" fill="#111">White/orange</text>
+  <line x1="540" y1="210" x2="595" y2="210" stroke="#111" stroke-width="7"/>
+  <circle cx="540" cy="210" r="6" fill="#111"/>
+  <text x="604" y="215" font-size="14" font-weight="bold" fill="#111">Black (GND)</text>
+  <!-- Brown -->
+  <text x="208" y="265" text-anchor="end" font-size="14" font-weight="bold" fill="#111">3.3V</text>
+  <line x1="220" y1="260" x2="540" y2="260" stroke="#111" stroke-width="16"/>
+  <line x1="220" y1="260" x2="540" y2="260" stroke="#8B5A2B" stroke-width="12"/>
+  <text x="380" y="245" text-anchor="middle" font-size="13" font-weight="bold" fill="#111">Brown</text>
+  <line x1="540" y1="260" x2="595" y2="260" stroke="#111" stroke-width="10"/>
+  <line x1="540" y1="260" x2="595" y2="260" stroke="#D62828" stroke-width="7"/>
+  <circle cx="540" cy="260" r="6" fill="#111"/>
+  <text x="604" y="265" font-size="14" font-weight="bold" fill="#111">Red (+V)</text>
+  <!-- Green -->
+  <text x="208" y="325" text-anchor="end" font-size="14" font-weight="bold" fill="#111">Data</text>
+  <line x1="220" y1="320" x2="540" y2="320" stroke="#111" stroke-width="16"/>
+  <line x1="220" y1="320" x2="540" y2="320" stroke="#2E9E44" stroke-width="12"/>
+  <text x="380" y="305" text-anchor="middle" font-size="13" font-weight="bold" fill="#111">Green</text>
+  <line x1="540" y1="320" x2="595" y2="320" stroke="#111" stroke-width="10"/>
+  <line x1="540" y1="320" x2="595" y2="320" stroke="#F2C200" stroke-width="7"/>
+  <circle cx="540" cy="320" r="6" fill="#111"/>
+  <text x="604" y="325" font-size="14" font-weight="bold" fill="#111">Yellow (data)</text>
+  <!-- White/green -->
+  <text x="208" y="375" text-anchor="end" font-size="14" font-weight="bold" fill="#111">GND</text>
+  <line x1="220" y1="370" x2="540" y2="370" stroke="#111" stroke-width="16"/>
+  <line x1="220" y1="370" x2="540" y2="370" stroke="#2E9E44" stroke-width="12"/>
+  <line x1="220" y1="370" x2="540" y2="370" stroke="#ffffff" stroke-width="12" stroke-dasharray="14 10"/>
+  <text x="380" y="355" text-anchor="middle" font-size="13" font-weight="bold" fill="#111">White/green</text>
+  <line x1="540" y1="370" x2="595" y2="370" stroke="#111" stroke-width="7"/>
+  <circle cx="540" cy="370" r="6" fill="#111"/>
+  <text x="604" y="375" font-size="14" font-weight="bold" fill="#111">Black (GND)</text>
+  <!-- Blue -->
+  <text x="208" y="425" text-anchor="end" font-size="14" font-weight="bold" fill="#111">3.3V</text>
+  <line x1="220" y1="420" x2="540" y2="420" stroke="#111" stroke-width="16"/>
+  <line x1="220" y1="420" x2="540" y2="420" stroke="#2F6FD6" stroke-width="12"/>
+  <text x="380" y="405" text-anchor="middle" font-size="13" font-weight="bold" fill="#111">Blue</text>
+  <line x1="540" y1="420" x2="595" y2="420" stroke="#111" stroke-width="10"/>
+  <line x1="540" y1="420" x2="595" y2="420" stroke="#D62828" stroke-width="7"/>
+  <circle cx="540" cy="420" r="6" fill="#111"/>
+  <text x="604" y="425" font-size="14" font-weight="bold" fill="#111">Red (+V)</text>
+  <!-- White/brown -->
+  <text x="208" y="485" text-anchor="end" font-size="14" font-weight="bold" fill="#111">GND</text>
+  <line x1="220" y1="480" x2="540" y2="480" stroke="#111" stroke-width="16"/>
+  <line x1="220" y1="480" x2="540" y2="480" stroke="#8B5A2B" stroke-width="12"/>
+  <line x1="220" y1="480" x2="540" y2="480" stroke="#ffffff" stroke-width="12" stroke-dasharray="14 10"/>
+  <text x="380" y="465" text-anchor="middle" font-size="13" font-weight="bold" fill="#111">White/brown</text>
+  <rect x="540" y="471" width="10" height="18" fill="#111"/>
+  <text x="590" y="485" font-size="12" font-style="italic" fill="#555">trim &amp; insulate</text>
+  <!-- White/blue -->
+  <text x="208" y="525" text-anchor="end" font-size="14" font-weight="bold" fill="#111">GND</text>
+  <line x1="220" y1="520" x2="540" y2="520" stroke="#111" stroke-width="16"/>
+  <line x1="220" y1="520" x2="540" y2="520" stroke="#2F6FD6" stroke-width="12"/>
+  <line x1="220" y1="520" x2="540" y2="520" stroke="#ffffff" stroke-width="12" stroke-dasharray="14 10"/>
+  <text x="380" y="505" text-anchor="middle" font-size="13" font-weight="bold" fill="#111">White/blue</text>
+  <rect x="540" y="511" width="10" height="18" fill="#111"/>
+  <text x="590" y="525" font-size="12" font-style="italic" fill="#555">trim &amp; insulate</text>
+  <text x="400" y="575" text-anchor="middle" font-size="15" font-weight="bold" fill="#111">Warm colours (orange, brown) = Sensor A · Cool colours (green, blue) = Sensor B</text>
+  <text x="400" y="600" text-anchor="middle" font-size="14" fill="#111">All four whites go to GND at the hub</text>
+</svg>
