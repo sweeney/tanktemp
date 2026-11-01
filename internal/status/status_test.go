@@ -101,13 +101,17 @@ func TestNotStaleJustInside(t *testing.T) {
 	}
 }
 
-func TestSuspectIsNotDegraded(t *testing.T) {
+// A suspect 85 °C is published (it's probably real) but degrades health, so
+// someone looks at it (decided 2026-11-01, GUESSES G16).
+func TestSuspectDegradesHealth(t *testing.T) {
 	sw := okSweep(start)
 	sw.Tanks[0].Sensors[0].Suspect = reading.Suspect85
 	tr := newTracker(true)
 	tr.RecordSweep(sw)
-	if h := tr.Snapshot().Health(start); h.Status != StatusOK {
-		t.Errorf("a published, flagged value is not a fault: %+v", h)
+	h := tr.Snapshot().Health(start)
+	if h.Status != StatusDegraded || len(h.Detail) != 1 || !strings.Contains(h.Detail[0], "85c_unverified") ||
+		!strings.Contains(h.Detail[0], sw.Tanks[0].Sensors[0].Position) {
+		t.Errorf("health = %+v", h)
 	}
 }
 

@@ -120,8 +120,8 @@ type Health struct {
 
 // Health decides the status at now. starting: no sweep yet. degraded: MQTT
 // down, any sensor failing, the last sweep stale, the clock not synced, a
-// failed discovery, or any startup problem. A suspect (flagged, published)
-// value is not a fault.
+// failed discovery, any startup problem, or a suspect 85 °C value (which is
+// still published: it's probably real, but someone should look).
 func (s Snapshot) Health(now time.Time) Health {
 	var h Health
 	if !s.MQTTConnected {
@@ -148,6 +148,8 @@ func (s Snapshot) Health(now time.Time) Health {
 		for _, x := range t.Sensors {
 			if x.Code != reading.OK {
 				h.Detail = append(h.Detail, fmt.Sprintf("%s %s (%s): %s", t.DeviceID, x.Position, x.ROM, x.Code))
+			} else if x.Suspect != "" {
+				h.Detail = append(h.Detail, fmt.Sprintf("%s %s (%s): published but %s", t.DeviceID, x.Position, x.ROM, x.Suspect))
 			}
 		}
 	}
