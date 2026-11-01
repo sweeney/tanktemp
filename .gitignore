@@ -7,3 +7,4 @@
 /deploy/config.local.yaml
 /deploy/host
 /bin/
+/tools/guessreview/answers.json

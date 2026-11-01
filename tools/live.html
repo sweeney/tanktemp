@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>tanktemp Live</title>
+<!--
+  A live view of tanktemp's MQTT traffic, for a browser on the same network
+  as the broker. It connects over MQTT-over-WebSockets, subscribes to exactly
+  what docs/STATEHOUSE.md says an adapter should ({prefix}/+/state and
+  {prefix}/status), and draws each cylinder, the status topic and the flow of
+  messages. With no broker it can replay a made-up demo.
+
+  Open it with ./tools/live.sh, which fills in the broker from
+  deploy/config.local.yaml, or open the file and type a ws:// URL.
+  Parameters (in the URL hash): ws=ws://host:9001  prefix=test/energy/hot_water
+  demo=1
+-->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Public+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.10.1/mqtt.min.js"></script>
+<style>
+/* Layout: a control strip, then cylinders side by side with the status card, then a full-width message-flow timeline and the raw log. */
+:root {
+  --bg: #eef1f3; --panel: #ffffff; --ink: #172026; --muted: #5a6872; --line: #d6dde2; --grid: #e7ecef;
+  --copper: #b2602a; --ok: #2f7d5b; --warn: #b7791f; --bad: #c0392b; --info: #2b6cb0; --off: #6b7280;
+  --glass: #f7f9fa;
+  --f-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", sans-serif;
+  --f-body: "Public Sans", "Helvetica Neue", Arial, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root {
+  --bg: #0f1418; --panel: #172026; --ink: #e4eaee; --muted: #8e9ca6; --line: #2a353d; --grid: #1f292f;
+  --copper: #e08a4f; --ok: #5cc196; --warn: #e2b04a; --bad: #ef6f61; --info: #6fb0ec; --off: #8b939c;
+  --glass: #1c262d; color-scheme: dark } }
+* { box-sizing: border-box }
+[hidden] { display: none !important }
+html, body { margin: 0 }
+body { background: var(--bg); color: var(--ink); font: 14px/1.5 var(--f-body); padding: 20px max(16px, env(safe-area-inset-left, 0px)) 40px }
+.wrap { max-width: 1280px; margin: 0 auto; display: grid; gap: 16px }
+header { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; justify-content: space-between }
+h1 { font: 700 26px/1.1 var(--f-display); margin: 0; letter-spacing: -0.01em }
+h1 small { font: 500 12px var(--f-mono); color: var(--muted); letter-spacing: .05em; text-transform: uppercase; margin-left: 8px }
+form.conn { display: flex; flex-wrap: wrap; gap: 8px; align-items: center }
+input[type=text] { font: 13px var(--f-mono); color: var(--ink); background: var(--panel); border: 1.5px solid var(--line); border-radius: 7px; padding: 6px 9px; min-width: 0 }
+#ws { width: 230px } #prefix { width: 210px }
+button { font: 600 13px var(--f-body); border: 1.5px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 7px; padding: 6px 12px; cursor: pointer }
+button.primary { background: var(--copper); border-color: var(--copper); color: #fff }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--info); outline-offset: 2px }
+.pill { display: inline-flex; align-items: center; gap: 6px; font: 600 12px var(--f-mono); letter-spacing: .04em; text-transform: uppercase; padding: 4px 10px; border-radius: 999px; border: 1.5px solid currentColor }
+.pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor }
+.pill.ok { color: var(--ok) } .pill.warn { color: var(--warn) } .pill.bad { color: var(--bad) } .pill.off { color: var(--off) } .pill.info { color: var(--info) }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; min-width: 0 }
+.label { font: 600 11px var(--f-body); letter-spacing: .08em; text-transform: uppercase; color: var(--muted) }
+.top { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start }
+#tanks { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px }
+.tank h2 { font: 700 18px/1.2 var(--f-display); margin: 0 }
+.tank .meta { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; font: 12px var(--f-mono); color: var(--muted); margin: 2px 0 8px }
+.tank svg { display: block; width: 100%; height: auto; max-width: 100% }
+.tank .flags { display: flex; gap: 6px; flex-wrap: wrap; min-height: 22px }
+.chip { font: 500 11px var(--f-mono); padding: 1px 7px; border-radius: 4px; border: 1px solid var(--line); color: var(--muted) }
+.chip.bad { color: var(--bad); border-color: var(--bad) } .chip.warn { color: var(--warn); border-color: var(--warn) }
+.empty { color: var(--muted); padding: 28px 8px; text-align: center; border: 1.5px dashed var(--line); border-radius: 12px }
+.status dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 6px 12px; margin: 12px 0 0; font-variant-numeric: tabular-nums }
+.status dt { color: var(--muted); font-size: 12.5px }
+.status dd { margin: 0; font: 13px var(--f-mono); overflow-wrap: anywhere }
+.status .big { font: 700 22px/1 var(--f-display); margin-top: 10px }
+.problems { margin: 12px 0 0; padding: 0; list-style: none; display: grid; gap: 6px }
+.problems li { font-size: 12.5px; border-left: 3px solid var(--warn); padding-left: 8px }
+.problems code { font: 11.5px var(--f-mono); color: var(--muted) }
+.demo-ctl { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px }
+.flow-head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; margin-bottom: 8px }
+.legend { display: flex; flex-wrap: wrap; gap: 12px; font: 12px var(--f-body); color: var(--muted) }
+.legend span::before { content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--c); margin-right: 5px; vertical-align: -1px }
+.legend span.hollow::before { background: transparent; border: 1.5px solid var(--muted) }
+#flow { width: 100%; display: block; height: 0 }
+.log { max-height: 340px; overflow: auto; border-top: 1px solid var(--line); margin-top: 8px }
+.row { display: grid; grid-template-columns: 74px 20px minmax(0, 220px) minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 5px 2px; border-bottom: 1px solid var(--grid); cursor: pointer; font: 12.5px var(--f-mono) }
+.row:hover { background: var(--glass) }
+.row .t { color: var(--muted); font-variant-numeric: tabular-nums }
+.row .k { width: 10px; height: 10px; border-radius: 50%; background: var(--c); align-self: center }
+.row .k.ret { background: transparent; border: 2px solid var(--c) }
+.row .tp { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted) }
+.row .s { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.row pre { grid-column: 1 / -1; margin: 4px 0 6px; padding: 8px 10px; background: var(--glass); border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.45 var(--f-mono) }
+.foot { color: var(--muted); font-size: 12px }
+@media (max-width: 900px) { .top { grid-template-columns: minmax(0,1fr) } }
+@media (max-width: 560px) { .row { grid-template-columns: 64px 14px minmax(0,1fr) } .row .tp { display: none } #ws, #prefix { width: 100% } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>tanktemp live<small id="mode">idle</small></h1>
+    <form class="conn" id="conn">
+      <label class="label" for="ws">Broker</label>
+      <input type="text" id="ws" placeholder="ws://broker:9001" spellcheck="false" autocomplete="off">
+      <label class="label" for="prefix">Prefix</label>
+      <input type="text" id="prefix" value="test/energy/hot_water" spellcheck="false" autocomplete="off">
+      <button class="primary" id="go" type="submit">Connect</button>
+      <button id="demoBtn" type="button">Demo</button>
+      <span class="pill off" id="link">offline</span>
+    </form>
+  </header>
+
+  <div class="top">
+    <div id="tanks"><div class="empty" id="tanksEmpty">No cylinders yet. Their retained state arrives the moment you connect; or press <b>Demo</b>.</div></div>
+    <aside class="panel status" id="status">
+      <div class="label">Publisher · <span id="statusTopic">status</span></div>
+      <div class="big" id="sEvent">—</div>
+      <dl>
+        <dt>Online</dt><dd id="sOnline">—</dd>
+        <dt>Version</dt><dd id="sVersion">—</dd>
+        <dt>Ready</dt><dd id="sReady">—</dd>
+        <dt>Uptime</dt><dd id="sUptime">—</dd>
+        <dt>Sensors</dt><dd id="sSensors">—</dd>
+        <dt>Unexpected</dt><dd id="sUnexpected">—</dd>
+        <dt>Stamped</dt><dd id="sTime">—</dd>
+        <dt>Received</dt><dd id="sAge">—</dd>
+      </dl>
+      <ul class="problems" id="sProblems"></ul>
+      <div class="demo-ctl" id="demoCtl" hidden>
+        <button type="button" id="dFault">Inject a fault</button>
+        <button type="button" id="dLwt">Kill it (LWT)</button>
+        <button type="button" id="dRestart">Restart</button>
+      </div>
+    </aside>
+  </div>
+
+  <section class="panel">
+    <div class="flow-head">
+      <div class="label">Message flow · last <span id="win">5</span> min</div>
+      <div class="legend">
+        <span style="--c:var(--ok)">state, all ok</span>
+        <span style="--c:var(--warn)">state, a probe failing</span>
+        <span style="--c:var(--info)">STARTUP / HEARTBEAT</span>
+        <span style="--c:var(--off)">SHUTDOWN</span>
+        <span style="--c:var(--bad)">LWT</span>
+        <span class="hollow">retained replay</span>
+      </div>
+    </div>
+    <canvas id="flow" aria-label="Messages over time, one lane per topic"></canvas>
+    <div class="log" id="log" aria-live="off"></div>
+  </section>
+  <p class="foot">Subscribes to <code>{prefix}/+/state</code> and <code>{prefix}/status</code>, read-only. The contract is <code>docs/WIRE.md</code>. Nothing is published.</p>
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const WINDOW_MS = 5 * 60 * 1000;
+
+// ---------------------------------------------------------------- state
+const tanks = new Map();   // device_id -> {msg, at, history: Map(position -> [{t, v}])}
+const events = [];         // {at, topic, kind, retained, qos, payload, summary}
+let status = null, statusAt = 0, client = null, demo = null, prefix = "";
+
+// ---------------------------------------------------------------- settings
+function params() {
+  const p = new URLSearchParams(location.hash.slice(1));
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem("tanktemp-live") || "{}") } catch {}
+  return { ws: p.get("ws") || saved.ws || "", prefix: p.get("prefix") || saved.prefix || "test/energy/hot_water", demo: p.get("demo") === "1" };
+}
+function remember() { try { localStorage.setItem("tanktemp-live", JSON.stringify({ws: $("ws").value, prefix: $("prefix").value})) } catch {} }
+
+// ---------------------------------------------------------------- ingest
+function kindOf(topic, m) {
+  if (topic.endsWith("/status")) return m && m.event ? m.event : "STATUS";
+  if (m && Array.isArray(m.sensors)) return m.sensors.some(s => s.error) ? "STATE_FAIL" : "STATE_OK";
+  return "OTHER";
+}
+const colour = k => ({STATE_OK: css("--ok"), STATE_FAIL: css("--warn"), STARTUP: css("--info"), HEARTBEAT: css("--info"),
+                      SHUTDOWN: css("--off"), LWT: css("--bad")}[k] || css("--muted"));
+
+function ingest(topic, text, retained, qos) {
+  let m = null;
+  try { m = JSON.parse(text) } catch {}
+  const at = Date.now(), kind = kindOf(topic, m);
+  let summary = text.slice(0, 160);
+  if (kind.startsWith("STATE") && m) {
+    const ok = m.sensors.filter(s => s.temp_c != null).length;
+    summary = `${m.device_id}: ${ok}/${m.sensors.length} ok · ${m.sensors.map(s => s.temp_c == null ? s.position + " " + s.error : s.position + " " + s.temp_c.toFixed(2)).join(" · ")}`;
+    onState(m, at, retained);
+  } else if (topic.endsWith("/status") && m) {
+    summary = `${m.event}${m.online === false ? " (offline)" : ""}${m.reason ? " " + m.reason : ""}${m.version ? " · " + m.version : ""}`;
+    status = m; statusAt = at; renderStatus();
+  }
+  events.push({at, topic, kind, retained, qos, text, summary});
+  while (events.length > 2000) events.shift();
+  addLogRow(events[events.length - 1]);
+}
+
+function onState(m, at, retained) {
+  let t = tanks.get(m.device_id);
+  if (!t) { t = {history: new Map()}; tanks.set(m.device_id, t); }
+  t.msg = m; t.at = at; t.retained = retained;
+  for (const s of m.sensors) {
+    const h = t.history.get(s.position) || [];
+    const last = h[h.length - 1];
+    if (!last || last.ts !== m.timestamp) h.push({ts: m.timestamp, at, v: s.temp_c});
+    while (h.length > 120) h.shift();
+    t.history.set(s.position, h);
+  }
+  renderTanks();
+}
+
+// ---------------------------------------------------------------- cylinders
+// Temperature to colour: cold steel blue → warm amber → copper red.
+function tempColour(c) {
+  if (c == null) return null;
+  const stops = [[5, [70, 120, 170]], [25, [90, 160, 170]], [40, [214, 170, 70]], [55, [214, 110, 50]], [70, [180, 50, 40]]];
+  if (c <= stops[0][0]) return `rgb(${stops[0][1]})`;
+  for (let i = 1; i < stops.length; i++) if (c <= stops[i][0]) {
+    const [a, ca] = stops[i-1], [b, cb] = stops[i], f = (c - a) / (b - a);
+    return `rgb(${ca.map((x, j) => Math.round(x + (cb[j] - x) * f)).join(",")})`;
+  }
+  return `rgb(${stops[stops.length-1][1]})`;
+}
+
+function cylinderSVG(id, m) {
+  const W = 360, H = 300, cx = 56, cw = 84, top = 26, bot = H - 26, dome = 16;
+  const ss = [...m.sensors].sort((a, b) => a.order - b.order);
+  const heights = ss.map(s => s.height_mm).filter(h => h != null);
+  const maxH = heights.length ? Math.max(...heights) * 1.08 : null;
+  // y for each probe: from height_mm if every probe has one, else spread by order.
+  const useHeight = heights.length === ss.length && maxH > 0;
+  const ys = ss.map((s, i) => useHeight ? bot - dome - (s.height_mm / maxH) * (bot - top - 2 * dome)
+                                        : top + dome + (i + 0.5) * (bot - top - 2 * dome) / ss.length);
+  const gid = "g-" + id.replace(/[^a-z0-9_-]/gi, "");
+  const known = ss.map((s, i) => ({y: ys[i], c: tempColour(s.temp_c)})).filter(p => p.c);
+  const stops = known.length ? known.map(p => `<stop offset="${((p.y - top) / (bot - top) * 100).toFixed(1)}%" stop-color="${p.c}"/>`).join("")
+                             : `<stop offset="0" stop-color="${css("--grid")}"/>`;
+  const ink = css("--ink"), muted = css("--muted"), line = css("--line"), bad = css("--bad"), warn = css("--warn");
+  let probes = "";
+  ss.forEach((s, i) => {
+    const y = ys[i], failing = s.temp_c == null;
+    const val = failing ? (s.error || "null") : `${s.temp_c.toFixed(2)} °C`;
+    probes += `<line x1="${cx + cw}" y1="${y}" x2="${cx + cw + 22}" y2="${y}" stroke="${line}" stroke-width="1.5"/>
+      <circle cx="${cx + cw}" cy="${y}" r="5" fill="${failing ? css("--panel") : tempColour(s.temp_c)}" stroke="${failing ? bad : ink}" stroke-width="1.5"/>
+      <text x="${cx + cw + 28}" y="${y - 3}" font-family="var(--f-mono)" font-size="14" font-weight="500" fill="${failing ? bad : ink}">${esc(val)}${s.suspect ? " ⚑" : ""}</text>
+      <text x="${cx + cw + 28}" y="${y + 13}" font-family="var(--f-body)" font-size="11" fill="${muted}">${esc(s.position)}${s.height_mm != null ? " · " + s.height_mm + " mm" : ""}${s.offset_c ? " · " + (s.offset_c > 0 ? "+" : "") + s.offset_c : ""}</text>
+      ${sparkPath(id, s.position, W - 58, y - 12, 52, 20, s.suspect ? warn : muted)}`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(id)} cylinder with ${ss.length} probes">
+    <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">${stops}</linearGradient></defs>
+    <path d="M${cx} ${top + dome} Q${cx} ${top} ${cx + cw / 2} ${top} Q${cx + cw} ${top} ${cx + cw} ${top + dome} L${cx + cw} ${bot - dome} Q${cx + cw} ${bot} ${cx + cw / 2} ${bot} Q${cx} ${bot} ${cx} ${bot - dome} Z"
+      fill="url(#${gid})" stroke="${ink}" stroke-width="2" opacity="${known.length ? 1 : .5}"/>
+    <line x1="${cx + 10}" y1="${top + dome}" x2="${cx + 10}" y2="${bot - dome}" stroke="#fff" stroke-opacity=".35" stroke-width="4" stroke-linecap="round"/>
+    <text x="${cx - 8}" y="${top + 6}" text-anchor="end" font-family="var(--f-body)" font-size="11" fill="${muted}">top</text>
+    <text x="${cx - 8}" y="${bot}" text-anchor="end" font-family="var(--f-body)" font-size="11" fill="${muted}">base</text>
+    ${probes}</svg>`;
+}
+
+function sparkPath(id, pos, x, y, w, h, stroke) {
+  const pts = (tanks.get(id)?.history.get(pos) || []).filter(p => p.v != null);
+  if (pts.length < 2) return "";
+  const vs = pts.map(p => p.v), lo = Math.min(...vs), hi = Math.max(...vs), span = Math.max(hi - lo, 0.25);
+  const d = pts.map((p, i) => `${i ? "L" : "M"}${(x + i / (pts.length - 1) * w).toFixed(1)} ${(y + h - (p.v - lo) / span * h).toFixed(1)}`).join(" ");
+  const last = pts[pts.length - 1];
+  return `<path d="${d}" fill="none" stroke="${stroke}" stroke-width="1.2"/><circle cx="${x + w}" cy="${(y + h - (last.v - lo) / span * h).toFixed(1)}" r="2" fill="${stroke}"/>`;
+}
+
+function renderTanks() {
+  $("tanksEmpty").hidden = tanks.size > 0;
+  for (const [id, t] of tanks) {
+    let el = document.getElementById("tank-" + id);
+    if (!el) {
+      el = document.createElement("div");
+      el.className = "panel tank"; el.id = "tank-" + id;
+      $("tanks").appendChild(el);
+    }
+    const m = t.msg, ok = m.sensors.filter(s => s.temp_c != null).length;
+    const flags = [];
+    if (m.clock_synced === false) flags.push(`<span class="chip warn">clock not synced</span>`);
+    for (const s of m.sensors) if (s.error) flags.push(`<span class="chip bad">${esc(s.position)}: ${esc(s.error)}</span>`);
+    for (const s of m.sensors) if (s.suspect) flags.push(`<span class="chip warn">${esc(s.position)}: ${esc(s.suspect)}</span>`);
+    if (t.retained) flags.push(`<span class="chip">retained replay</span>`);
+    el.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <h2>${esc(id)}</h2><span class="pill ${ok === m.sensors.length ? "ok" : ok ? "warn" : "bad"}">${ok}/${m.sensors.length}</span></div>
+      <div class="meta"><span>${esc(m.timestamp)}</span><span data-age="${t.at}"></span><span>sweep ${m.sweep_ms} ms</span></div>
+      ${cylinderSVG(id, m)}
+      <div class="flags">${flags.join("")}</div>`;
+  }
+  tickAges();
+}
+
+// ---------------------------------------------------------------- status
+function renderStatus() {
+  const s = status; if (!s) return;
+  $("sEvent").textContent = s.event || "—";
+  $("sEvent").style.color = colour(s.event);
+  $("sOnline").textContent = String(s.online);
+  $("sVersion").textContent = s.version ?? "—";
+  $("sReady").textContent = s.ready == null ? "—" : String(s.ready);
+  $("sUptime").textContent = s.uptime_s == null ? "—" : fmtDur(s.uptime_s);
+  $("sSensors").textContent = s.sensors_ok == null ? "—" : `${s.sensors_ok} ok · ${s.sensors_failed} failed`;
+  $("sUnexpected").textContent = s.unexpected == null ? "—" : (s.unexpected.length ? s.unexpected.join(", ") : "none");
+  $("sTime").textContent = s.timestamp ?? "no timestamp (a last will)";
+  $("sProblems").innerHTML = (s.startup_problems || []).map(p => `<li>${esc(p.message)} <code>${esc(p.code)}${p.rom ? " · " + esc(p.rom) : ""}</code></li>`).join("");
+  tickAges();
+}
+function fmtDur(s) { s = Math.round(s); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+  return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : m ? `${m}m ${s % 60}s` : `${s}s`; }
+function tickAges() {
+  const now = Date.now();
+  if (statusAt) $("sAge").textContent = fmtDur((now - statusAt) / 1000) + " ago";
+  document.querySelectorAll("[data-age]").forEach(el => {
+    const age = (now - +el.dataset.age) / 1000;
+    el.textContent = `received ${fmtDur(age)} ago`;
+    el.style.color = age > 90 ? css("--bad") : "";  // STATEHOUSE.md: stale after 3 sweeps
+  });
+}
+
+// ---------------------------------------------------------------- log
+function addLogRow(e) {
+  const row = document.createElement("div");
+  row.className = "row";
+  row.style.setProperty("--c", colour(e.kind));
+  row.innerHTML = `<span class="t">${new Date(e.at).toLocaleTimeString([], {hour12: false})}</span><span class="k ${e.retained ? "ret" : ""}" title="${e.retained ? "retained" : "live"} · QoS ${e.qos}"></span>
+    <span class="tp">${esc(e.topic)}</span><span class="s">${esc(e.summary)}</span>`;
+  row.addEventListener("click", () => {
+    const pre = row.querySelector("pre");
+    if (pre) { pre.remove(); return; }
+    const p = document.createElement("pre");
+    try { p.textContent = `${e.topic}  ·  ${e.retained ? "retained" : "live"}  ·  QoS ${e.qos}\n\n` + JSON.stringify(JSON.parse(e.text), null, 2) } catch { p.textContent = e.text }
+    row.appendChild(p);
+  });
+  $("log").prepend(row);
+  while ($("log").children.length > 300) $("log").lastChild.remove();
+}
+
+// ---------------------------------------------------------------- flow timeline
+const flow = $("flow"), fctx = flow.getContext("2d");
+function lanes() {
+  const ts = [...new Set(events.map(e => e.topic))];
+  ts.sort((a, b) => (a.endsWith("/status") ? -1 : b.endsWith("/status") ? 1 : a.localeCompare(b)));
+  return ts.length ? ts : [(prefix || "…") + "/status"];
+}
+function drawFlow() {
+  const ls = lanes(), laneH = 30, padL = Math.min(240, flow.clientWidth * 0.38), padT = 8, padB = 22;
+  const W = flow.clientWidth, H = padT + ls.length * laneH + padB, dpr = window.devicePixelRatio || 1;
+  if (flow.style.height !== H + "px") flow.style.height = H + "px";
+  if (flow.width !== Math.round(W * dpr) || flow.height !== Math.round(H * dpr)) { flow.width = Math.round(W * dpr); flow.height = Math.round(H * dpr); }
+  fctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  fctx.clearRect(0, 0, W, H);
+  const now = Date.now(), x = t => padL + (1 - (now - t) / WINDOW_MS) * (W - padL - 8);
+  fctx.font = `11px ${css("--f-mono")}`;
+  // minute grid
+  fctx.strokeStyle = css("--grid"); fctx.fillStyle = css("--muted"); fctx.lineWidth = 1;
+  for (let m = 0; m <= 5; m++) {
+    const gx = x(now - m * 60000);
+    fctx.beginPath(); fctx.moveTo(gx, padT); fctx.lineTo(gx, H - padB + 4); fctx.stroke();
+    fctx.textAlign = "center"; fctx.fillText(m ? `−${m}m` : "now", gx, H - 6);
+  }
+  ls.forEach((topic, i) => {
+    const y = padT + i * laneH + laneH / 2;
+    fctx.strokeStyle = css("--line"); fctx.beginPath(); fctx.moveTo(padL, y); fctx.lineTo(W - 8, y); fctx.stroke();
+    fctx.fillStyle = css("--muted"); fctx.textAlign = "right";
+    const short = prefix && topic.startsWith(prefix + "/") ? "…/" + topic.slice(prefix.length + 1) : topic;
+    fctx.fillText(short.length > 34 ? "…" + short.slice(-33) : short, padL - 10, y + 4);
+  });
+  for (const e of events) {
+    if (now - e.at > WINDOW_MS) continue;
+    const i = ls.indexOf(e.topic); if (i < 0) continue;
+    const y = padT + i * laneH + laneH / 2, ex = x(e.at), age = now - e.at;
+    const r = 5 + (age < 1200 ? (1 - age / 1200) * 5 : 0);  // a fresh message lands with a pulse
+    fctx.beginPath(); fctx.arc(ex, y, r, 0, Math.PI * 2);
+    if (e.retained) { fctx.lineWidth = 2; fctx.strokeStyle = colour(e.kind); fctx.fillStyle = css("--panel"); fctx.fill(); fctx.stroke(); }
+    else { fctx.fillStyle = colour(e.kind); fctx.fill(); }
+  }
+}
+const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+function loop() { drawFlow(); if (!reduced) requestAnimationFrame(loop); }
+if (reduced) setInterval(drawFlow, 1000);
+loop();
+setInterval(tickAges, 1000);
+addEventListener("resize", drawFlow);
+
+// ---------------------------------------------------------------- MQTT
+function setLink(cls, text) { $("link").className = "pill " + cls; $("link").textContent = text; }
+function clearView() {
+  tanks.clear(); events.length = 0; status = null; statusAt = 0;
+  document.querySelectorAll(".tank").forEach(el => el.remove());
+  $("log").innerHTML = ""; $("tanksEmpty").hidden = false;
+  for (const id of ["sEvent","sOnline","sVersion","sReady","sUptime","sSensors","sUnexpected","sTime","sAge"]) $(id).textContent = "—";
+  $("sEvent").style.color = ""; $("sProblems").innerHTML = "";
+}
+function disconnect() {
+  if (client) { client.end(true); client = null; }
+  stopDemo();
+  setLink("off", "offline"); $("go").textContent = "Connect"; $("mode").textContent = "idle";
+}
+function connect() {
+  disconnect(); clearView();
+  const url = $("ws").value.trim(); prefix = $("prefix").value.trim().replace(/\/+$/, "");
+  $("statusTopic").textContent = prefix + "/status";
+  if (!/^wss?:\/\//.test(url)) { setLink("bad", "need ws:// URL"); $("ws").focus(); return; }
+  if (typeof mqtt === "undefined") { setLink("bad", "mqtt.js didn't load"); return; }
+  remember();
+  setLink("warn", "connecting");
+  $("mode").textContent = "live"; $("go").textContent = "Disconnect";
+  client = mqtt.connect(url, {clientId: "tanktemp-live-" + Math.random().toString(16).slice(2, 8), clean: true, reconnectPeriod: 3000, connectTimeout: 8000});
+  client.on("connect", () => {
+    setLink("ok", "connected");
+    client.subscribe([prefix + "/+/state", prefix + "/status"], {qos: 1}, err => { if (err) setLink("bad", "subscribe failed"); });
+  });
+  client.on("reconnect", () => setLink("warn", "reconnecting"));
+  client.on("offline", () => setLink("bad", "broker unreachable"));
+  client.on("error", e => setLink("bad", (e && e.message || "error").slice(0, 40)));
+  client.on("message", (topic, payload, packet) => ingest(topic, new TextDecoder().decode(payload), !!packet.retain, packet.qos));
+}
+
+// ---------------------------------------------------------------- demo
+// A made-up cylinder pair, so the page shows what it does with no broker.
+// Times are compressed: a sweep every 3 s, a heartbeat every 45 s.
+function startDemo() {
+  disconnect(); clearView();
+  prefix = "demo/energy/hot_water"; $("statusTopic").textContent = prefix + "/status";
+  $("mode").textContent = "demo · made-up data"; setLink("info", "demo"); $("demoCtl").hidden = false;
+  const D = {
+    up: 0, alive: true, fault: 0, version: "demo123",
+    tanks: [
+      {id: "hot-water-cylinder", probes: [["top", 1480, 60.5, -0.19], ["upper", 1100, 57.8, 0], ["middle", 750, 49.1, 0.05], ["lower", 400, 31.0, 0], ["bottom", 100, 17.4, 0]]},
+      {id: "thermal-store", probes: [["top", 1700, 71.2, 0], ["middle", 900, 55.3, 0], ["bottom", 150, 38.9, 0]]},
+    ],
+  };
+  const pub = (t, o, ret = true, qos = 0) => ingest(prefix + "/" + t, JSON.stringify(o), ret, qos);
+  const stamp = () => new Date().toISOString().replace(/\.\d+Z$/, "Z");
+  const statusMsg = (event, extra = {}) => ({online: event !== "SHUTDOWN", event, timestamp: stamp(), version: D.version, ready: event !== "STARTUP",
+    uptime_s: D.up, tanks: D.tanks.map(t => t.id), sensors_ok: event === "STARTUP" ? null : D.okCount ?? 8, sensors_failed: event === "STARTUP" ? null : D.failCount ?? 0,
+    unexpected: event === "STARTUP" ? null : [], startup_problems: [], ...extra});
+  // A retained replay first, as a fresh subscriber would see.
+  pub("status", statusMsg("HEARTBEAT", {uptime_s: 86400}), true, 1);
+  const sweep = (retained) => {
+    let ok = 0, fail = 0;
+    for (const t of D.tanks) {
+      const sensors = t.probes.map(([pos, h, base, off], i) => {
+        base += (Math.random() - 0.52) * 0.12; t.probes[i][2] = base;  // slow drift, a little draw-off
+        let raw = Math.round(base * 16) / 16, error = null, attempts = 1;
+        if (D.fault > 0 && t.id === "hot-water-cylinder" && pos === "middle") { error = D.fault > 2 ? "crc" : "not_present"; attempts = error === "crc" ? 3 : 1; }
+        error ? fail++ : ok++;
+        return {position: pos, order: i + 1, height_mm: h, rom: "28-00000000" + (0x1000 + i + t.id.length * 16).toString(16).padStart(4, "0"),
+          temp_c: error ? null : Math.round((raw + off) * 1e4) / 1e4, raw_c: error ? null : raw, offset_c: off, error, suspect: null, attempts,
+          bus: error === "not_present" ? null : "w1_bus_master" + (1 + (i % 2))};
+      });
+      pub(t.id + "/state", {device_id: t.id, timestamp: stamp(), clock_synced: true, sweep_ms: 3900 + Math.round(Math.random() * 200), sensors}, retained, 0);
+    }
+    D.okCount = ok; D.failCount = fail;
+    if (D.fault > 0) D.fault--;
+  };
+  sweep(true);
+  let n = 0;
+  const step = () => {
+    if (!D.alive) return;
+    D.up += 30; n++;
+    sweep(false);
+    if (n % 15 === 0) pub("status", statusMsg("HEARTBEAT"), true, 1);
+  };
+  D.timer = setInterval(step, 3000);
+  D.restart = () => {
+    if (D.alive) pub("status", statusMsg("SHUTDOWN", {reason: "SIGTERM"}), true, 1);
+    D.alive = false;
+    setTimeout(() => { D.up = 0; pub("status", statusMsg("STARTUP"), true, 1); }, 1200);
+    setTimeout(() => { D.alive = true; sweep(false); pub("status", statusMsg("HEARTBEAT"), true, 1); }, 2600);
+  };
+  D.lwt = () => { if (!D.alive) return; D.alive = false; setTimeout(() => pub("status", {online: false, event: "LWT"}, true, 1), 900); };
+  D.injectFault = () => { D.fault = 5; };
+  demo = D;
+}
+function stopDemo() { if (demo) { clearInterval(demo.timer); demo = null; } $("demoCtl").hidden = true; }
+$("dFault").onclick = () => demo && demo.injectFault();
+$("dLwt").onclick = () => demo && demo.lwt();
+$("dRestart").onclick = () => demo && demo.restart();
+
+// ---------------------------------------------------------------- boot
+$("conn").addEventListener("submit", e => { e.preventDefault(); client ? (disconnect(), clearView()) : connect(); });
+$("demoBtn").onclick = () => demo ? (disconnect(), clearView()) : startDemo();
+const P = params();
+$("ws").value = P.ws; $("prefix").value = P.prefix;
+if (P.demo || !P.ws) startDemo(); else connect();
+</script>
+</body>
+</html>

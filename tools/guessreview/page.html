@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>tanktemp Guess Review</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Public+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a gauge-panel rail of 25 guesses on the left, one guess at a time on the right; the rail folds into a chip strip on phones. */
+:root {
+  --bg: #f3f5f6;
+  --panel: #ffffff;
+  --ink: #1b2329;
+  --muted: #5b6871;
+  --line: #d9dfe3;
+  --copper: #b2602a;
+  --copper-soft: #f6e6da;
+  --keep: #2f7d5b;
+  --keep-soft: #dcefe6;
+  --change: #8a4fb0;
+  --change-soft: #efe3f6;
+  --focus: #1f6fb5;
+  --f-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", sans-serif;
+  --f-body: "Public Sans", "Helvetica Neue", Arial, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #12171b; --panel: #1a2126; --ink: #e6ebee; --muted: #93a1aa; --line: #2c363d;
+  --copper: #e08a4f; --copper-soft: #3a2619; --keep: #5cc196; --keep-soft: #183429;
+  --change: #c294e4; --change-soft: #2f2139; --focus: #6fb0ec; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #12171b; --panel: #1a2126; --ink: #e6ebee; --muted: #93a1aa; --line: #2c363d;
+  --copper: #e08a4f; --copper-soft: #3a2619; --keep: #5cc196; --keep-soft: #183429;
+  --change: #c294e4; --change-soft: #2f2139; --focus: #6fb0ec; color-scheme: dark }
+
+* { box-sizing: border-box }
+[hidden] { display: none !important }
+html, body { margin: 0 }
+body { background: var(--bg); color: var(--ink); font: 15px/1.55 var(--f-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 24px 48px }
+.wrap { max-width: 1120px; margin: 0 auto; display: grid; gap: 20px }
+header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px 24px }
+h1 { font: 700 clamp(26px, 4vw, 36px)/1.1 var(--f-display); margin: 0; letter-spacing: -0.01em; text-wrap: balance }
+.sub { color: var(--muted); margin: 6px 0 0; max-width: 62ch }
+.meter { display: grid; gap: 6px; min-width: 220px }
+.meter-row { display: flex; justify-content: space-between; font: 500 12px var(--f-mono); color: var(--muted); letter-spacing: .04em; text-transform: uppercase }
+.bar { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; display: flex }
+.bar i { display: block; height: 100% }
+.bar .k { background: var(--keep) } .bar .c { background: var(--change) }
+.save { font: 12px var(--f-mono); color: var(--muted) }
+.save.err { color: var(--copper) }
+
+.main { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 20px; align-items: start }
+nav.rail { display: grid; gap: 2px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px; position: sticky; top: calc(env(safe-area-inset-top, 0px) + 12px); max-height: calc(100vh - 40px); overflow: auto }
+.rail-head { display: flex; gap: 6px; padding: 4px 4px 8px; flex-wrap: wrap }
+.chipbtn { font: 500 12px var(--f-body); border: 1px solid var(--line); background: transparent; color: var(--muted); border-radius: 999px; padding: 3px 10px; cursor: pointer }
+.chipbtn[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink) }
+.item { display: grid; grid-template-columns: 34px minmax(0,1fr) 10px; gap: 8px; align-items: center; text-align: left; border: 0; background: transparent; color: var(--ink); padding: 7px 6px; border-radius: 6px; cursor: pointer; font: 13px/1.3 var(--f-body) }
+.item:hover { background: var(--bg) }
+.item[aria-current="true"] { background: var(--copper-soft) }
+.item .gid { font: 500 12px var(--f-mono); color: var(--muted) }
+.item .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.dot { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--line) }
+.dot.keep { background: var(--keep); border-color: var(--keep) }
+.dot.change { background: var(--change); border-color: var(--change) }
+.dot.note { background: transparent; border-color: var(--copper) }
+
+article.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: clamp(18px, 3vw, 32px); display: grid; gap: 18px; min-width: 0 }
+.eyebrow { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font: 500 12px var(--f-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted) }
+.eyebrow .num { color: var(--copper); font-size: 13px }
+.tag { border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px }
+.big { background: var(--copper); color: #fff; border-color: var(--copper) }
+h2 { font: 700 clamp(20px, 2.6vw, 26px)/1.2 var(--f-display); margin: 0; text-wrap: balance }
+.facts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px }
+.facts div { min-width: 0 }
+.facts h3 { margin: 0 0 4px; font: 600 11px var(--f-body); letter-spacing: .08em; text-transform: uppercase; color: var(--muted) }
+.facts p { margin: 0; max-width: 65ch }
+.where { font: 13px var(--f-mono); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; display: inline-block; overflow-wrap: anywhere }
+code { font: 0.92em var(--f-mono); background: var(--bg); padding: 0 4px; border-radius: 3px }
+
+fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 8px }
+legend { font: 600 11px var(--f-body); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; padding: 0 }
+.opt { display: grid; grid-template-columns: 28px minmax(0,1fr); gap: 10px; align-items: start; border: 1.5px solid var(--line); border-radius: 8px; padding: 10px 12px; cursor: pointer; background: var(--panel) }
+.opt:hover { border-color: var(--muted) }
+.opt input { position: absolute; opacity: 0; pointer-events: none }
+.opt .key { font: 500 12px var(--f-mono); width: 24px; height: 24px; border-radius: 5px; border: 1px solid var(--line); display: grid; place-items: center; color: var(--muted) }
+.opt .lbl { font-weight: 600 }
+.opt .desc { color: var(--muted); font-size: 13.5px }
+.opt.sel.keep { border-color: var(--keep); background: var(--keep-soft) }
+.opt.sel.change { border-color: var(--change); background: var(--change-soft) }
+.opt.sel .key { background: var(--ink); color: var(--bg); border-color: var(--ink) }
+.opt:focus-within { outline: 2px solid var(--focus); outline-offset: 2px }
+label.notes { display: grid; gap: 6px; font: 600 11px var(--f-body); letter-spacing: .08em; text-transform: uppercase; color: var(--muted) }
+textarea { font: 14px/1.5 var(--f-body); color: var(--ink); background: var(--bg); border: 1.5px solid var(--line); border-radius: 8px; padding: 10px 12px; min-height: 96px; resize: vertical; width: 100%; text-transform: none; letter-spacing: 0 }
+textarea:focus, button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px }
+.nav { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: center }
+.btn { font: 600 14px var(--f-body); border: 1.5px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 8px; padding: 8px 16px; cursor: pointer }
+.btn.primary { background: var(--copper); border-color: var(--copper); color: #fff }
+.btn:disabled { opacity: .4; cursor: default }
+.hint { font: 12px var(--f-mono); color: var(--muted) }
+
+section.summary { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; display: grid; gap: 12px }
+section.summary h2 { font-size: 18px }
+pre.md { margin: 0; font: 12.5px/1.5 var(--f-mono); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-x: auto; white-space: pre-wrap; max-height: 320px }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center }
+
+@media (max-width: 760px) {
+  .main { grid-template-columns: minmax(0,1fr) }
+  nav.rail { position: static; max-height: none; grid-auto-flow: column; grid-auto-columns: max-content; overflow-x: auto; padding: 6px }
+  .rail-head { display: none }
+  .item { grid-template-columns: auto 10px; padding: 6px 10px }
+  .item .t { display: none }
+  .facts { grid-template-columns: minmax(0,1fr) }
+}
+@media (prefers-reduced-motion: no-preference) { .opt, .item { transition: background .12s, border-color .12s } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>tanktemp guess review</h1>
+      <p class="sub">25 calls I made overnight without asking. Pick an answer for each, add a note where it needs one, and they save to <code>tools/guessreview/answers.json</code> for me to act on.</p>
+    </div>
+    <div class="meter" aria-live="polite">
+      <div class="meter-row"><span id="count">0 / 25 answered</span><span id="split"></span></div>
+      <div class="bar"><i class="k" id="barK" style="width:0"></i><i class="c" id="barC" style="width:0"></i></div>
+      <span class="save" id="saveState">Loading saved answers…</span>
+    </div>
+  </header>
+
+  <div class="main">
+    <nav class="rail" aria-label="Guesses">
+      <div class="rail-head">
+        <button class="chipbtn" id="fAll" aria-pressed="true" type="button">All</button>
+        <button class="chipbtn" id="fOpen" aria-pressed="false" type="button">Unanswered</button>
+        <button class="chipbtn" id="fChg" aria-pressed="false" type="button">Changes</button>
+      </div>
+      <div id="list" style="display:contents"></div>
+    </nav>
+
+    <article class="card" id="card" aria-live="polite"></article>
+  </div>
+
+  <section class="summary">
+    <h2>Your answers as text</h2>
+    <p class="sub" style="margin:0">I read the answers from the file directly. This copy is here in case you'd rather paste them into the terminal.</p>
+    <pre class="md" id="md"></pre>
+    <div class="row"><button class="btn" id="copy" type="button">Copy answers</button><span class="hint" id="copyState"></span></div>
+  </section>
+</div>
+
+<script>
+const G = [
+ {id:"G1", tag:"build", title:"CI can't pass until the common modules are tagged",
+  guess:"CI is written but can't pass on GitHub until lifecycle, health and mqttpub are tagged. The local build uses a gitignored go.work.",
+  why:"Nothing is pushed yet, and the tags wait for tanktemp to run on the Pi.", where:".github/workflows/ci.yml",
+  opts:[["keep","Keep: tag, pin, then push","Tag the three modules, pin them in go.mod, push tanktemp after."],
+        ["change","Push now, CI red until tags","Push tanktemp as-is and accept a failing CI for a while."],
+        ["change","CI checks out common too","Have CI clone common at a branch and write its own go.work."]]},
+ {id:"G2", tag:"1-wire", title:"The 85 °C re-read sits outside attempts",
+  guess:"An accepted 85.000 always gets one more read, even on the last attempt, so a reading can report 4 attempts when attempts is 3. A different good value replaces the 85; otherwise it's kept with suspect: 85c_unverified.",
+  why:"An 85 is never published unchecked.", where:"Source.recheck85 · internal/onewire/source.go",
+  opts:[["keep","Keep: always re-read, outside attempts",""],
+        ["change","Count it inside attempts","On the last attempt, an 85 is published as suspect without a re-read."],
+        ["change","Never re-read, just flag it","Publish every 85 with suspect set and no extra read."]]},
+ {id:"G3", tag:"1-wire", title:"Unknown read errors are retried",
+  guess:"Anything that isn't a parse or scratchpad failure, or a missing file, maps to read_error and is retried.",
+  why:"Every read is a fresh conversion, so an unknown transient error probably clears like the known ones.", where:"readChecked",
+  opts:[["keep","Keep: retry them",""],["change","Fail fast","read_error is reported on the first occurrence, no retry."]]},
+ {id:"G4", tag:"1-wire", title:"Odd ext_power or resolution reads as unknown",
+  guess:"ext_power other than 0 or 1, or an unparseable resolution, is reported as null, not as an error.",
+  why:"Unknown values are absent, never guessed.", where:"Source.Inspect",
+  opts:[["keep","Keep: null",""],["change","Raise a startup problem","Flag it in STARTUP's startup_problems with a new code."]]},
+ {id:"G5", tag:"fixtures", title:"Two fault fixtures are synthetic",
+  guess:"The power-on reset and the bus-held-low fixtures were modelled from byte patterns, never captured with full scratchpads.",
+  why:"Capturing them needs hands on the hardware. Each is marked synthetic: true.", where:"internal/onewire/testdata/sysfs/synthetic-*",
+  opts:[["keep","Keep until I capture real ones","I'll power-cycle a probe and pull a data line with w1capture."],
+        ["keep","Keep them permanently","They model the datasheet well enough."],
+        ["change","Talk me through capturing them","Write me a script that guides the capture step by step."]]},
+ {id:"G6", tag:"config", title:"Interval must cover 0.8 s per sensor",
+  guess:"sweep.interval must be at least 0.8 s × the total number of sensors, as if all were on one bus.",
+  why:"Config can't know which bus each ROM is on, so it assumes the worst case. An overrunning sweep skips a tick rather than queueing.", where:"config.ReadTime",
+  opts:[["keep","Keep: worst case",""],["change","Warn instead of refuse","Load the config but log a warning."],
+        ["change","Drop the check","Trust the lifecycle's tick skipping."]]},
+ {id:"G7", tag:"config", title:"Offsets beyond ±5 °C are refused",
+  guess:"offset_c beyond ±5 °C is refused as a probable typo.",
+  why:"DS18B20s are within ±0.5 °C; 5 °C leaves room for a surface mount that reads low.", where:"config.MaxOffsetC",
+  opts:[["keep","Keep ±5 °C",""],["change","Tighten to ±2 °C",""],["change","No limit",""]]},
+ {id:"G8", tag:"config", title:"sweep.parallel is dropped",
+  guess:"The planned sweep.parallel option is gone. Buses are always read in parallel.",
+  why:"No reason was found to read them in series, and fewer knobs means fewer combinations to test.", where:"config.Sweep · onewire.Source",
+  opts:[["keep","Keep it dropped",""],["change","Bring it back","Some rigs might share a power budget across buses."]]},
+ {id:"G9", tag:"mqtt", title:"Default client ID is tanktemp-<hostname>",
+  guess:"An empty mqtt.client_id becomes tanktemp-<hostname>, filled in by main.",
+  why:"config doesn't touch the OS.", where:"cmd/tanktemp",
+  opts:[["keep","Keep tanktemp-<hostname>",""],["change","Plain tanktemp","One instance per broker anyway."],["change","Require it in config",""]]},
+ {id:"G10", tag:"wire", title:"Calibrated values are rounded to 4 dp",
+  guess:"temp_c is rounded to 4 decimal places to remove float noise (61.375 − 0.19 publishes as 61.185). raw_c stays exact.",
+  why:"Readings come in 1/16 °C steps and offsets in hundredths, so 4 places never lose information.", where:"sweep.calibrate",
+  opts:[["keep","Keep 4 dp",""],["change","Round to 2 dp","Easier to read; loses the 1/16 steps."],["change","Round to 1 dp",""]]},
+ {id:"G11", tag:"sweep", title:"A failed discovery still publishes a sweep",
+  guess:"When discovery fails (e.g. no bus masters), the sweep runs, every sensor reads not_present, and the error is recorded in health.",
+  why:"Fail loud, and every configured sensor appears in every sweep.", where:"sweep.Sweeper.Sweep",
+  opts:[["keep","Keep: publish all not_present",""],["change","Skip publishing that sweep","Leave the retained state as it was."],
+        ["change","Exit and let systemd restart",""]]},
+ {id:"G12", tag:"startup", title:"Startup checks flag only what they see",
+  guess:"Flagged: a sensor on no bus, parasite power, resolution ≠ 12, a failed Inspect or discovery. An unreadable ext_power or resolution file isn't.",
+  why:"No speculative checks.", where:"internal/startup",
+  opts:[["keep","Keep",""],["change","Also flag unreadable files",""]]},
+ {id:"G13", tag:"wire", big:true, title:"The wire contract wasn't reviewed",
+  guess:"docs/WIRE.md and its goldens were written without your review. The plan said I'd show you first.",
+  why:"You were asleep and said to proceed. Nothing subscribes yet and the deploy uses test/, so a change now costs nothing.", where:"docs/WIRE.md · internal/payload/testdata/",
+  opts:[["keep","Approved as written",""],["change","I'll review and leave notes","Notes below, or I'll come back to it."],
+        ["change","Walk me through it first","Go through WIRE.md with me in the terminal."]]},
+ {id:"G14", tag:"wire", title:"The last will has no timestamp",
+  guess:"SHUTDOWN publishes online: false. The will is exactly {\"online\":false,\"event\":\"LWT\"}, unlike mqttpub's OfflinePayload which adds one.",
+  why:"A will is fixed at connect time, so its timestamp would be misleading.", where:"payload.LWT",
+  opts:[["keep","Keep: no timestamp",""],["change","Match mqttpub's OfflinePayload","Consistency across services beats accuracy here."]]},
+ {id:"G15", tag:"wire", title:"Startup problems carry a sentence",
+  guess:"startup_problems[].message is a human-readable sentence alongside the stable code.",
+  why:"It's the most useful thing on a dashboard. Consumers match on code.", where:"payload.Status",
+  opts:[["keep","Keep the message",""],["change","Codes only","Let consumers word it."]]},
+ {id:"G16", tag:"health", title:"A suspect 85 °C doesn't degrade health",
+  guess:"A suspect reading is published with a flag and health stays ok.",
+  why:"It's probably real; degrading would make a hot cylinder look like a fault.", where:"status.Snapshot.Health",
+  opts:[["keep","Keep",""],["change","Degrade health","Suspect values deserve attention."]]},
+ {id:"G17", tag:"health", title:"Stale means 3 × the interval",
+  guess:"Health degrades when the last sweep is more than 3 × the interval old (90 s at 30 s).",
+  why:"It's what the plan said.", where:"status.StaleAfter",
+  opts:[["keep","Keep 3×",""],["change","2×",""],["change","5×",""]]},
+ {id:"G18", tag:"mqtt", title:"Startup waits 10 s for the broker",
+  guess:"Then it sweeps and serves HTTP anyway while the connection retries in the background.",
+  why:"STARTUP normally gets through, and a broker outage at boot doesn't take the service down.", where:"main.ConnectWait",
+  opts:[["keep","Keep 10 s",""],["change","30 s",""],["change","Don't wait at all",""]]},
+ {id:"G19", tag:"mqtt", title:"Reconnects republish a HEARTBEAT",
+  guess:"After every MQTT reconnect the status is republished as a HEARTBEAT, replacing any last will the broker published.",
+  why:"Otherwise the retained status reads online:false for up to 15 minutes.", where:"run · the Reconnected goroutine",
+  opts:[["keep","Keep HEARTBEAT",""],["change","A distinct RECONNECT event","A wire change: WIRE.md and goldens first."]]},
+ {id:"G20", tag:"ops", title:"Failures log once per sweep",
+  guess:"A sweep with failures logs one line, so a missing sensor logs every 30 s.",
+  why:"Simple, and journald copes.", where:"run's Work",
+  opts:[["keep","Keep",""],["change","Log only when failures change",""]]},
+ {id:"G21", tag:"common", title:"mqttpubtest.Fake gained a lock",
+  guess:"The fake now takes a mutex and has Snapshot() (mqttpub commit 6134c56), a small API addition.",
+  why:"tanktemp publishes from two goroutines while its test polls. Fixed at the source.", where:"mqttpub/mqttpubtest/fake.go",
+  opts:[["keep","Keep it in mqttpub",""],["change","Wrap it inside tanktemp","Leave mqttpub's API as extracted."]]},
+ {id:"G22", tag:"deploy", title:"What counts as a healthy deploy",
+  guess:"Accept a build when /healthz reports its version, ready, mqtt_connected, a status other than starting, and no fewer sensors_ok than before. degraded only warns.",
+  why:"One probe already missing shouldn't block a deploy; a build that breaks reading still fails.", where:"wait_healthy · deploy/lib.sh",
+  opts:[["keep","Keep",""],["change","Fail on degraded too",""],["change","Version and ready only",""]]},
+ {id:"G23", tag:"deploy", title:"--allow-unpushed exists",
+  guess:"deploy.sh and setup-pi.sh can run from a local repo with --allow-unpushed. The default still refuses.",
+  why:"The overnight deploys came from an unpushed repo.", where:"deploy.sh · setup-pi.sh",
+  opts:[["keep","Keep the flag",""],["change","Remove it once pushed",""]]},
+ {id:"G24", tag:"deploy", title:"templog is a systemd unit",
+  guess:"setup-pi.sh treats templog as a unit of that name, checks for no timer or cron, and restarts tanktemp after a config change (after a prompt).",
+  why:"That's how the rig runs it.", where:"setup-pi.sh",
+  opts:[["keep","Keep templog disabled as a fallback",""],["change","Remove templog after cutover","Once tanktemp has run a week."],
+        ["change","Bring templog back now","Stop tanktemp until it's reviewed."]]},
+ {id:"G25", tag:"deploy", title:"Runs as User=sweeney",
+  guess:"Not a DynamicUser: builds live in ~sweeney/tanktemp and the 0700 home blocked a throwaway user (status=203/EXEC). Other hardening stays.",
+  why:"The smallest fix that keeps boiler-sensor's deploy layout.", where:"tanktemp.service",
+  opts:[["keep","Keep User=sweeney",""],["change","Move to /opt + DynamicUser","A change to the deploy scripts."],
+        ["change","A dedicated tanktemp system user",""]]},
+];
+
+const answers = {};   // id -> {choice, label, kind, note}
+let cur = 0, filter = "all";
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function state(g) {
+  const a = answers[g.id];
+  if (!a || (a.choice == null && !a.note)) return "";
+  if (a.choice == null) return "note";
+  return a.kind;
+}
+function visible() {
+  return G.map((g, i) => i).filter(i => filter === "all" ||
+    (filter === "open" && answers[G[i].id]?.choice == null) ||
+    (filter === "chg" && state(G[i]) === "change"));
+}
+function renderList() {
+  const vis = new Set(visible());
+  $("list").innerHTML = G.map((g, i) => vis.has(i) ? `<button class="item" type="button" data-i="${i}" aria-current="${i===cur}">
+    <span class="gid">${g.id}</span><span class="t">${esc(g.title)}</span><span class="dot ${state(g)}" aria-label="${state(g)||'unanswered'}"></span></button>` : "").join("");
+  const done = G.filter(g => answers[g.id]?.choice != null);
+  const k = done.filter(g => answers[g.id].kind === "keep").length, c = done.length - k;
+  $("count").textContent = `${done.length} / ${G.length} answered`;
+  $("split").textContent = done.length ? `${k} keep · ${c} change` : "";
+  $("barK").style.width = (k / G.length * 100) + "%";
+  $("barC").style.width = (c / G.length * 100) + "%";
+  renderMd();
+}
+function renderCard() {
+  const g = G[cur], a = answers[g.id] || {};
+  $("card").innerHTML = `
+    <div class="eyebrow"><span class="num">${g.id}</span><span class="tag">${g.tag}</span>${g.big ? '<span class="tag big">Needs you most</span>' : ""}<span>${cur+1} of ${G.length}</span></div>
+    <h2>${esc(g.title)}</h2>
+    <div class="facts">
+      <div><h3>What I did</h3><p>${esc(g.guess)}</p></div>
+      <div><h3>Why</h3><p>${esc(g.why)}</p></div>
+      <div><h3>Where it lives</h3><span class="where">${esc(g.where)}</span></div>
+    </div>
+    <fieldset><legend>Your call</legend>
+      ${g.opts.map(([kind, label, desc], j) => `<label class="opt ${kind} ${a.choice===j?'sel':''}">
+        <input type="radio" name="opt-${g.id}" id="opt-${g.id}-${j}" value="${j}" ${a.choice===j?'checked':''}>
+        <span class="key">${j+1}</span><span><span class="lbl">${esc(label)}</span>${desc?`<br><span class="desc">${esc(desc)}</span>`:""}</span></label>`).join("")}
+    </fieldset>
+    <label class="notes" for="note-${g.id}">Notes, or a different answer
+      <textarea id="note-${g.id}" placeholder="Anything I should know, or what you'd do instead">${esc(a.note||"")}</textarea></label>
+    <div class="nav">
+      <button class="btn" type="button" id="prev" ${cur===0?'disabled':''}>Previous</button>
+      <span class="hint">Keys 1–${g.opts.length} choose · ← → move</span>
+      <button class="btn primary" type="button" id="next">${cur===G.length-1?'Back to the first':'Next'}</button>
+    </div>`;
+  $("card").querySelectorAll("input[type=radio]").forEach(r => r.addEventListener("change", () => choose(+r.value)));
+  const ta = $("note-" + g.id);
+  ta.addEventListener("input", () => { setAnswer(g.id, {note: ta.value}, false); scheduleSave(g.id); });
+  ta.addEventListener("blur", () => flush(g.id));
+  $("prev").onclick = () => go(cur - 1);
+  $("next").onclick = () => go(cur === G.length - 1 ? 0 : cur + 1);
+}
+function setAnswer(id, patch, rerenderList = true) {
+  answers[id] = {...(answers[id] || {choice: null, note: ""}), ...patch};
+  if (rerenderList) renderList(); else renderMd();
+}
+function choose(j) {
+  const g = G[cur], [kind, label] = g.opts[j];
+  setAnswer(g.id, {choice: j, kind, label});
+  renderCard();
+  flush(g.id);
+}
+function go(i) {
+  const id = G[cur].id; flush(id);
+  cur = Math.max(0, Math.min(G.length - 1, i));
+  renderList(); renderCard();
+  try { localStorage.setItem("tt-cur", cur) } catch {}
+}
+function renderMd() {
+  const lines = G.map(g => {
+    const a = answers[g.id];
+    if (!a || (a.choice == null && !a.note)) return `- ${g.id} ${g.title}: (no answer)`;
+    let s = `- ${g.id} ${g.title}: ${a.choice == null ? "(no choice)" : (a.kind === "keep" ? "KEEP — " : "CHANGE — ") + a.label}`;
+    if (a.note) s += `\n    note: ${a.note.replace(/\n/g, "\n          ")}`;
+    return s;
+  });
+  $("md").textContent = lines.join("\n");
+}
+
+// Saving: one PUT per guess, debounced for typing, flushed on choice or blur.
+const timers = {}, lastSaved = {};
+function scheduleSave(id) { clearTimeout(timers[id]); timers[id] = setTimeout(() => flush(id), 700); }
+async function flush(id) {
+  clearTimeout(timers[id]);
+  const a = answers[id]; if (!a) return;
+  const body = {choice: a.choice, kind: a.kind ?? null, label: a.label ?? null, title: G.find(g => g.id === id).title, note: a.note || ""};
+  const key = JSON.stringify([body.choice, body.note]);
+  if (lastSaved[id] === key) return;
+  lastSaved[id] = key;
+  $("saveState").className = "save"; $("saveState").textContent = `Saving ${id}…`;
+  try {
+    const r = await fetch("/api/answers/" + id, {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+    if (!r.ok) throw new Error(await r.text());
+    $("saveState").textContent = `Saved ${id} to answers.json`;
+  } catch (e) {
+    delete lastSaved[id]; saveLocal();
+    $("saveState").className = "save err";
+    $("saveState").textContent = `Couldn't save ${id}: is guessreview still running? Kept in this browser.`;
+  }
+}
+function saveLocal() { try { localStorage.setItem("tt-answers", JSON.stringify(answers)) } catch {} }
+
+document.addEventListener("keydown", e => {
+  if (e.target.closest("textarea, input[type=text]")) return;
+  if (e.key === "ArrowRight") go(cur + 1);
+  else if (e.key === "ArrowLeft") go(cur - 1);
+  else if (/^[1-4]$/.test(e.key) && +e.key <= G[cur].opts.length) choose(+e.key - 1);
+});
+$("list").addEventListener("click", e => { const b = e.target.closest(".item"); if (b) go(+b.dataset.i); });
+for (const [btn, f] of [["fAll","all"],["fOpen","open"],["fChg","chg"]]) $(btn).onclick = () => {
+  filter = f; for (const b of ["fAll","fOpen","fChg"]) $(b).setAttribute("aria-pressed", b === btn); renderList(); };
+$("copy").onclick = () => {
+  const t = $("md").textContent;
+  navigator.clipboard?.writeText(t).then(() => $("copyState").textContent = "Copied",
+    () => { const r = document.createRange(); r.selectNodeContents($("md")); getSelection().removeAllRanges(); getSelection().addRange(r); $("copyState").textContent = "Selected: press ⌘C"; });
+};
+
+// Boot: local draft first, then the shared store wins.
+try { Object.assign(answers, JSON.parse(localStorage.getItem("tt-answers") || "{}")); cur = Math.min(G.length-1, +localStorage.getItem("tt-cur") || 0) } catch {}
+renderList(); renderCard();
+
+(async () => {
+  try {
+    const saved = await (await fetch("/api/answers")).json();
+    for (const [id, v] of Object.entries(saved)) {
+      answers[id] = {choice: v.choice ?? null, kind: v.kind ?? undefined, label: v.label ?? undefined, note: v.note || ""};
+      lastSaved[id] = JSON.stringify([v.choice ?? null, v.note || ""]);
+    }
+    renderList(); renderCard();
+    const n = Object.keys(saved).length;
+    $("saveState").textContent = n ? `${n} answers loaded from answers.json` : "Answers save as you go";
+    for (const id of Object.keys(answers)) if (!lastSaved[id]) flush(id);  // push any browser-only drafts
+  } catch {
+    $("saveState").className = "save err";
+    $("saveState").textContent = "Can't reach guessreview. Answers stay in this browser; use Copy answers.";
+  }
+})();
+</script>
+</body>
+</html>
