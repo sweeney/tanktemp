@@ -167,14 +167,17 @@ online.
 This fault actually happened on the test rig (`docs/samples/fault-data-line.csv`):
 the pull-up contact failed for about 10 minutes, then recovered. It is
 replayed as `TestFaultReplays/data_line` in `internal/status`. The three
-probes are `cyl.left`, `cyl.middle` and `cyl.right`.
+probes are `cyl.left`, `cyl.middle` and `cyl.right`. The values are the
+CSV's rows at 16:51 and 17:02:30, as tanktemp publishes them: exact
+sixteenths, where the logger's CSV shows the kernel's truncated `t=`
+(20.5625 there is 20.562).
 
 | Sweep | What tanktemp publishes (per probe) | What statehouse should do |
 |---|---|---|
-| 1 | `temp_c` 20.562 / 20.312 / 20.25, `error` null | write three `temperature_c` points |
+| 1 | `temp_c` 20.5625 / 20.3125 / 20.25, `error` null | write three `temperature_c` points |
 | 2 | `temp_c` null ×3, `error` `bus_low` ×3 (the data line was held low; the kernel's raw value was a false 0.000) | write nothing; note `bus_low` |
 | 3 | `temp_c` null ×3, `error` `not_present` ×3 (the sensors dropped off the bus) | write nothing; after N minutes of this, the probes are down |
-| 4 | `temp_c` 20.5 / 20.25 / 20.187, `error` null | write three points; the probes are back |
+| 4 | `temp_c` 20.5625 / 20.25 / 20.1875, `error` null | write three points; the probes are back |
 
 The status topic stays `online:true` throughout: the publisher was fine,
 the wiring wasn't. That is why per-probe liveness has to come from the

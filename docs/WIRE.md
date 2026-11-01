@@ -17,7 +17,7 @@ every key is always present (except `reason`, below).
 | Topic | When | QoS | Retained |
 |---|---|---|---|
 | `{prefix}/{device_id}/state` | every sweep, one message per tank | 0 | yes |
-| `{prefix}/status` | STARTUP, the first HEARTBEAT (`ready`), each scheduled HEARTBEAT, SHUTDOWN; and the last will | 1 | yes |
+| `{prefix}/status` | STARTUP, the first HEARTBEAT (`ready`), each scheduled HEARTBEAT, a HEARTBEAT after every MQTT reconnect, SHUTDOWN; and the last will | 1 | yes |
 
 `device_id` is the tank's key in `devices_<site>`, so it is `[a-z0-9_-]+`
 and safe as a topic segment. There is one tanktemp per site: a second one
@@ -51,10 +51,10 @@ not to a tank.
 | `sensors` | **every** configured sensor of this tank, in `order` (1 = top). A failing sensor is never left out |
 | `position`, `order`, `height_mm`, `rom` | from the config. `height_mm` is `null` if not configured. The ROM is the physical sensor; it changes when a probe is replaced, while the position doesn't |
 | `temp_c` | calibrated °C: `raw_c + offset_c`, at most 4 decimals. `null` when the read failed |
-| `raw_c` | the sensor's own value, a multiple of 0.0625. `null` when the read failed |
+| `raw_c` | the sensor's own value, exactly: a multiple of 0.0625 (the kernel's `t=` truncates odd sixteenths, e.g. 12.0625 to 12.062; tanktemp doesn't). `null` when the read failed |
 | `offset_c` | the calibration applied, `0` when uncalibrated |
 | `error` | `null`, or why there is no value: one of `not_present`, `bus_low`, `crc`, `power_on_reset`, `bad_scratchpad`, `out_of_range`, `malformed`, `read_error` |
-| `suspect` | `null`, or `85c_unverified`: a value of exactly 85.000 °C that passed every check and a second read. It's probably real (a cylinder can reach it), but 85 °C is also the sensor's power-on value |
+| `suspect` | `null`, or `85c_unverified`: a value of exactly 85.000 °C that passed every check, and that one extra read didn't replace with a different good value (it read 85 again, or that read failed). It's probably real (a cylinder can reach it), but 85 °C is also the sensor's power-on value. While a probe is suspect, tanktemp's `/healthz` reports `degraded` |
 | `attempts` | reads it took |
 | `bus` | the kernel's bus name, for diagnostics only: bus numbers change across reboots. `null` when the sensor is on no bus |
 
@@ -79,7 +79,7 @@ reading. Its `timestamp` says how old it is.
 | `online` | `true` from tanktemp; `false` in the last will and on SHUTDOWN |
 | `event` | `STARTUP`, `HEARTBEAT`, `SHUTDOWN` or `LWT` |
 | `version` | the commit tanktemp was built from |
-| `ready` | `true` once the first complete sweep has been published |
+| `ready` | `true` once the first complete sweep has been taken (and handed to MQTT; it is `true` even if that publish was lost). A HEARTBEAT after a reconnect that happens before the first sweep says `false` |
 | `uptime_s` | seconds since start |
 | `tanks` | the configured device IDs, in config order |
 | `sensors_ok`, `sensors_failed` | from the last sweep; `null` before the first |
@@ -90,6 +90,20 @@ reading. Its `timestamp` says how old it is.
 The **last will** is exactly `{"online":false,"event":"LWT"}`, retained, QoS
 1. The broker publishes it if tanktemp vanishes without a SHUTDOWN. It
 carries no timestamp, because a will is fixed when tanktemp connects.
+
+## Delivery
+
+What MQTT does and doesn't guarantee here:
+
+- **Nothing is queued while the broker is unreachable.** A state message
+  published while disconnected is dropped; the next sweep after the
+  reconnect replaces it.
+- **STARTUP can be lost.** tanktemp waits up to 10 s for the broker at
+  start, then carries on without it; a STARTUP that couldn't be sent isn't
+  retried. The HEARTBEAT after the connection comes up replaces it.
+- **A SHUTDOWN that can't be sent becomes the last will.** Without a clean
+  disconnect the broker publishes `LWT`, so a consumer sees `online:false`
+  either way.
 
 ## For consumers
 

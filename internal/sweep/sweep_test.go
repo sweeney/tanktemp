@@ -85,7 +85,9 @@ func TestSweepCalibratesAndOrders(t *testing.T) {
 	if s[0].TempC == nil || *s[0].TempC != 61.185 || *s[0].RawC != 61.375 || s[0].OffsetC != -0.19 {
 		t.Errorf("top = %+v", s[0])
 	}
-	if *s[2].TempC != 12.112 || *s[2].RawC != 12.062 {
+	// The Source's 12062 millidegrees is the kernel's truncation of the
+	// register's exact 12.0625 (raw 193/16); raw_c publishes the exact value.
+	if *s[2].TempC != 12.1125 || *s[2].RawC != 12.0625 {
 		t.Errorf("bottom = temp %v raw %v", *s[2].TempC, *s[2].RawC)
 	}
 	if *s[1].TempC != 45 || s[1].OffsetC != 0 {
@@ -195,6 +197,22 @@ func TestRoundingIsStable(t *testing.T) {
 			if r := float64(int64(c*1e4+copysign(0.5, c))) / 1e4; r != c {
 				t.Fatalf("calibrate(%d, %v) = %v, not 4-decimal clean", raw, off, c)
 			}
+		}
+	}
+}
+
+// raw_c is exact (WIRE.md): a Source gives the kernel's millidegrees,
+// int(raw)*1000/16 truncated toward zero, and every register value the
+// DS18B20 can report (-55 to +125 °C in 1/16 steps) comes back as raw/16.
+func TestRawIsExactSixteenths(t *testing.T) {
+	for raw := -55 * 16; raw <= 125*16; raw++ {
+		kernel := raw * 1000 / 16
+		got, want := rawC(kernel), float64(raw)/16
+		if got != want {
+			t.Fatalf("raw %d: kernel %d mC -> %v, want %v", raw, kernel, got, want)
+		}
+		if c := calibrate(kernel, 0); c != want {
+			t.Fatalf("raw %d: calibrate with no offset = %v, want %v", raw, c, want)
 		}
 	}
 }

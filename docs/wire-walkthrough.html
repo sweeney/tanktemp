@@ -1,0 +1,1022 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>tanktemp Wire Walkthrough</title>
+<!--
+  A guided review of tanktemp's MQTT wire contract (docs/WIRE.md), for the
+  person who has to approve it. Open from disk. Every payload shown is a
+  golden from internal/payload/testdata/, copied byte for byte; the fault
+  replay is docs/samples/fault-data-line.csv. Nothing here is normative:
+  WIRE.md and the goldens are.
+-->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Public+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --bg: #eef1f3; --panel: #ffffff; --ink: #172026; --muted: #5a6872; --line: #d6dde2; --grid: #e7ecef;
+  --copper: #b2602a; --copper-soft: #f4e4d8; --ok: #2f7d5b; --warn: #b7791f; --bad: #c0392b; --info: #2b6cb0; --off: #6b7280;
+  --glass: #f7f9fa; --code: #f3f5f7;
+  --s1: #2b6cb0; --s2: #b2602a; --s3: #7a5cc0;
+  --hot: #c4512a; --cold: #3b7bbf;
+  --f-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", sans-serif;
+  --f-body: "Public Sans", "Helvetica Neue", Arial, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f1418; --panel: #172026; --ink: #e4eaee; --muted: #8e9ca6; --line: #2a353d; --grid: #1f292f;
+  --copper: #e08a4f; --copper-soft: #3a2a1f; --ok: #5cc196; --warn: #e2b04a; --bad: #ef6f61; --info: #6fb0ec; --off: #8b939c;
+  --glass: #1c262d; --code: #121a1f;
+  --s1: #4f95d6; --s2: #d27a3f; --s3: #9580dc;
+  --hot: #e0774f; --cold: #5a9ad8;
+  color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0f1418; --panel: #172026; --ink: #e4eaee; --muted: #8e9ca6; --line: #2a353d; --grid: #1f292f;
+  --copper: #e08a4f; --copper-soft: #3a2a1f; --ok: #5cc196; --warn: #e2b04a; --bad: #ef6f61; --info: #6fb0ec; --off: #8b939c;
+  --glass: #1c262d; --code: #121a1f;
+  --s1: #4f95d6; --s2: #d27a3f; --s3: #9580dc;
+  --hot: #e0774f; --cold: #5a9ad8;
+  color-scheme: dark }
+
+* { box-sizing: border-box }
+html { scroll-behavior: smooth; scroll-padding-top: 64px }
+html, body { margin: 0 }
+body { background: var(--bg); color: var(--ink); font: 15px/1.6 var(--f-body); overflow-x: hidden }
+code, .mono { font-family: var(--f-mono); font-size: .88em }
+p code, li code, td code { background: var(--code); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; overflow-wrap: anywhere }
+a { color: var(--info) }
+h1, h2, h3 { font-family: var(--f-display); letter-spacing: -0.01em; line-height: 1.15 }
+h2 { font-size: 28px; margin: 0 0 6px }
+h3 { font-size: 19px; margin: 28px 0 8px }
+.kicker { font: 600 11px var(--f-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--copper) }
+.lede { color: var(--muted); max-width: 70ch; margin: 0 0 18px }
+
+.layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); max-width: 1320px; margin: 0 auto; gap: 0 32px; padding: 0 16px }
+nav.toc { position: sticky; top: 0; align-self: start; max-height: 100vh; overflow: auto; padding: 24px 0 }
+nav.toc .brand { display: flex; gap: 10px; align-items: center; font: 700 17px var(--f-display); margin-bottom: 18px }
+nav.toc ol { list-style: none; margin: 0; padding: 0; counter-reset: s }
+nav.toc li { counter-increment: s }
+nav.toc a { display: flex; gap: 10px; text-decoration: none; color: var(--muted); padding: 6px 10px; border-radius: 7px; font-size: 13.5px; border-left: 2px solid transparent }
+nav.toc a::before { content: counter(s, decimal-leading-zero); font: 500 11px/1.9 var(--f-mono); color: var(--muted); opacity: .7 }
+nav.toc a:hover { background: var(--panel); color: var(--ink) }
+nav.toc a.on { color: var(--ink); background: var(--panel); border-left-color: var(--copper) }
+nav.toc .themebtn { margin-top: 16px }
+main { min-width: 0; padding: 24px 0 80px }
+section { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 26px 28px; margin: 0 0 22px; min-width: 0 }
+
+.hero { display: grid; grid-template-columns: minmax(0, 1fr) 150px; gap: 24px; align-items: center; background: linear-gradient(180deg, var(--panel), var(--glass)) }
+.hero h1 { font-size: 40px; margin: 6px 0 10px }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px }
+.chip { font: 500 12px var(--f-mono); padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: var(--panel) }
+.chip.warn { color: var(--warn); border-color: var(--warn) } .chip.ok { color: var(--ok); border-color: var(--ok) } .chip.bad { color: var(--bad); border-color: var(--bad) } .chip.cu { color: var(--copper); border-color: var(--copper) }
+
+figure { margin: 18px 0; min-width: 0 }
+figcaption { font-size: 13px; color: var(--muted); margin-top: 8px; max-width: 80ch }
+.scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--line); border-radius: 10px; background: var(--glass) }
+.scroll svg { display: block; min-width: 600px; width: 100%; height: auto }
+svg text { font-family: var(--f-body) }
+svg .mono { font-family: var(--f-mono) }
+
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 14px }
+.card { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; background: var(--glass); min-width: 0 }
+.card h4 { margin: 0 0 6px; font: 600 14px var(--f-mono); overflow-wrap: anywhere }
+.card p { margin: 6px 0; font-size: 14px }
+.kv { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 4px 12px; font-size: 13.5px; margin: 8px 0 }
+.kv dt { color: var(--muted) } .kv dd { margin: 0; font-family: var(--f-mono); font-size: 12.5px; overflow-wrap: anywhere }
+
+table { border-collapse: collapse; width: 100%; font-size: 13.5px }
+.tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px }
+th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--grid) }
+th { font: 600 11px var(--f-body); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); background: var(--glass); position: sticky; top: 0 }
+tr:last-child td { border-bottom: 0 }
+td.code { font-family: var(--f-mono); font-size: 12.5px; white-space: nowrap }
+
+.callout { border-left: 3px solid var(--copper); background: var(--copper-soft); padding: 10px 14px; border-radius: 0 8px 8px 0; margin: 14px 0; font-size: 14px }
+.callout.warn { border-color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent) }
+.callout.info { border-color: var(--info); background: color-mix(in srgb, var(--info) 10%, transparent) }
+.callout strong:first-child { font-family: var(--f-display) }
+
+/* Annotated JSON */
+.anat { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 16px; align-items: start }
+pre.json { margin: 0; background: var(--code); border: 1px solid var(--line); border-radius: 10px; padding: 12px 0; font: 12.5px/1.65 var(--f-mono); overflow-x: auto }
+pre.json .ln { display: block; padding: 0 14px; white-space: pre; border-left: 3px solid transparent }
+pre.json .ln.hl { background: color-mix(in srgb, var(--copper) 16%, transparent); border-left-color: var(--copper) }
+.j-k { color: var(--ink) } .j-s { color: var(--ok) } .j-n { color: var(--info) } .j-b { color: var(--s3) } .j-null { color: var(--bad); font-weight: 500 }
+.badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px; background: var(--copper); color: #fff; font: 600 10.5px var(--f-mono); margin-left: 8px; vertical-align: 1px; cursor: pointer }
+ol.notes { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px }
+ol.notes li { display: grid; grid-template-columns: 26px minmax(0,1fr); gap: 6px; font-size: 13.5px; padding: 6px 8px; border-radius: 8px; cursor: default }
+ol.notes li.hl { background: var(--copper-soft) }
+ol.notes li .badge { margin: 2px 0 0 }
+ol.notes b { font-family: var(--f-mono); font-weight: 500; font-size: 12.5px }
+details { margin: 10px 0 }
+summary { cursor: pointer; color: var(--muted); font-size: 13px }
+details pre { white-space: pre-wrap; word-break: break-all; font: 12px/1.5 var(--f-mono); background: var(--code); border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin: 8px 0 0 }
+
+.statusgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 12px }
+.statusgrid pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 11.5px/1.55 var(--f-mono); background: var(--code); border-radius: 8px; padding: 10px; border: 1px solid var(--line) }
+.ev { font: 700 15px var(--f-display); display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 8px }
+.cell-absent { color: var(--muted); font-style: italic }
+
+/* Charts */
+.ctl { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 }
+button { font: 600 13px var(--f-body); border: 1.5px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 7px; padding: 6px 12px; cursor: pointer }
+button[aria-pressed="true"] { background: var(--copper); border-color: var(--copper); color: #fff }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--info); outline-offset: 2px }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12.5px; color: var(--muted); margin: 6px 0 }
+.legend span { display: inline-flex; align-items: center; gap: 6px }
+.legend i { width: 14px; height: 10px; border-radius: 3px; background: var(--c); display: inline-block }
+.legend i.line { height: 3px; border-radius: 2px }
+#tip { position: fixed; pointer-events: none; z-index: 20; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: 12px/1.5 var(--f-body); box-shadow: 0 6px 20px rgba(0,0,0,.18); max-width: 280px; display: none }
+#tip b { font-family: var(--f-mono); font-weight: 500 }
+.strat { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 16px; align-items: stretch }
+.strat svg { width: 100%; height: auto; display: block }
+
+/* Decisions */
+.dec { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px }
+.dec li { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 6px 14px; align-items: start; background: var(--glass) }
+.dec li.confirmed { border-left: 4px solid var(--ok) }
+.dec li.open { border-left: 4px solid var(--copper) }
+.dec h4 { margin: 0; font: 600 15px var(--f-display) }
+.dec p { margin: 2px 0 0; font-size: 13.5px; color: var(--muted) }
+.dec .state { font: 600 11px var(--f-mono); text-transform: uppercase; letter-spacing: .08em; white-space: nowrap }
+.dec .state.c { color: var(--ok) } .dec .state.o { color: var(--copper) }
+.choice { display: flex; gap: 6px; grid-column: 1 / -1 }
+.choice button { padding: 3px 10px; font-size: 12px }
+
+.issues { counter-reset: i; list-style: none; padding: 0; margin: 0; display: grid; gap: 10px }
+.issues li { counter-increment: i; position: relative; padding: 10px 14px 10px 46px; border: 1px solid var(--line); border-radius: 10px; font-size: 14px; background: var(--glass) }
+.issues li::before { content: counter(i); position: absolute; left: 12px; top: 10px; width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--warn); color: var(--warn); font: 600 11px/19px var(--f-mono); text-align: center }
+.issues li b { font-family: var(--f-display) }
+.tag { font: 600 10.5px var(--f-mono); text-transform: uppercase; letter-spacing: .06em; padding: 1px 6px; border-radius: 4px; border: 1px solid currentColor; margin-left: 6px; white-space: nowrap }
+.tag.wire { color: var(--copper) } .tag.doc { color: var(--info) } .tag.silent { color: var(--off) }
+
+@media (max-width: 900px) {
+  html { scroll-padding-top: 58px }
+  .layout { grid-template-columns: minmax(0,1fr); padding: 0 }
+  nav.toc { position: sticky; top: 0; z-index: 10; max-height: none; padding: 8px 16px; background: var(--bg); border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; overflow: hidden }
+  nav.toc .brand { margin: 0; flex: none } nav.toc .brand span { display: none }
+  nav.toc ol { display: flex; gap: 2px; overflow-x: auto; flex: 1; scrollbar-width: none }
+  nav.toc a { white-space: nowrap; border-left: 0; border-bottom: 2px solid transparent; border-radius: 6px 6px 0 0; padding: 6px 8px }
+  nav.toc a.on { border-bottom-color: var(--copper) }
+  nav.toc .themebtn { display: none }
+  main { padding: 16px 16px 60px }
+  section { padding: 20px 16px; border-radius: 12px }
+  .hero { grid-template-columns: minmax(0,1fr) } .hero .emblem { display: none }
+  .hero h1 { font-size: 30px }
+  .anat { grid-template-columns: minmax(0,1fr) }
+  .strat { grid-template-columns: 110px minmax(0, 1fr) }
+}
+.fixed{display:inline-block;margin-top:6px;color:var(--ok)}
+</style>
+</head>
+<body>
+<div id="tip" role="tooltip"></div>
+<div class="layout">
+<nav class="toc" aria-label="Sections">
+  <div class="brand">
+    <svg width="22" height="30" viewBox="0 0 22 30" aria-hidden="true"><rect x="2" y="2" width="18" height="26" rx="8" fill="none" stroke="var(--copper)" stroke-width="2"/><rect x="5" y="6" width="12" height="7" rx="3" fill="var(--hot)" opacity=".8"/><rect x="5" y="17" width="12" height="7" rx="3" fill="var(--cold)" opacity=".7"/></svg>
+    <span>Wire walkthrough</span>
+  </div>
+  <ol>
+    <li><a href="#topics">Topic tree</a></li>
+    <li><a href="#lifecycle">Lifecycle</a></li>
+    <li><a href="#state">State anatomy</a></li>
+    <li><a href="#errors">Error codes</a></li>
+    <li><a href="#status">Status messages</a></li>
+    <li><a href="#charts">Charts</a></li>
+    <li><a href="#consumer">Consumer mapping</a></li>
+    <li><a href="#compat">Compatibility</a></li>
+    <li><a href="#gaps">Docs vs code</a></li>
+    <li><a href="#decisions">Decisions to confirm</a></li>
+  </ol>
+  <button class="themebtn" id="themebtn" type="button">Theme: auto</button>
+</nav>
+
+<main>
+<section class="hero" id="top">
+  <div>
+    <div class="kicker">tanktemp · docs/WIRE.md · for review</div>
+    <h1>The MQTT wire contract, walked through</h1>
+    <p class="lede">tanktemp reads DS18B20 probes strapped to hot water cylinders and publishes every sweep to MQTT. This contract was written overnight without your review (G13). This page goes through it in the order a reviewer would: where messages go, when they're sent, what's in them, what goes wrong, and what a consumer does with them. It ends with the choices waiting for your yes or no.</p>
+    <p class="lede" style="margin:0">Every payload below is copied byte for byte from the goldens in <code>internal/payload/testdata/</code>, which are the contract. The device names are the made-up ones the goldens use. Where the docs say nothing, this page says so instead of filling the gap.</p>
+    <div class="chips">
+      <span class="chip cu">2 topics</span>
+      <span class="chip">6 goldens</span>
+      <span class="chip">8 error codes</span>
+      <span class="chip">test prefix: test/energy/hot_water</span>
+      <span class="chip warn">nothing subscribes yet</span>
+    </div>
+  </div>
+  <svg class="emblem" viewBox="0 0 150 220" aria-hidden="true">
+    <defs><linearGradient id="emb" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--hot)"/><stop offset="1" stop-color="var(--cold)"/></linearGradient></defs>
+    <rect x="30" y="14" width="90" height="192" rx="40" fill="url(#emb)" opacity=".85"/>
+    <rect x="30" y="14" width="90" height="192" rx="40" fill="none" stroke="var(--ink)" stroke-opacity=".35" stroke-width="2"/>
+    <g stroke="var(--copper)" stroke-width="2.5" fill="var(--panel)">
+      <line x1="120" y1="42" x2="142" y2="42"/><circle cx="120" cy="42" r="5"/>
+      <line x1="120" y1="110" x2="142" y2="110"/><circle cx="120" cy="110" r="5"/>
+      <line x1="120" y1="182" x2="142" y2="182"/><circle cx="120" cy="182" r="5"/>
+    </g>
+  </svg>
+</section>
+
+<!-- 1. TOPICS -->
+<section id="topics">
+  <div class="kicker">01 · Where messages go</div>
+  <h2>The topic tree</h2>
+  <p class="lede">There are two topics. One carries a state message per tank per sweep. The other carries the daemon's lifecycle and its last will. <code>{prefix}</code> is <code>mqtt.topic_prefix</code>: <code>energy/hot_water</code> by default, <code>test/energy/hot_water</code> for the test deploy until this review is done.</p>
+  <figure>
+    <div class="scroll"><svg id="topicSvg" viewBox="0 0 760 330" role="img" aria-label="Topic tree: prefix, then device_id/state and status"></svg></div>
+    <figcaption>The <code>{device_id}</code> is the tank's key in <code>devices_&lt;site&gt;</code>, so it matches <code>[a-z0-9_-]+</code> and is safe to use as a topic segment. The dashed branch is made up: it stands for a topic tanktemp might add one day.</figcaption>
+  </figure>
+  <div class="grid2">
+    <div class="card">
+      <h4>{prefix}/{device_id}/state</h4>
+      <dl class="kv"><dt>When</dt><dd>every sweep (default 30 s), one message per tank</dd><dt>QoS</dt><dd>0</dd><dt>Retained</dt><dd>yes</dd><dt>Golden</dt><dd>state-ok, state-failures</dd></dl>
+      <p>QoS 0 is fine here because the next sweep replaces the message within 30 s. Because it's retained, a late subscriber gets the last reading straight away, and its <code>timestamp</code> says how old that reading is.</p>
+    </div>
+    <div class="card">
+      <h4>{prefix}/status</h4>
+      <dl class="kv"><dt>When</dt><dd>STARTUP, first HEARTBEAT (ready), scheduled HEARTBEAT (15 min), HEARTBEAT after every reconnect, SHUTDOWN; the last will</dd><dt>QoS</dt><dd>1 (the will too)</dd><dt>Retained</dt><dd>yes (the will too)</dd><dt>Golden</dt><dd>status-startup, -heartbeat, -shutdown, lwt</dd></dl>
+      <p>This topic belongs to the daemon, not to a tank. So a site has one tanktemp, and a second one would need its own prefix.</p>
+    </div>
+  </div>
+  <h3>Why exactly two subscription patterns</h3>
+  <p>The consumer spec (<code>docs/STATEHOUSE.md</code>) tells adapters to subscribe to <code>{base}/+/state</code> and <code>{base}/status</code>, and <em>not</em> to <code>{base}/#</code>. With the two exact patterns, a topic tanktemp adds later (the dashed branch) never reaches a consumer that wasn't written for it. With <code>#</code>, it would. The <code>+</code> covers any number of tanks. <code>status</code> sits one level higher, so the two patterns can never match the same topic.</p>
+</section>
+
+<!-- 2. LIFECYCLE -->
+<section id="lifecycle">
+  <div class="kicker">02 · When messages go</div>
+  <h2>Lifecycle, over time</h2>
+  <p class="lede">From <code>cmd/tanktemp/main.go</code> and <code>common/lifecycle</code>: STARTUP, the first sweep, a <em>ready</em> HEARTBEAT, then state every 30 s and a heartbeat every 15 min, through a broker drop and a SIGTERM. The right-hand column shows what's retained on the broker after each step, which is exactly what a subscriber connecting at that moment would get. Click a row for details.</p>
+  <div class="legend">
+    <span style="--c:var(--copper)"><i></i>status (QoS 1, retained)</span>
+    <span style="--c:var(--info)"><i></i>state (QoS 0, retained)</span>
+    <span style="--c:var(--bad)"><i></i>last will, published by the broker</span>
+    <span style="--c:var(--off)"><i></i>inside tanktemp, nothing on the wire</span>
+  </div>
+  <figure>
+    <div class="scroll"><svg id="seqSvg" viewBox="0 0 760 700" role="img" aria-label="Sequence diagram of the lifecycle"></svg></div>
+  </figure>
+  <div class="callout" id="seqDetail" aria-live="polite"></div>
+  <div class="callout info"><strong>Retained says nothing about age.</strong> After SHUTDOWN, the retained state still holds the last sweep's reading, indefinitely. That's why consumers have to check <code>timestamp</code> (the 90 s rule in §07), and why the status topic is the one that says whether anyone is publishing.</div>
+</section>
+
+<!-- 3. STATE -->
+<section id="state">
+  <div class="kicker">03 · What's in a state message</div>
+  <h2>Anatomy of a state message</h2>
+  <p class="lede">Each message has a fixed key order. Every key is always present, and an unknown value is <code>null</code>, never 0. The real payload is one compact line; it's pretty-printed here, and you can open the exact bytes below each example. Hover over a line or a number.</p>
+  <h3>state-ok.golden: a healthy sweep</h3>
+  <div class="anat">
+    <pre class="json" id="jsonOk"></pre>
+    <ol class="notes" id="notesOk"></ol>
+  </div>
+  <details><summary>Exact bytes: state-ok.golden</summary><pre id="rawOk"></pre></details>
+
+  <h3>state-failures.golden: null, not zero</h3>
+  <p>The same tank on a bad sweep: a suspect 85 °C at the top, the middle probe gone from the bus, a CRC failure at the bottom, and a clock that hasn't synced. All three probes are still listed.</p>
+  <div class="anat">
+    <pre class="json" id="jsonFail"></pre>
+    <ol class="notes" id="notesFail"></ol>
+  </div>
+  <details><summary>Exact bytes: state-failures.golden</summary><pre id="rawFail"></pre></details>
+</section>
+
+<!-- 4. ERRORS -->
+<section id="errors">
+  <div class="kicker">04 · Why there's no value</div>
+  <h2>Error code reference</h2>
+  <p class="lede">The codes are part of the contract: <code>internal/reading</code> warns never to rename one. The physical causes come from <code>docs/ONEWIRE.md</code>, a month of rig experiments. Every failed read leaves <code>temp_c</code> and <code>raw_c</code> as <code>null</code>. Every code except <code>not_present</code> is retried, up to <code>sweep.attempts</code> (default 3), because each read is a fresh conversion.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Code</th><th>What physically happened</th><th>Passes kernel CRC?</th><th>Retried</th><th>Consumer should</th></tr></thead>
+    <tbody>
+      <tr><td class="code">not_present</td><td><code>w1_slave</code> is missing (ENOENT): the probe isn't on any bus. It was unplugged, or the kernel dropped it after failed bus searches. If discovery itself fails (no bus masters, for example), every sensor reads this (G11). <code>bus</code> is <code>null</code>.</td><td>n/a</td><td>no (attempts 1)</td><td>Write nothing. If it lasts N minutes, the probe is down. STATEHOUSE.md leaves N open.</td></tr>
+      <tr><td class="code">bus_low</td><td>All nine scratchpad bytes are <code>00</code> and <code>t=0</code>. The data line was held low: the pull-up was lost or DQ was shorted to GND. Because the CRC of all zeros is 0, the kernel says <em>YES</em> and reports a fake 0.000 °C. Seen for real on 2026-09-28 and 2026-10-18.</td><td><b>yes</b></td><td>yes</td><td>Write nothing. This is a wiring fault, not a cold tank.</td></tr>
+      <tr><td class="code">crc</td><td>The kernel's verdict was NO, or tanktemp's own CRC check disagreed. Usually noise or a marginal contact. A floating line (all <code>ff</code>, nothing answering) also fails here.</td><td>no</td><td>yes</td><td>Write nothing. One on its own is transient; if it persists, look at the contact.</td></tr>
+      <tr><td class="code">power_on_reset</td><td>raw = 0x0550 (85.000 °C) <em>and</em> scratchpad byte 6 = <code>0x0C</code>. The sensor restarted (it lost 3.3 V) and hasn't converted yet. The pattern comes from the datasheet: <b>a real one has never been captured</b> (G5, synthetic fixture).</td><td><b>yes</b></td><td>yes; usually clears on the next read</td><td>Write nothing. Several probes resetting together points to the power rail.</td></tr>
+      <tr><td class="code">bad_scratchpad</td><td>The CRC passed, but the fixed bytes are wrong (byte 4 &amp; 0x9F ≠ 0x1F, byte 5 ≠ <code>ff</code>, or byte 7 ≠ <code>10</code>). Garbage from a clone, or corrupted data.</td><td>maybe</td><td>yes</td><td>Write nothing. If it persists, suspect the part.</td></tr>
+      <tr><td class="code">out_of_range</td><td>The value is outside the DS18B20's −55 to +125 °C range.</td><td>—</td><td>yes</td><td>Write nothing.</td></tr>
+      <tr><td class="code">malformed</td><td>The kernel's <code>w1_slave</code> text didn't have the expected two-line shape.</td><td>—</td><td>yes</td><td>Write nothing.</td></tr>
+      <tr><td class="code">read_error</td><td>Any other failure. Unrecognised errors land here rather than being guessed at, and are retried (G3).</td><td>—</td><td>yes</td><td>Write nothing.</td></tr>
+    </tbody>
+  </table></div>
+  <div class="callout warn"><strong>Not an error: <code>suspect: "85c_unverified"</code>.</strong> 85 °C is the sensor's power-on value, but a cylinder can genuinely reach it. Any 85.000 that passes every check gets one extra read, outside the attempt budget (G2). If that read gives a different good value, the new value replaces the 85. Otherwise the 85 is published with the flag. Consumers should write the value, and keep the flag if they can carry per-reading quality.</div>
+  <p class="lede">The other sentinel, <code>internal/reading</code>'s <code>cancelled</code>, is never published: a sweep cancelled by shutdown is thrown away.</p>
+</section>
+
+<!-- 5. STATUS -->
+<section id="status">
+  <div class="kicker">05 · The daemon's own topic</div>
+  <h2>Status messages</h2>
+  <p class="lede">All four goldens, side by side. HEARTBEAT has no separate "ready" or "reconnect" event: the first HEARTBEAT after the first sweep is the ready signal, and the HEARTBEAT republished after a reconnect (G19) looks just like a scheduled one.</p>
+  <div class="statusgrid" id="statusCards"></div>
+  <h3>Field by field</h3>
+  <div class="tablewrap"><table id="statusMatrix"></table></div>
+  <p style="font-size:13.5px;color:var(--muted)">"absent" means the key isn't in the message. Apart from <code>reason</code>, which appears on SHUTDOWN only, a key is missing only in the last will, which carries just two keys.</p>
+
+  <h3>startup_problems</h3>
+  <p>These come from the startup checks, and each one has a <code>rom</code> (<code>null</code> for a bus-wide problem), a stable <code>code</code> and a human <code>message</code> (G15). The codes are <code>discover_failed</code>, <code>not_present</code>, <code>parasite_power</code>, <code>resolution</code> and <code>inspect_failed</code>. Consumers should match on <code>code</code>, never on the message. The STARTUP golden has both kinds: a parasite-powered probe, and <code>"rom":null</code> with "no 1-Wire bus masters".</p>
+  <div class="callout info"><strong>Health isn't on the wire.</strong> The status message doesn't carry a health verdict. Health is <code>/healthz</code>, decided in <code>internal/status</code>. It is <code>starting</code> before the first sweep, and <code>degraded</code> on any of: MQTT disconnected, any probe with an error, the last sweep older than 3 × interval (90 s, G17), clock not synced, discovery failed, or any startup problem. <b>Decided change (G16):</b> a suspect 85 °C reading will now degrade health too. The current code still treats it as "not a fault". It doesn't change the wire.</div>
+</section>
+
+<!-- 6. CHARTS -->
+<section id="charts">
+  <div class="kicker">06 · The data, drawn</div>
+  <h2>Charts</h2>
+
+  <h3>a · Stratification: temperature against height</h3>
+  <p class="lede">A hot cylinder is hottest at the top. <code>height_mm</code> and <code>order</code> are there for exactly this view. The points are the goldens' made-up values: <b>no real cylinder data exists yet</b>. Every rig reading so far was between 12 and 31 °C (ONEWIRE.md, scope warning).</p>
+  <div class="ctl" role="group" aria-label="Which golden">
+    <button type="button" data-strat="ok" aria-pressed="true">state-ok</button>
+    <button type="button" data-strat="fail" aria-pressed="false">state-failures</button>
+    <button type="button" id="stratZero" aria-pressed="false">Show what writing 0 for null would draw</button>
+  </div>
+  <div class="strat">
+    <svg id="stratTank" viewBox="0 0 170 380" aria-hidden="true"></svg>
+    <svg id="stratChart" viewBox="0 0 560 380" role="img" aria-label="Temperature against height"></svg>
+  </div>
+  <p id="stratNote" style="font-size:13.5px;color:var(--muted)"></p>
+
+  <h3>b · The data-line fault, replayed sweep by sweep</h3>
+  <p class="lede">This happened on the rig on 2026-09-28 (<code>docs/samples/fault-data-line.csv</code>): the pull-up contact failed for about 10 minutes, then came back. The old logger wrote what the kernel said, including the fake 0.000s. tanktemp publishes <code>null</code> with a code. Toggle between the two to see why the rule exists.</p>
+  <div class="ctl" role="group" aria-label="View">
+    <button type="button" data-fault="tt" aria-pressed="true">As tanktemp publishes it</button>
+    <button type="button" data-fault="raw" aria-pressed="false">As the old logger recorded it</button>
+  </div>
+  <div class="legend">
+    <span style="--c:var(--s1)"><i class="line"></i>left</span>
+    <span style="--c:var(--s2)"><i class="line"></i>middle</span>
+    <span style="--c:var(--s3)"><i class="line"></i>right</span>
+    <span style="--c:var(--bad)"><i></i>bus_low</span>
+    <span style="--c:var(--off)"><i></i>not_present (inferred)</span>
+    <span style="--c:var(--warn)"><i></i>failed, kind not logged</span>
+  </div>
+  <figure>
+    <div class="scroll"><svg id="faultSvg" viewBox="0 0 760 470" role="img" aria-label="Fault replay chart"></svg></div>
+    <figcaption>How the CSV becomes codes: a <code>0.000</code> is an all-zero scratchpad, which tanktemp calls <code>bus_low</code> (ONEWIRE.md's failure table). A blank is a failed read whose kind the logger didn't record. ONEWIRE.md says the sensors then "dropped off the bus", which tanktemp reports as <code>not_present</code>, so blanks after the 0.000 phase are shown as <code>not_present</code>. The two blanks mixed in with 0.000s are shown as unknown. The test <code>TestFaultReplays/data_line</code> in <code>internal/status</code> plays this as four sweeps.</figcaption>
+  </figure>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Sweep</th><th>tanktemp publishes (left / middle / right)</th><th>statehouse should</th><th>status topic</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td><code>temp_c</code> 20.562 / 20.312 / 20.25, <code>error</code> null</td><td>write three <code>temperature_c</code> points</td><td>online:true</td></tr>
+      <tr><td>2</td><td><code>temp_c</code> null ×3, <code>error</code> <code>bus_low</code> ×3</td><td>write nothing; note <code>bus_low</code></td><td>online:true</td></tr>
+      <tr><td>3</td><td><code>temp_c</code> null ×3, <code>error</code> <code>not_present</code> ×3</td><td>write nothing; after N minutes the probes are down</td><td>online:true</td></tr>
+      <tr><td>4</td><td><code>temp_c</code> 20.5 / 20.25 / 20.187, <code>error</code> null</td><td>write three points; the probes are back</td><td>online:true</td></tr>
+    </tbody>
+  </table></div>
+  <p style="font-size:13.5px;color:var(--muted)">From STATEHOUSE.md's worked example. The status topic says <code>online:true</code> throughout: the publisher was fine, the wiring wasn't. So per-probe liveness has to come from the state messages.</p>
+
+  <h3>c · Timing: sweep_ms against the 30 s interval</h3>
+  <p class="lede"><code>sweep_ms</code> is the whole sweep, across all tanks. Buses are read in parallel, and reads on one bus are serialised by the kernel at about 0.8 s each. If a sweep is still running when the next tick comes, that tick is skipped, not queued (G6).</p>
+  <figure>
+    <div class="scroll"><svg id="timingSvg" viewBox="0 0 760 330" role="img" aria-label="Sweep durations against the 30 second interval"></svg></div>
+    <figcaption>Goldens are made-up but realistic values. "Measured" bars are ONEWIRE.md's speed table (2026-10-25, 2 buses × 5 sensors). The striped bar is plain arithmetic from documented numbers, not a measurement. Health only calls the last sweep stale after 90 s, beyond the right edge.</figcaption>
+  </figure>
+</section>
+
+<!-- 7. CONSUMER -->
+<section id="consumer">
+  <div class="kicker">07 · What statehouse does with it</div>
+  <h2>Consumer mapping</h2>
+  <p class="lede">From <code>docs/STATEHOUSE.md</code>, which is a spec, not yet implemented. The engine device is a <b>probe</b>, not a tank: <code>scheme = "tanktemp"</code>, <code>primary = "&lt;device_id&gt;.&lt;position&gt;"</code>, for example <code>hot-water-cylinder.top</code>. The identity is the position, not the ROM, so replacing a probe keeps its series going.</p>
+  <figure>
+    <div class="scroll"><svg id="flowSvg" viewBox="0 0 760 560" role="img" aria-label="Flow for handling a state message"></svg></div>
+    <figcaption>One state message, as STATEHOUSE.md's mapping and staleness rules describe it. The order of the checks is this page's reading; the spec lists the rules without fixing an order.</figcaption>
+  </figure>
+  <div class="tablewrap"><table>
+    <thead><tr><th>tanktemp</th><th>statehouse</th></tr></thead>
+    <tbody>
+      <tr><td class="code">device_id + "." + position</td><td><code>primary</code> (scheme <code>tanktemp</code>)</td></tr>
+      <tr><td class="code">temp_c</td><td><code>temperature_c</code> in <code>device_environment</code>, at <code>timestamp</code></td></tr>
+      <tr><td class="code">temp_c: null</td><td><b>write nothing</b>, never 0; count or log <code>error</code></td></tr>
+      <tr><td class="code">error</td><td>the reason; match on the codes, which are stable</td></tr>
+      <tr><td class="code">suspect</td><td>write the value; keep the flag if per-reading quality exists</td></tr>
+      <tr><td class="code">rom</td><td>metadata; a change under the same primary means "probe replaced"</td></tr>
+      <tr><td class="code">raw_c, offset_c</td><td>publisher metadata; need not be kept (<code>temp_c</code> is already calibrated)</td></tr>
+      <tr><td class="code">order, height_mm</td><td>config facts; useful for a stratification view</td></tr>
+      <tr><td class="code">attempts, bus</td><td>diagnostics: drop them</td></tr>
+      <tr><td class="code">timestamp</td><td>reading time for every probe in the message</td></tr>
+      <tr><td class="code">clock_synced: false</td><td>use the broker receive time instead, or drop the reading</td></tr>
+      <tr><td class="code">sweep_ms</td><td>diagnostics</td></tr>
+      <tr><td class="code">status SHUTDOWN / LWT</td><td>mark every <code>tanktemp</code> device offline</td></tr>
+      <tr><td class="code">sensors_ok, sensors_failed, unexpected, startup_problems</td><td>publisher health; may show on a status page; never create devices from them</td></tr>
+    </tbody>
+  </table></div>
+  <div class="callout info"><strong>Retained replay.</strong> On every (re)connect the broker hands statehouse the last state of every cylinder at once. Accept a retained state as current only if its <code>timestamp</code> is within 3 sweep intervals (90 s) of now. Otherwise mark those devices stale, or wait for the next live message. Never write the same reading twice: tanktemp republishes every 30 s, so a timestamp you've already seen means a replay.</div>
+</section>
+
+<!-- 8. COMPAT -->
+<section id="compat">
+  <div class="kicker">08 · How it may change</div>
+  <h2>Compatibility rules</h2>
+  <div class="grid2">
+    <div class="card" style="border-left:4px solid var(--ok)">
+      <h4 style="font-family:var(--f-display);font-size:16px">Additive (minor)</h4>
+      <ul style="margin:6px 0;padding-left:18px;font-size:14px">
+        <li>A new field. Adapters must ignore fields they don't know.</li>
+        <li>The goldens change too, since they pin bytes and key order. The change starts in WIRE.md.</li>
+      </ul>
+    </div>
+    <div class="card" style="border-left:4px solid var(--bad)">
+      <h4 style="font-family:var(--f-display);font-size:16px">Breaking (major), announced in WIRE.md first</h4>
+      <ul style="margin:6px 0;padding-left:18px;font-size:14px">
+        <li>Renaming or removing a field.</li>
+        <li>Changing an error code.</li>
+        <li>Moving the prefix from <code>test/energy/hot_water</code> to <code>energy/hot_water</code> is planned once this review is done. Adapters keep the base configurable.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="callout"><strong>The goldens are the contract.</strong> <code>internal/payload/testdata/*.golden</code> pin the exact bytes, and a diff there is a breaking change. Never edit a golden to make a test pass. STATEHOUSE.md offers the same files to the adapter as test fixtures.</div>
+  <p style="font-size:14px"><b>Where the docs are silent:</b> they don't say whether <em>adding</em> a new error code is additive or major (they only cover changing one). They don't say what happens to a value's type, such as an int becoming a float. And the payloads carry no schema or contract version field, so a consumer can only tell versions apart by <code>version</code>, the build commit.</p>
+</section>
+
+<!-- 9. GAPS -->
+<section id="gaps">
+  <div class="kicker">09 · Found while building this page</div>
+  <h2>Where WIRE.md and the goldens or code disagreed</h2>
+  <p class="lede">All ten were resolved on 2026-11-01; each says how. <span class="tag wire">wire</span> changes bytes on the wire. <span class="tag doc">doc</span> is wording. <span class="tag silent">silent</span> means the contract doesn't say.</p>
+  <ol class="issues">
+    <li><b>raw_c isn't a multiple of 0.0625 in practice.</b><span class="tag wire">wire</span><br>WIRE.md says <code>raw_c</code> is "a multiple of 0.0625", and G10 says it's "exact". But the real Source converts the scratchpad the way the kernel's <code>t=</code> does, with integer millidegrees: <code>Scratchpad.MilliC() = raw*1000/16</code>, and <code>Celsius()</code> then divides by 1000. So 12.0625 °C publishes as <code>raw_c: 12.062</code>, and <code>temp_c</code> is calibrated from that. The <code>state-ok</code> golden's <code>12.0625</code> comes from a hand-built test input that the Source can't produce. The sample CSVs (20.562, 20.187) show the truncated form. A value like 61.375 is exact either way.<br><span class="fixed"><b>Fixed:</b> The code was wrong, not the contract. <code>sweep</code> now rounds the kernel's millidegrees back to the exact sixteenth (<code>TestRawIsExactSixteenths</code> covers every value from −55 to +125 °C), so 12.0625 publishes as 12.0625. The goldens didn't change.</span></li>
+    <li><b>The topics table leaves out the reconnect HEARTBEAT.</b><span class="tag doc">doc</span><br>WIRE.md's table lists STARTUP, first HEARTBEAT, scheduled HEARTBEAT and SHUTDOWN. <code>main.go</code> also republishes a HEARTBEAT after every reconnect (G19), and STATEHOUSE.md says so.<br><span class="fixed"><b>Fixed:</b> WIRE.md's table now lists it.</span></li>
+    <li><b>A HEARTBEAT can carry <code>ready:false</code>.</b><span class="tag doc">doc</span><br>A reconnect before the first sweep has finished republishes the status as HEARTBEAT, and <code>ready</code> is still false. STATEHOUSE.md's status table presents HEARTBEAT as <code>"ready":true</code>.<br><span class="fixed"><b>Fixed:</b> WIRE.md's <code>ready</code> row now says so.</span></li>
+    <li><b><code>ready</code> means "swept", not "published".</b><span class="tag doc">doc</span><br>WIRE.md says <code>ready</code> is true "once the first complete sweep has been published". The tracker sets it when the sweep is <em>recorded</em>, before the state publish, so a first sweep whose publishes all failed still makes <code>ready</code> true.<br><span class="fixed"><b>Fixed:</b> WIRE.md now describes what the code does: true once the first sweep is taken, even if its publish was lost.</span></li>
+    <li><b>"Passed every check and a second read" is stronger than the code.</b><span class="tag doc">doc</span><br>In <code>recheck85</code>, the 85 is kept and flagged if the extra read fails <em>for any reason</em> (a CRC error, say), not only when it reads 85 again. So a suspect 85 hasn't necessarily been confirmed by a second good read. When the extra read gives a different good value, that value replaces the 85 with no flag, and <code>attempts</code> shows the extra read.<br><span class="fixed"><b>Fixed:</b> WIRE.md's <code>suspect</code> row now says the extra read either read 85 again or failed.</span></li>
+    <li><b>STARTUP isn't guaranteed to arrive.</b><span class="tag silent">silent</span><br>If the broker isn't connected within 10 s (G18), the STARTUP publish fails and isn't retried. The first status a consumer sees might then be the ready HEARTBEAT. WIRE.md doesn't mention this.<br><span class="fixed"><b>Fixed:</b> Covered in WIRE.md's new Delivery section.</span></li>
+    <li><b>State published while disconnected is dropped, not queued.</b><span class="tag silent">silent</span><br>mqttpub fails a publish at once when the connection is down. After a reconnect, only the status is republished, and the state catches up at the next sweep (≤ 30 s later). This is correct, but WIRE.md doesn't say it.<br><span class="fixed"><b>Fixed:</b> Covered in WIRE.md's new Delivery section.</span></li>
+    <li><b>A failed SHUTDOWN becomes an LWT.</b><span class="tag silent">silent</span><br><code>mqttpub.Close</code> disconnects cleanly only if the last publish got through. Otherwise it leaves without a DISCONNECT, so the broker publishes the will. WIRE.md describes the will only as "if tanktemp vanishes".<br><span class="fixed"><b>Fixed:</b> Covered in WIRE.md's new Delivery section.</span></li>
+    <li><b>The worked example's recovery sweep isn't a CSV row.</b><span class="tag doc">doc</span><br>STATEHOUSE.md's sweep 4 (20.5 / 20.25 / 20.187) matches the test replay, not any single row of <code>fault-data-line.csv</code>. The first recovered row is 20.562 / 20.250 / 20.187. That's harmless, but the example says it "actually happened".<br><span class="fixed"><b>Fixed:</b> STATEHOUSE.md now uses the CSV's real rows (16:51 and 17:02:30) as exact sixteenths.</span></li>
+    <li><b>G16 in GUESSES.md vs the decision.</b><span class="tag doc">doc</span><br>G16 and the <code>Health</code> comment still say a suspect reading doesn't degrade health. You've decided it will. That's a health change and doesn't touch the wire, but both texts will need updating along with the code.<br><span class="fixed"><b>Fixed:</b> The code, the comment and GUESSES.md now match the decision.</span></li>
+  </ol>
+</section>
+
+<!-- 10. DECISIONS -->
+<section id="decisions">
+  <div class="kicker">10 · Your call</div>
+  <h2>Decisions to confirm</h2>
+  <p class="lede">These are the choices that touch the wire. The ones marked <span style="color:var(--ok);font-weight:600">confirmed</span> you've already kept. The open ones are waiting for a yes or a change. Your Keep/Change clicks are saved in this browser only. "Copy answers" puts a plain-text summary on the clipboard.</p>
+  <ol class="dec" id="decList"></ol>
+  <div class="ctl"><button type="button" id="copyAns">Copy answers</button><span id="copyMsg" style="font-size:13px;color:var(--muted);align-self:center"></span></div>
+  <div class="callout info"><strong>Related, not wire:</strong> a suspect 85 °C reading will degrade <code>/healthz</code> (G16, decided). The payload keeps publishing the value with its flag.</div>
+</section>
+</main>
+</div>
+
+<script>
+// ---------- data, copied from the goldens ----------
+const G = {
+  stateOk: '{"device_id":"hot-water-cylinder","timestamp":"2026-11-02T21:06:26Z","clock_synced":true,"sweep_ms":3988,"sensors":[{"position":"top","order":1,"height_mm":1500,"rom":"28-0000117287e6","temp_c":61.185,"raw_c":61.375,"offset_c":-0.19,"error":null,"suspect":null,"attempts":1,"bus":"w1_bus_master2"},{"position":"bottom","order":2,"height_mm":null,"rom":"28-000011721ce9","temp_c":12.0625,"raw_c":12.0625,"offset_c":0,"error":null,"suspect":null,"attempts":1,"bus":"w1_bus_master1"}]}',
+  stateFail: '{"device_id":"hot-water-cylinder","timestamp":"2026-11-02T21:06:56Z","clock_synced":false,"sweep_ms":6402,"sensors":[{"position":"top","order":1,"height_mm":1500,"rom":"28-0000117287e6","temp_c":85,"raw_c":85,"offset_c":0,"error":null,"suspect":"85c_unverified","attempts":2,"bus":"w1_bus_master2"},{"position":"middle","order":2,"height_mm":800,"rom":"28-000011721ab6","temp_c":null,"raw_c":null,"offset_c":0.05,"error":"not_present","suspect":null,"attempts":1,"bus":null},{"position":"bottom","order":3,"height_mm":100,"rom":"28-000011721ce9","temp_c":null,"raw_c":null,"offset_c":0,"error":"crc","suspect":null,"attempts":3,"bus":"w1_bus_master1"}]}',
+  startup: '{"online":true,"event":"STARTUP","timestamp":"2026-11-02T21:00:00Z","version":"4aba4d5","ready":false,"uptime_s":0,"tanks":["hot-water-cylinder","second"],"sensors_ok":null,"sensors_failed":null,"unexpected":null,"startup_problems":[{"rom":"28-0000117287e6","code":"parasite_power","message":"28-0000117287e6 is in parasite-power mode; wire VDD to 3.3 V"},{"rom":null,"code":"discover_failed","message":"no 1-Wire bus masters"}]}',
+  heartbeat: '{"online":true,"event":"HEARTBEAT","timestamp":"2026-11-03T21:00:00Z","version":"4aba4d5","ready":true,"uptime_s":86400,"tanks":["hot-water-cylinder"],"sensors_ok":9,"sensors_failed":1,"unexpected":["28-000011721aa5"],"startup_problems":[]}',
+  shutdown: '{"online":false,"event":"SHUTDOWN","timestamp":"2026-11-03T21:00:05Z","version":"4aba4d5","ready":true,"uptime_s":86405,"tanks":["hot-water-cylinder"],"sensors_ok":10,"sensors_failed":0,"unexpected":[],"startup_problems":[],"reason":"SIGTERM"}',
+  lwt: '{"online":false,"event":"LWT"}'
+};
+// docs/samples/fault-data-line.csv, verbatim (time,left,middle,right)
+const FAULT_CSV = `2026-09-28T16:51:00+01:00,20.562,20.312,20.250
+2026-09-28T16:51:30+01:00,20.562,20.312,20.250
+2026-09-28T16:52:00+01:00,20.562,20.312,20.250
+2026-09-28T16:52:30+01:00,20.562,20.312,20.187
+2026-09-28T16:53:00+01:00,,0.000,0.000
+2026-09-28T16:53:30+01:00,0.000,0.000,0.000
+2026-09-28T16:54:00+01:00,0.000,0.000,0.000
+2026-09-28T16:54:30+01:00,0.000,0.000,0.000
+2026-09-28T16:55:00+01:00,,,0.000
+2026-09-28T16:55:30+01:00,,,
+2026-09-28T16:56:00+01:00,,,
+2026-09-28T16:56:30+01:00,,,
+2026-09-28T16:57:00+01:00,,,
+2026-09-28T16:57:30+01:00,,,
+2026-09-28T16:58:00+01:00,,,
+2026-09-28T16:58:30+01:00,,,
+2026-09-28T16:59:00+01:00,,,
+2026-09-28T16:59:30+01:00,,,
+2026-09-28T17:00:00+01:00,,,
+2026-09-28T17:00:30+01:00,,,
+2026-09-28T17:01:00+01:00,,,
+2026-09-28T17:01:30+01:00,,,
+2026-09-28T17:02:00+01:00,,,
+2026-09-28T17:02:30+01:00,20.562,20.250,20.187
+2026-09-28T17:03:01+01:00,20.437,20.187,20.125
+2026-09-28T17:03:30+01:00,20.500,20.187,20.125`;
+
+// ---------- helpers ----------
+const NS = 'http://www.w3.org/2000/svg';
+function S(tag, attrs, parent, text) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs || {}) e.setAttribute(k, attrs[k]);
+  if (text != null) e.textContent = text;
+  if (parent) parent.appendChild(e);
+  return e;
+}
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const tip = document.getElementById('tip');
+function showTip(ev, html) {
+  tip.innerHTML = html; tip.style.display = 'block';
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  let x = ev.clientX + 14, y = ev.clientY + 14;
+  if (x + w > innerWidth - 8) x = ev.clientX - w - 14;
+  if (y + h > innerHeight - 8) y = ev.clientY - h - 14;
+  tip.style.left = Math.max(8, x) + 'px'; tip.style.top = Math.max(8, y) + 'px';
+}
+function hideTip() { tip.style.display = 'none' }
+function bindTip(el, html) {
+  el.addEventListener('pointermove', e => showTip(e, typeof html === 'function' ? html() : html));
+  el.addEventListener('pointerleave', hideTip);
+}
+function arrowDefs(svg) {
+  const d = S('defs', {}, svg);
+  for (const [id, c] of [['aCu','var(--copper)'],['aInfo','var(--info)'],['aBad','var(--bad)'],['aMut','var(--muted)'],['aOk','var(--ok)']]) {
+    const m = S('marker', {id, viewBox:'0 0 10 10', refX:9, refY:5, markerWidth:7, markerHeight:7, orient:'auto-start-reverse'}, d);
+    S('path', {d:'M0,0 L10,5 L0,10 z', fill:c}, m);
+  }
+  return d;
+}
+function wrapText(parent, x, y, text, maxChars, attrs, lh) {
+  const words = text.split(' '); let line = '', lines = [];
+  for (const w of words) { if ((line + ' ' + w).trim().length > maxChars) { lines.push(line.trim()); line = w } else line += ' ' + w }
+  if (line.trim()) lines.push(line.trim());
+  const t = S('text', Object.assign({x, y}, attrs), parent);
+  lines.forEach((l, i) => S('tspan', {x, dy: i ? (lh || 15) : 0}, t, l));
+  return lines.length;
+}
+
+// ---------- 1. topic tree ----------
+(function () {
+  const svg = document.getElementById('topicSvg'); arrowDefs(svg);
+  const node = (x, y, w, label, sub, color, dashed) => {
+    const g = S('g', {}, svg);
+    S('rect', {x, y, width:w, height:46, rx:9, fill:'var(--panel)', stroke:color, 'stroke-width':dashed?1.5:2, 'stroke-dasharray':dashed?'5 4':'none'}, g);
+    S('text', {x:x+12, y:y+20, class:'mono', 'font-size':13, fill:'var(--ink)', 'font-weight':500}, g, label);
+    S('text', {x:x+12, y:y+37, 'font-size':11, fill:'var(--muted)'}, g, sub);
+    return g;
+  };
+  const link = (x1, y1, x2, y2, dashed) => S('path', {d:`M${x1},${y1} C${x1+40},${y1} ${x2-40},${y2} ${x2},${y2}`, fill:'none', stroke:'var(--muted)', 'stroke-width':1.5, 'stroke-dasharray':dashed?'5 4':'none'}, svg);
+  node(20, 132, 180, '{prefix}', 'energy/hot_water · test/…', 'var(--ink)');
+  node(250, 40, 190, '{device_id}', 'one per tank: hot-water-cylinder', 'var(--info)');
+  node(490, 40, 110, 'state', 'per sweep', 'var(--info)');
+  node(250, 160, 190, 'status', 'the daemon, one per prefix', 'var(--copper)');
+  node(250, 260, 190, '…/future', 'made up: a later topic', 'var(--off)', true);
+  link(200, 155, 250, 63); link(440, 63, 490, 63); link(200, 155, 250, 183); link(200, 155, 250, 283, true);
+  // badges
+  const badge = (x, y, t, c) => { const w = t.length * 7.2 + 14; S('rect', {x, y, width:w, height:20, rx:10, fill:'none', stroke:c, 'stroke-width':1.3}, svg); S('text', {x:x+w/2, y:y+14, 'text-anchor':'middle', class:'mono', 'font-size':11, fill:c}, svg, t); return w; };
+  let bx = 612; bx += badge(bx, 52, 'QoS 0', 'var(--info)') + 6; badge(bx, 52, 'retained', 'var(--info)');
+  bx = 452; bx += badge(bx, 172, 'QoS 1', 'var(--copper)') + 6; bx += badge(bx, 172, 'retained', 'var(--copper)') + 6; badge(bx, 172, '+ last will', 'var(--bad)');
+  // subscription patterns
+  S('text', {x:470, y:240, 'font-size':11, fill:'var(--muted)', 'letter-spacing':'.08em'}, svg, 'CONSUMER SUBSCRIBES TO');
+  const sub = (y, pat, ok, note) => {
+    S('text', {x:470, y, class:'mono', 'font-size':12.5, fill: ok ? 'var(--ok)' : 'var(--bad)', 'text-decoration': ok ? 'none':'line-through'}, svg, pat);
+    S('text', {x:470, y:y+15, 'font-size':11, fill:'var(--muted)'}, svg, note);
+  };
+  sub(262, '{base}/+/state', true, 'every tank, nothing else');
+  sub(298, '{base}/status', true, 'the lifecycle and the will');
+  S('text', {x:650, y:262, class:'mono', 'font-size':12.5, fill:'var(--bad)', 'text-decoration':'line-through'}, svg, '{base}/#');
+  S('text', {x:650, y:277, 'font-size':11, fill:'var(--muted)'}, svg, 'would catch …/future');
+})();
+
+// ---------- 2. lifecycle sequence ----------
+(function () {
+  const svg = document.getElementById('seqSvg'); arrowDefs(svg);
+  const X = {tt: 90, br: 330}, RX = 430, ROW = 46, TOP = 70;
+  const prevS = 'previous run’s SHUTDOWN or LWT', prevState = 'previous run’s last sweep';
+  const steps = [
+    {t:'boot', k:'note', label:'connect; will registered', st:prevS, sv:prevState, d:'tanktemp connects with the will <code>{"online":false,"event":"LWT"}</code> on <code>{prefix}/status</code> (QoS 1, retained). Startup waits for the broker for at most 10 s (G18), then for NTP sync, then runs the startup checks. A subscriber at this point still sees whatever the previous run left behind.'},
+    {t:'T₀', k:'status', label:'STARTUP · ready:false', st:'STARTUP (ready:false)', sv:prevState, d:'<code>status-startup.golden</code>: <code>sensors_ok</code>, <code>sensors_failed</code> and <code>unexpected</code> are <code>null</code>, because there\'s no sweep yet. <code>startup_problems</code> lists what the checks found. If the broker still isn\'t connected, this publish fails and isn\'t retried (see §09).'},
+    {t:'T₀', k:'note', label:'sweep 1 (≈ 4 s)', st:'STARTUP (ready:false)', sv:prevState, d:'Buses are read in parallel, about 0.8 s per sensor on each bus. Nothing is on the wire until the sweep has finished.'},
+    {t:'+4 s', k:'state', label:'state × each tank', st:'STARTUP (ready:false)', sv:'sweep 1', d:'One retained message per tank on <code>{prefix}/{device_id}/state</code>, at QoS 0. <code>timestamp</code> is when the sweep <em>started</em>.'},
+    {t:'+4 s', k:'status', label:'HEARTBEAT · ready:true', st:'HEARTBEAT (ready)', sv:'sweep 1', d:'The first HEARTBEAT after the first sweep is the "ready" signal. There\'s no separate READY event.'},
+    {t:'+30 s', k:'state', label:'state (every interval)', st:'HEARTBEAT (ready)', sv:'sweep 2, 3, …', d:'Every 30 s by default. If a sweep is still running when the next tick comes, that tick is skipped, not queued.'},
+    {t:'+15 min', k:'status', label:'HEARTBEAT (scheduled)', st:'HEARTBEAT', sv:'latest sweep', d:'<code>status-heartbeat.golden</code>: counts from the last sweep, <code>unexpected</code> ROMs, and <code>uptime_s</code>.'},
+    {t:'drop', k:'will', label:'link lost → broker publishes LWT', st:'LWT', sv:'last sweep before the drop (ageing)', d:'tanktemp didn\'t send a DISCONNECT, so the broker publishes the will on <code>{prefix}/status</code>, retained. The retained state still holds the reading from before the drop, and its <code>timestamp</code> keeps getting older.'},
+    {t:'outage', k:'note', label:'sweeps continue; publishes fail', st:'LWT', sv:'last sweep before the drop (ageing)', d:'Sweeps and <code>/healthz</code> keep running, and health is <code>degraded</code> (MQTT disconnected). State publishes fail at once and aren\'t queued.'},
+    {t:'reconnect', k:'status', label:'HEARTBEAT republished (G19)', st:'HEARTBEAT', sv:'last sweep before the drop (ageing)', d:'After every reconnect, the status is republished as a HEARTBEAT, so the retained LWT doesn\'t sit there for up to 15 minutes. If this happens before the first sweep, it carries <code>ready:false</code>.'},
+    {t:'≤ 30 s', k:'state', label:'state at the next sweep', st:'HEARTBEAT', sv:'fresh sweep', d:'State isn\'t republished on reconnect. It catches up at the next sweep.'},
+    {t:'SIGTERM', k:'note', label:'in-flight sweep cancelled, discarded', st:'HEARTBEAT', sv:'fresh sweep', d:'The lifecycle cancels the running sweep and waits for it. A cancelled sweep is never published.'},
+    {t:'stop', k:'status', label:'SHUTDOWN · online:false · reason', st:'SHUTDOWN', sv:'last sweep (ages forever)', d:'<code>status-shutdown.golden</code>: <code>"online":false</code> and <code>"reason":"SIGTERM"</code> (or <code>SIGINT</code> or <code>context</code>).'},
+    {t:'stop', k:'note', label:'clean DISCONNECT → will discarded', st:'SHUTDOWN', sv:'last sweep (ages forever)', d:'If SHUTDOWN got through, mqttpub disconnects cleanly and the broker drops the will. If it didn\'t, mqttpub leaves without a DISCONNECT, so the broker publishes the LWT instead.'}
+  ];
+  const H = TOP + steps.length * ROW + 20; svg.setAttribute('viewBox', `0 0 760 ${H}`);
+  // headers
+  const head = (x, t, sub) => { S('text', {x, y:26, 'text-anchor':'middle', 'font-size':14, 'font-weight':700, fill:'var(--ink)', style:'font-family:var(--f-display)'}, svg, t); S('text', {x, y:43, 'text-anchor':'middle', 'font-size':11, fill:'var(--muted)'}, svg, sub); };
+  head(X.tt, 'tanktemp', 'the Pi'); head(X.br, 'broker', 'retained store');
+  S('text', {x:RX+12, y:26, 'font-size':14, 'font-weight':700, fill:'var(--ink)', style:'font-family:var(--f-display)'}, svg, 'A late subscriber gets…');
+  S('text', {x:RX+12, y:43, 'font-size':11, fill:'var(--muted)'}, svg, 'what is retained after this step');
+  for (const x of [X.tt, X.br]) S('line', {x1:x, y1:54, x2:x, y2:H-10, stroke:'var(--line)', 'stroke-width':2, 'stroke-dasharray':'2 4'}, svg);
+  S('line', {x1:RX, y1:54, x2:RX, y2:H-10, stroke:'var(--line)'}, svg);
+  const color = {status:'var(--copper)', state:'var(--info)', will:'var(--bad)', note:'var(--off)'};
+  const mk = {status:'aCu', state:'aInfo', will:'aBad'};
+  const detail = document.getElementById('seqDetail');
+  const rows = [];
+  const select = i => {
+    rows.forEach((r, j) => r.hl.setAttribute('opacity', i === j ? 1 : 0));
+    const s = steps[i];
+    detail.innerHTML = `<strong>${esc(s.t)} · ${esc(s.label)}</strong><br>${s.d}<br><span style="color:var(--muted);font-size:13px">Retained now: status = ${esc(s.st)}; state = ${esc(s.sv)}.</span>`;
+  };
+  steps.forEach((s, i) => {
+    const y = TOP + i * ROW, cy = y + ROW / 2;
+    const g = S('g', {style:'cursor:pointer', tabindex:0, role:'button', 'aria-label':s.t + ' ' + s.label}, svg);
+    const hl = S('rect', {x:4, y:y+2, width:752, height:ROW-4, rx:8, fill:'var(--copper-soft)', opacity:0}, g);
+    S('rect', {x:4, y:y+2, width:752, height:ROW-4, fill:'transparent'}, g);
+    S('text', {x:12, y:cy+4, 'font-size':10.5, class:'mono', fill:'var(--muted)'}, g, s.t);
+    const c = color[s.k];
+    if (s.k === 'note') {
+      S('rect', {x:X.tt+8, y:cy-12, width:X.br-X.tt-30, height:24, rx:6, fill:'var(--panel)', stroke:c, 'stroke-dasharray':'3 3'}, g);
+      S('text', {x:X.tt+18, y:cy+4, 'font-size':11.5, fill:'var(--muted)'}, g, s.label);
+    } else if (s.k === 'will') {
+      S('path', {d:`M${X.br},${cy-10} q30,10 0,20`, fill:'none', stroke:c, 'stroke-width':2, 'marker-end':'url(#aBad)'}, g);
+      S('text', {x:X.br-8, y:cy+4, 'text-anchor':'end', 'font-size':11.5, fill:c, 'font-weight':600}, g, s.label);
+      S('text', {x:X.tt, y:cy+4, 'text-anchor':'middle', 'font-size':14, fill:c}, g, '✕');
+    } else {
+      S('line', {x1:X.tt+6, y1:cy, x2:X.br-6, y2:cy, stroke:c, 'stroke-width':2, 'marker-end':`url(#${mk[s.k]})`}, g);
+      S('text', {x:(X.tt+X.br)/2, y:cy-6, 'text-anchor':'middle', 'font-size':11.5, fill:'var(--ink)', 'font-weight':500}, g, s.label);
+      S('circle', {cx:X.tt, cy, r:4, fill:c}, g);
+    }
+    // retained column
+    const changedS = i === 0 || steps[i-1].st !== s.st, changedV = i === 0 || steps[i-1].sv !== s.sv;
+    S('text', {x:RX+12, y:cy-3, 'font-size':11.5, fill: changedS ? 'var(--copper)' : 'var(--muted)', 'font-weight': changedS ? 600 : 400}, g, 'status: ' + s.st);
+    S('text', {x:RX+12, y:cy+13, 'font-size':11.5, fill: changedV ? 'var(--info)' : 'var(--muted)', 'font-weight': changedV ? 600 : 400}, g, 'state: ' + s.sv);
+    g.addEventListener('click', () => select(i));
+    g.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(i) } });
+    rows.push({hl});
+  });
+  select(7);
+})();
+
+// ---------- 3. annotated JSON ----------
+function renderJSON(preId, notesId, rawId, raw, notes) {
+  const obj = JSON.parse(raw);
+  document.getElementById(rawId).textContent = raw;
+  const pre = document.getElementById(preId), list = document.getElementById(notesId);
+  const lines = []; const order = Object.keys(notes); const num = {}; order.forEach((k, i) => num[k] = i + 1);
+  const val = v => v === null ? '<span class="j-null">null</span>' : typeof v === 'string' ? `<span class="j-s">"${esc(v)}"</span>` : typeof v === 'boolean' ? `<span class="j-b">${v}</span>` : `<span class="j-n">${v}</span>`;
+  function walk(v, path, ind, key, comma) {
+    const pad = '  '.repeat(ind), kh = key != null ? `<span class="j-k">"${esc(key)}"</span>: ` : '';
+    if (v && typeof v === 'object') {
+      const arr = Array.isArray(v), ks = arr ? v.map((_, i) => i) : Object.keys(v);
+      lines.push({path, html: pad + kh + (arr ? '[' : '{')});
+      ks.forEach((k, i) => walk(v[k], path ? path + '.' + k : String(k), ind + 1, arr ? null : k, i < ks.length - 1));
+      lines.push({path: null, html: pad + (arr ? ']' : '}') + (comma ? ',' : '')});
+    } else lines.push({path, html: pad + kh + val(v) + (comma ? ',' : '')});
+  }
+  walk(obj, '', 0, null, false);
+  const lineEls = {};
+  pre.innerHTML = '';
+  lines.forEach(l => {
+    const span = document.createElement('span'); span.className = 'ln';
+    span.innerHTML = l.html + (l.path && num[l.path] ? `<span class="badge">${num[l.path]}</span>` : '');
+    if (l.path && num[l.path]) { span.dataset.n = num[l.path]; lineEls[num[l.path]] = span }
+    pre.appendChild(span);
+  });
+  order.forEach((k, i) => {
+    const li = document.createElement('li'); li.dataset.n = i + 1;
+    const label = k.replace(/^sensors\.(\d+)\./, (_, d) => `sensors[${d}].`);
+    li.innerHTML = `<span class="badge">${i + 1}</span><span><b>${esc(label)}</b> ${notes[k]}</span>`;
+    list.appendChild(li);
+  });
+  const hl = n => { pre.querySelectorAll('.ln').forEach(e => e.classList.toggle('hl', e.dataset.n == n)); list.querySelectorAll('li').forEach(e => e.classList.toggle('hl', e.dataset.n == n)) };
+  [pre, list].forEach(root => {
+    root.addEventListener('pointerover', e => { const t = e.target.closest('[data-n]'); if (t) hl(t.dataset.n) });
+    root.addEventListener('pointerleave', () => hl(-1));
+  });
+}
+renderJSON('jsonOk', 'notesOk', 'rawOk', G.stateOk, {
+  'device_id': 'The tank: its key in <code>devices_&lt;site&gt;</code>, <code>[a-z0-9_-]+</code>. Also the topic segment.',
+  'timestamp': 'When the sweep <em>started</em>. UTC, RFC 3339, to the second. It is the reading time for every probe in the message.',
+  'clock_synced': 'Whether NTP had synced. The Pi has no real-time clock, so <code>false</code> means the timestamp may be wrong.',
+  'sweep_ms': 'How long the whole sweep took, across all tanks. Diagnostics.',
+  'sensors': '<b>Every</b> configured probe of this tank, in <code>order</code>, top first. A failing probe is never left out.',
+  'sensors.0.position': 'From config. Together with <code>device_id</code> it is the consumer\'s identity: <code>hot-water-cylinder.top</code>.',
+  'sensors.0.order': 'From config: 1 = top.',
+  'sensors.0.height_mm': 'From config, in millimetres.',
+  'sensors.0.rom': 'The physical sensor. It changes when a probe is replaced; the position doesn\'t.',
+  'sensors.0.temp_c': '<code>raw_c + offset_c</code>, rounded to 4 dp (G10): 61.375 − 0.19 = 61.185, without float noise. <code>null</code> when the read failed.',
+  'sensors.0.raw_c': 'The sensor\'s own value, before calibration. <code>null</code> when the read failed. See §09 #1 on its real precision.',
+  'sensors.0.offset_c': 'The calibration from config. <code>0</code> when uncalibrated: always a number, never <code>null</code>.',
+  'sensors.0.error': '<code>null</code>, or a failure code (§04).',
+  'sensors.0.suspect': '<code>null</code>, or <code>85c_unverified</code>.',
+  'sensors.0.attempts': 'How many reads it took. Diagnostics.',
+  'sensors.0.bus': 'The kernel\'s bus name, for diagnostics only: bus numbers swap across reboots.',
+  'sensors.1.height_mm': '<code>null</code>: not configured. Unknown is <code>null</code>, never 0. The probe can still be placed by <code>order</code>.',
+  'sensors.1.temp_c': 'No offset, so <code>temp_c</code> equals <code>raw_c</code>.'
+});
+renderJSON('jsonFail', 'notesFail', 'rawFail', G.stateFail, {
+  'clock_synced': '<code>false</code>: NTP hadn\'t synced, typically in the first minute after a reboot. Consumers should use the receive time or drop the reading.',
+  'sweep_ms': '6.4 s, longer than state-ok\'s 4 s: three CRC attempts on one probe, plus the extra 85 °C read.',
+  'sensors.0.temp_c': 'Exactly 85: published, not dropped.',
+  'sensors.0.suspect': '<code>85c_unverified</code>: it passed every check, and the extra read didn\'t give a different good value.',
+  'sensors.0.attempts': '2 = one read plus the extra 85 °C read, which sits <em>outside</em> the attempt budget (G2). So attempts can exceed <code>sweep.attempts</code>.',
+  'sensors.1.temp_c': '<code>null</code>, never 0: there is no value.',
+  'sensors.1.raw_c': '<code>null</code> too.',
+  'sensors.1.offset_c': 'Still the configured 0.05: it\'s a config fact, reported even with no reading.',
+  'sensors.1.error': '<code>not_present</code>: <code>w1_slave</code> is missing, so it isn\'t retried.',
+  'sensors.1.attempts': '1: <code>not_present</code> stops at once.',
+  'sensors.1.bus': '<code>null</code>: the probe is on no bus.',
+  'sensors.2.error': '<code>crc</code>: retried, and every try failed.',
+  'sensors.2.attempts': '3: the whole budget (<code>sweep.attempts</code>, default 3).',
+  'sensors.2.bus': 'Still known: the probe is on a bus, it just didn\'t read cleanly.'
+});
+
+// ---------- 5. status ----------
+(function () {
+  const evs = [['STARTUP', G.startup, 'var(--info)'], ['HEARTBEAT', G.heartbeat, 'var(--ok)'], ['SHUTDOWN', G.shutdown, 'var(--off)'], ['LWT', G.lwt, 'var(--bad)']];
+  const wrap = document.getElementById('statusCards');
+  for (const [name, raw, c] of evs) {
+    const o = JSON.parse(raw);
+    const d = document.createElement('div'); d.className = 'card'; d.style.borderTop = `3px solid ${c}`;
+    d.innerHTML = `<div class="ev"><span>${name}</span><span class="chip" style="color:${c};border-color:${c}">online:${o.online}</span></div><pre>${esc(JSON.stringify(o, null, 1))}</pre><p style="font-size:12px;color:var(--muted);margin:8px 0 0">${name === 'LWT' ? 'lwt.golden · published by the broker' : 'status-' + name.toLowerCase() + '.golden'}</p>`;
+    wrap.appendChild(d);
+  }
+  const objs = evs.map(e => JSON.parse(e[1]));
+  const keys = Object.keys(objs[2]); // shutdown has every key
+  const t = document.getElementById('statusMatrix');
+  let h = '<thead><tr><th>Field</th>' + evs.map(e => `<th>${e[0]}</th>`).join('') + '</tr></thead><tbody>';
+  const show = v => v === undefined ? '<span class="cell-absent">absent</span>' : v === null ? '<span class="j-null">null</span>' : Array.isArray(v) ? (v.length ? (typeof v[0] === 'object' ? `[${v.length} problem${v.length > 1 ? 's' : ''}]` : esc(JSON.stringify(v))) : '[]') : esc(JSON.stringify(v));
+  for (const k of keys) h += `<tr><td class="code">${k}</td>` + objs.map(o => `<td class="code">${show(o[k])}</td>`).join('') + '</tr>';
+  t.innerHTML = h + '</tbody>';
+})();
+
+// ---------- 6a. stratification ----------
+(function () {
+  const ok = JSON.parse(G.stateOk), fail = JSON.parse(G.stateFail);
+  let which = 'ok', zero = false;
+  const tank = document.getElementById('stratTank'), ch = document.getElementById('stratChart'), note = document.getElementById('stratNote');
+  const H0 = 30, H1 = 320, maxH = 1600; // chart y range in px, mm
+  const yOf = mm => H1 - (mm / maxH) * (H1 - H0);
+  const X0 = 60, X1 = 540, xOf = t => X0 + (t / 90) * (X1 - X0);
+  const UNPLACED = 352; // lane for height_mm null
+  const tcol = t => { const f = Math.max(0, Math.min(1, (t - 10) / 60)); return `color-mix(in srgb, var(--hot) ${Math.round(f*100)}%, var(--cold))` };
+  function draw() {
+    const d = which === 'ok' ? ok : fail;
+    tank.innerHTML = ''; ch.innerHTML = '';
+    // tank
+    const top = yOf(1600), bot = yOf(0);
+    S('rect', {x:40, y:top, width:90, height:bot-top, rx:38, fill:'var(--glass)', stroke:'var(--muted)', 'stroke-width':2}, tank);
+    S('text', {x:85, y:16, 'text-anchor':'middle', 'font-size':11, fill:'var(--muted)'}, tank, d.device_id);
+    for (const s of d.sensors) {
+      const placed = s.height_mm !== null, y = placed ? yOf(s.height_mm) : UNPLACED;
+      const good = s.temp_c !== null;
+      if (placed) S('rect', {x:44, y:y-14, width:82, height:28, rx:6, fill: good ? tcol(s.temp_c) : 'transparent', opacity: good ? .55 : 1, stroke: good ? 'none' : 'var(--bad)', 'stroke-dasharray':'3 3'}, tank);
+      S('line', {x1:130, y1:y, x2:158, y2:y, stroke:'var(--copper)', 'stroke-width':2}, tank);
+      S('circle', {cx:130, cy:y, r:5, fill:'var(--panel)', stroke:'var(--copper)', 'stroke-width':2}, tank);
+      S('text', {x:85, y:y+4, 'text-anchor':'middle', 'font-size':11, class:'mono', fill:'var(--ink)'}, tank, good ? s.temp_c + '°' : (s.error || ''));
+      if (!placed) S('text', {x:85, y:y+18, 'text-anchor':'middle', 'font-size':9.5, fill:'var(--muted)'}, tank, s.position + ' · no height');
+    }
+    // chart grid
+    for (let mm = 0; mm <= 1600; mm += 400) { const y = yOf(mm); S('line', {x1:X0, y1:y, x2:X1, y2:y, stroke:'var(--grid)'}, ch); S('text', {x:X0-8, y:y+4, 'text-anchor':'end', 'font-size':11, fill:'var(--muted)'}, ch, mm); }
+    for (let t = 0; t <= 90; t += 15) { const x = xOf(t); S('line', {x1:x, y1:H0, x2:x, y2:H1, stroke:'var(--grid)'}, ch); S('text', {x, y:H1+16, 'text-anchor':'middle', 'font-size':11, fill:'var(--muted)'}, ch, t + '°'); }
+    S('text', {x:14, y:H0-12, 'font-size':11, fill:'var(--muted)'}, ch, 'height_mm');
+    S('text', {x:X1, y:H1+30, 'text-anchor':'end', 'font-size':11, fill:'var(--muted)'}, ch, 'temp_c (°C)');
+    S('line', {x1:X0, y1:UNPLACED-12, x2:X1, y2:UNPLACED-12, stroke:'var(--line)', 'stroke-dasharray':'2 3'}, ch);
+    S('text', {x:X0-8, y:UNPLACED+4, 'text-anchor':'end', 'font-size':10.5, fill:'var(--muted)'}, ch, 'null');
+    // ghost zero line
+    if (zero) {
+      const pts = d.sensors.filter(s => s.height_mm !== null).map(s => [xOf(s.temp_c ?? 0), yOf(s.height_mm)]);
+      if (pts.length > 1) S('polyline', {points:pts.map(p => p.join(',')).join(' '), fill:'none', stroke:'var(--bad)', 'stroke-width':2, 'stroke-dasharray':'6 4'}, ch);
+      pts.forEach(p => S('circle', {cx:p[0], cy:p[1], r:4, fill:'none', stroke:'var(--bad)', 'stroke-width':1.5}, ch));
+    }
+    // real line between consecutive known placed points only
+    const known = d.sensors.filter(s => s.height_mm !== null && s.temp_c !== null);
+    if (known.length > 1) S('polyline', {points:known.map(s => xOf(s.temp_c) + ',' + yOf(s.height_mm)).join(' '), fill:'none', stroke:'var(--copper)', 'stroke-width':2}, ch);
+    for (const s of d.sensors) {
+      const placed = s.height_mm !== null, y = placed ? yOf(s.height_mm) : UNPLACED;
+      let mark;
+      if (s.temp_c !== null) {
+        const x = xOf(s.temp_c);
+        mark = S('circle', {cx:x, cy:y, r:6, fill:'var(--copper)', stroke:'var(--panel)', 'stroke-width':2}, ch);
+        if (s.suspect) S('circle', {cx:x, cy:y, r:11, fill:'none', stroke:'var(--warn)', 'stroke-width':2, 'stroke-dasharray':'3 2'}, ch);
+        S('text', {x:x+14, y:y+4, 'font-size':11.5, fill:'var(--ink)'}, ch, `${s.position} ${s.temp_c} °C${s.suspect ? ' · ' + s.suspect : ''}`);
+      } else {
+        const x = X0 + 10;
+        S('text', {x, y:y+4, 'font-size':14, fill:'var(--bad)', 'font-weight':700}, ch, '×');
+        mark = S('rect', {x:x-4, y:y-10, width:16, height:16, fill:'transparent'}, ch);
+        S('text', {x:x+16, y:y+4, 'font-size':11.5, fill:'var(--bad)'}, ch, `${s.position}: temp_c null · ${s.error}`);
+      }
+      const hit = S('circle', {cx: s.temp_c !== null ? xOf(s.temp_c) : X0 + 14, cy:y, r:16, fill:'transparent'}, ch);
+      bindTip(hit, `<b>${esc(s.position)}</b> (order ${s.order})<br>height_mm: ${s.height_mm ?? 'null'}<br>temp_c: ${s.temp_c ?? 'null'} · raw_c: ${s.raw_c ?? 'null'}<br>error: ${s.error ?? 'null'} · suspect: ${s.suspect ?? 'null'}<br>attempts: ${s.attempts} · bus: ${s.bus ?? 'null'}`);
+    }
+    note.innerHTML = which === 'ok'
+      ? 'state-ok: the bottom probe has <code>height_mm: null</code>, so it can\'t go on the height axis. It sits in the "null" lane, and is still ordered below <code>top</code> by <code>order: 2</code>. Two points don\'t make a profile; a real tank would have more probes.'
+      : 'state-failures: only the suspect top value can be plotted. The middle and bottom probes have a height but no value, so the profile line can\'t be drawn' + (zero ? '. <b style="color:var(--bad)">The dashed red line is what a consumer that wrote 0 for null would chart: a tank apparently at 0 °C below the top.</b>' : '. Turn on the zero view to see why <code>null</code> matters.');
+  }
+  document.querySelectorAll('[data-strat]').forEach(b => b.addEventListener('click', () => {
+    which = b.dataset.strat; document.querySelectorAll('[data-strat]').forEach(x => x.setAttribute('aria-pressed', x === b)); draw();
+  }));
+  const zb = document.getElementById('stratZero');
+  zb.addEventListener('click', () => { zero = !zero; zb.setAttribute('aria-pressed', zero); draw() });
+  draw();
+})();
+
+// ---------- 6b. fault replay ----------
+(function () {
+  const rows = FAULT_CSV.trim().split('\n').map(l => { const [t, ...v] = l.split(','); return {t: t.slice(11, 19), v: v.map(x => x === '' ? null : parseFloat(x)), raw: v} });
+  // classify each cell
+  const lastGood = 3, firstBack = 23;
+  rows.forEach((r, i) => {
+    r.code = r.raw.map(x => {
+      if (x !== '' && parseFloat(x) !== 0) return null; // a value
+      if (x === '0.000') return 'bus_low';
+      // blank
+      const anyZero = r.raw.includes('0.000');
+      return anyZero ? 'unknown' : 'not_present';
+    });
+  });
+  let mode = 'tt';
+  const svg = document.getElementById('faultSvg');
+  const L = 84, R = 700, T = 20, B = 220, n = rows.length;
+  const xOf = i => L + (i + .5) * (R - L) / n, cw = (R - L) / n;
+  const yOf = t => B - (t / 22) * (B - T);
+  const series = ['left', 'middle', 'right'], cols = ['var(--s1)', 'var(--s2)', 'var(--s3)'];
+  const codeCol = {bus_low:'var(--bad)', not_present:'var(--off)', unknown:'var(--warn)'};
+  function draw() {
+    svg.innerHTML = '';
+    // fault band
+    S('rect', {x:xOf(lastGood+1)-cw/2, y:T, width:(firstBack-lastGood-1)*cw, height:B-T, fill:'var(--bad)', opacity:.06}, svg);
+    for (let t = 0; t <= 20; t += 5) { const y = yOf(t); S('line', {x1:L, y1:y, x2:R, y2:y, stroke:'var(--grid)'}, svg); S('text', {x:L-8, y:y+4, 'text-anchor':'end', 'font-size':11, fill:'var(--muted)'}, svg, t + '°'); }
+    S('text', {x:L, y:T-6, 'font-size':11, fill:'var(--muted)'}, svg, mode === 'tt' ? 'temp_c as published (gaps are null)' : 'as logged: the kernel’s t= value, 0.000 included');
+    // lines
+    series.forEach((name, si) => {
+      let seg = [];
+      const flush = () => { if (seg.length > 1) S('polyline', {points:seg.join(' '), fill:'none', stroke:cols[si], 'stroke-width':2, 'stroke-linejoin':'round'}, svg); else if (seg.length === 1) { const [x, y] = seg[0].split(','); S('circle', {cx:x, cy:y, r:3, fill:cols[si]}, svg) } seg = []; };
+      rows.forEach((r, i) => {
+        let v = r.v[si];
+        if (mode === 'tt' && r.code[si]) v = null;
+        if (v === null) { flush(); return }
+        seg.push(xOf(i) + ',' + (yOf(v) + (mode === 'raw' && v === 0 ? (si - 1) * 3 : 0)));
+      });
+      flush();
+    });
+    if (mode === 'raw') S('text', {x:xOf(6), y:yOf(0)-10, 'text-anchor':'middle', 'font-size':11.5, fill:'var(--bad)', 'font-weight':600}, svg, 'fake 0.000 °C: CRC passed');
+    else S('text', {x:(xOf(lastGood+1)+xOf(firstBack-1))/2, y:yOf(11), 'text-anchor':'middle', 'font-size':12, fill:'var(--muted)'}, svg, 'no value published · temp_c null');
+    // direct labels
+    series.forEach((name, si) => S('text', {x:xOf(n-1)+6, y:yOf(rows[n-1].v[si]) + (si-1)*11, 'font-size':10.5, fill:'var(--muted)'}, svg, name));
+    // code strip
+    const SY = 262, SH = 18;
+    S('text', {x:L-8, y:SY-8, 'text-anchor':'end', 'font-size':10.5, fill:'var(--muted)'}, svg, 'error');
+    series.forEach((name, si) => {
+      const y = SY + si * (SH + 3);
+      S('text', {x:L-8, y:y+13, 'text-anchor':'end', 'font-size':11, fill:'var(--muted)'}, svg, name);
+      rows.forEach((r, i) => {
+        const c = r.code[si];
+        S('rect', {x:xOf(i)-cw/2+1, y, width:cw-2, height:SH, rx:3, fill: c ? codeCol[c] : 'var(--grid)', opacity: c ? .85 : 1}, svg);
+      });
+    });
+    // statehouse + status rows
+    const HY = SY + 3 * (SH + 3) + 16;
+    S('text', {x:L-8, y:HY+13, 'text-anchor':'end', 'font-size':11, fill:'var(--muted)'}, svg, 'statehouse');
+    const phases = [
+      [0, lastGood, 'write ×3', 'var(--ok)'],
+      [lastGood+1, 8, 'nothing · bus_low', 'var(--bad)'],
+      [9, firstBack-1, 'write nothing · after N min: probes down', 'var(--off)'],
+      [firstBack, n-1, 'back', 'var(--ok)']
+    ];
+    for (const [a, b, t, c] of phases) {
+      const x0 = xOf(a)-cw/2+1, w = (b-a+1)*cw-2;
+      S('rect', {x:x0, y:HY, width:w, height:SH+4, rx:4, fill:'none', stroke:c, 'stroke-width':1.5}, svg);
+      const txt = t;
+      S('text', {x:x0+w/2, y:HY+15, 'text-anchor':'middle', 'font-size':10.5, fill:'var(--ink)'}, svg, txt);
+    }
+    const PY = HY + SH + 16;
+    S('text', {x:L-8, y:PY+13, 'text-anchor':'end', 'font-size':11, fill:'var(--muted)'}, svg, 'status');
+    S('rect', {x:L+1, y:PY, width:R-L-2, height:SH+4, rx:4, fill:'none', stroke:'var(--copper)', 'stroke-width':1.5}, svg);
+    S('text', {x:(L+R)/2, y:PY+15, 'text-anchor':'middle', 'font-size':10.5, fill:'var(--ink)'}, svg, 'online:true throughout: the publisher was fine, the wiring wasn’t');
+    // time axis
+    const AY = PY + SH + 26;
+    rows.forEach((r, i) => { if (i % 4 === 0) S('text', {x:xOf(i), y:AY, 'text-anchor':'middle', 'font-size':10, class:'mono', fill:'var(--muted)'}, svg, r.t.slice(0, 5)); });
+    S('text', {x:R, y:AY+18, 'text-anchor':'end', 'font-size':10.5, fill:'var(--muted)'}, svg, 'local time, 2026-09-28, one column per 30 s sweep');
+    svg.setAttribute('viewBox', `0 0 760 ${AY + 26}`);
+    // hover columns
+    rows.forEach((r, i) => {
+      const hit = S('rect', {x:xOf(i)-cw/2, y:T, width:cw, height:AY-T, fill:'transparent'}, svg);
+      bindTip(hit, () => `<b>${r.t}</b><br>` + series.map((s, si) => `${s}: ${r.code[si] ? `temp_c null · <b>${r.code[si] === 'unknown' ? 'failed (kind not logged)' : r.code[si]}</b>` : `temp_c ${r.v[si]}`} <span style="color:var(--muted)">(CSV: ${r.raw[si] || 'blank'})</span>`).join('<br>'));
+      hit.addEventListener('pointerenter', () => hit.setAttribute('fill', 'color-mix(in srgb, var(--ink) 6%, transparent)'));
+      hit.addEventListener('pointerleave', () => hit.setAttribute('fill', 'transparent'));
+    });
+  }
+  document.querySelectorAll('[data-fault]').forEach(b => b.addEventListener('click', () => { mode = b.dataset.fault; document.querySelectorAll('[data-fault]').forEach(x => x.setAttribute('aria-pressed', x === b)); draw() }));
+  draw();
+})();
+
+// ---------- 6c. timing ----------
+(function () {
+  const svg = document.getElementById('timingSvg');
+  const d = S('defs', {}, svg);
+  const p = S('pattern', {id:'stripe', width:6, height:6, patternUnits:'userSpaceOnUse', patternTransform:'rotate(45)'}, d);
+  S('rect', {width:6, height:6, fill:'var(--glass)'}, p); S('line', {x1:0, y1:0, x2:0, y2:6, stroke:'var(--warn)', 'stroke-width':2.5}, p);
+  const bars = [
+    ['state-ok.golden', 3.988, 'golden', 'sweep_ms 3988'],
+    ['state-failures.golden', 6.402, 'golden', 'sweep_ms 6402: CRC retries and the 85 recheck'],
+    ['measured: 2 buses in parallel', 4.0, 'measured', 'ONEWIRE.md speed table, 2 × 5 sensors'],
+    ['measured: sequential', 8.0, 'measured', 'what parallel buses avoid'],
+    ['measured: sequential + second reader', 10.3, 'measured', 'why only one process may read (templog off)'],
+    ['config floor (G6): 10 × 0.8 s', 8.0, 'rule', 'sweep.interval must be ≥ 0.8 s × all sensors'],
+    ['arithmetic: 5 on a bus, all failing ×3', 12.0, 'calc', '5 × 3 × 0.8 s; not measured; a not_present fails fast']
+  ];
+  const L = 250, R = 730, T = 30, rowH = 36, xOf = s => L + s / 30 * (R - L);
+  for (let s = 0; s <= 30; s += 5) { const x = xOf(s); S('line', {x1:x, y1:T-8, x2:x, y2:T + bars.length * rowH, stroke:'var(--grid)'}, svg); S('text', {x, y:T + bars.length * rowH + 16, 'text-anchor':'middle', 'font-size':11, fill:'var(--muted)'}, svg, s + ' s'); }
+  const col = {golden:'var(--copper)', measured:'var(--info)', rule:'var(--off)', calc:'url(#stripe)'};
+  bars.forEach(([name, s, kind, note], i) => {
+    const y = T + i * rowH;
+    S('text', {x:L-10, y:y+18, 'text-anchor':'end', 'font-size':12, fill:'var(--ink)'}, svg, name);
+    const r = S('rect', {x:L, y:y+6, width:xOf(s)-L, height:18, rx:4, fill:col[kind], stroke: kind === 'calc' ? 'var(--warn)' : 'none'}, svg);
+    S('text', {x:xOf(s)+8, y:y+19, 'font-size':11.5, class:'mono', fill:'var(--muted)'}, svg, s.toFixed(s % 1 ? 3 : 1).replace(/0+$/, '').replace(/\.$/, '') + ' s');
+    const hit = S('rect', {x:0, y, width:760, height:rowH, fill:'transparent'}, svg);
+    bindTip(hit, `<b>${esc(name)}</b><br>${s} s of the 30 s interval (${Math.round(s/30*100)}%)<br>${esc(note)}`);
+  });
+  const x30 = xOf(30);
+  S('line', {x1:x30, y1:T-14, x2:x30, y2:T + bars.length * rowH, stroke:'var(--bad)', 'stroke-width':2}, svg);
+  S('text', {x:x30, y:T-18, 'text-anchor':'end', 'font-size':11.5, fill:'var(--bad)', 'font-weight':600}, svg, 'next tick: sweep.interval 30 s');
+  svg.setAttribute('viewBox', `0 0 760 ${T + bars.length * rowH + 30}`);
+})();
+
+// ---------- 7. consumer flow ----------
+(function () {
+  const svg = document.getElementById('flowSvg'); arrowDefs(svg);
+  const CX = 230, W = 300, RX = 560, RW = 180;
+  const box = (x, y, w, h, t, c, kind) => {
+    if (kind === 'q') {
+      S('path', {d:`M${x},${y+h/2} L${x+16},${y} L${x+w-16},${y} L${x+w},${y+h/2} L${x+w-16},${y+h} L${x+16},${y+h} Z`, fill:'var(--panel)', stroke:c, 'stroke-width':1.8}, svg);
+    } else S('rect', {x, y, width:w, height:h, rx:kind === 'end' ? h/2 : 8, fill:'var(--panel)', stroke:c, 'stroke-width':1.8}, svg);
+    const n = wrapText(svg, x + w/2, 0, t, kind === 'q' ? 38 : 30, {'text-anchor':'middle', 'font-size':12, fill:'var(--ink)'});
+    const txt = svg.lastChild; txt.setAttribute('y', y + h/2 + 4 - (n-1)*7.5);
+  };
+  const arrow = (x1, y1, x2, y2, c, label, lx, ly) => {
+    S('line', {x1, y1, x2, y2, stroke:c || 'var(--muted)', 'stroke-width':1.6, 'marker-end':'url(#aMut)'}, svg);
+    if (label) S('text', {x:lx ?? (x1+x2)/2 + 6, y:ly ?? (y1+y2)/2 - 4, 'font-size':11, 'font-weight':600, fill:'var(--muted)'}, svg, label);
+  };
+  const steps = [
+    {q:'state message on {base}/+/state', kind:'end', c:'var(--info)'},
+    {q:'timestamp already seen for this device_id?', yes:'replay: skip, never write twice', yc:'var(--off)'},
+    {q:'timestamp older than 90 s (3 × interval)?', yes:'retained, stale: mark devices stale; wait for a live message', yc:'var(--warn)'},
+    {q:'clock_synced false?', yes:'use broker receive time, or drop the reading', yc:'var(--warn)', cont:true},
+    {q:'for each sensor: temp_c null?', yes:'write nothing; never 0. Count or log error', yc:'var(--bad)'},
+    {q:'write temperature_c at timestamp to primary device_id.position', kind:'end', c:'var(--ok)', sub:true},
+  ];
+  let y = 20; const H = 52, GAP = 34;
+  steps.forEach((s, i) => {
+    const kind = s.kind || 'q', c = s.c || 'var(--line)';
+    box(CX - W/2, y, W, H, s.q, kind === 'q' ? 'var(--muted)' : c, kind);
+    if (s.yes) {
+      arrow(CX + W/2, y + H/2, RX - RW/2 - 4, y + H/2, null, 'yes', CX + W/2 + 10, y + H/2 - 6);
+      box(RX - RW/2, y + 2, RW, H - 4, s.yes, s.yc, 'r');
+      if (s.cont) { S('path', {d:`M${RX},${y+H-2} L${RX},${y+H+GAP/2} L${CX+20},${y+H+GAP/2}`, fill:'none', stroke:'var(--muted)', 'stroke-width':1.3, 'stroke-dasharray':'4 3', 'marker-end':'url(#aMut)'}, svg); S('text', {x:RX+6, y:y+H+GAP/2-2, 'font-size':10.5, fill:'var(--muted)'}, svg, 'then continue') }
+    }
+    if (i < steps.length - 1) arrow(CX, y + H, CX, y + H + GAP - 2, null, kind === 'q' ? 'no' : '', CX + 8, y + H + 20);
+    y += H + GAP;
+  });
+  S('text', {x:CX, y:y+4, 'text-anchor':'middle', 'font-size':11, fill:'var(--muted)'}, svg, 'suspect "85c_unverified": write the value, keep the flag if possible');
+  S('text', {x:CX, y:y+20, 'text-anchor':'middle', 'font-size':11, fill:'var(--muted)'}, svg, 'drop attempts, bus, sweep_ms; keep rom as metadata');
+  svg.setAttribute('viewBox', `0 0 760 ${y + 34}`);
+})();
+
+// ---------- 10. decisions ----------
+(function () {
+  const dec = [
+    ['prefix', 'Prefix and topic shape', '<code>energy/hot_water</code>, with <code>{prefix}/{device_id}/state</code> per tank and <code>{prefix}/status</code> per daemon. device_id is the <code>devices_&lt;site&gt;</code> key; one tanktemp per site.', false],
+    ['qos', 'Retained + QoS choices', 'State QoS 0, retained: the next sweep replaces it within 30 s. Status and will QoS 1, retained: the lifecycle mustn\'t be lost, and a late subscriber needs it.', false],
+    ['G14', 'LWT without a timestamp (G14)', 'A will is fixed at connect time, so any timestamp in it would be the connect time and misleading.', true],
+    ['G19', 'HEARTBEAT on reconnect, not a new event (G19)', 'Replaces the broker\'s retained LWT at once, using an event consumers already handle.', true],
+    ['G10', '4 dp rounding of temp_c (G10)', 'Removes float noise (61.185, not 61.18499…). Note §09 #1: raw_c is actually millidegree-truncated.', true],
+    ['G15', 'startup_problems carries a human sentence (G15)', 'The most useful thing on a dashboard. Consumers match on <code>code</code>, never the message.', true],
+    ['G2', '85 °C extra read outside attempts (G2)', 'An 85 is never published unchecked, even on the last attempt. So attempts can be sweep.attempts + 1.', true],
+    ['diag', 'Per-probe attempts and bus are diagnostics', 'On the wire for debugging. Bus names swap across reboots, and the consumer spec says to drop both. Keep them, or move them to the status page only?', false]
+  ];
+  let saved = {}; try { saved = JSON.parse(localStorage.getItem('tt-wire-decisions') || '{}') } catch (e) {}
+  const list = document.getElementById('decList');
+  const save = () => { try { localStorage.setItem('tt-wire-decisions', JSON.stringify(saved)) } catch (e) {} };
+  for (const [id, title, why, conf] of dec) {
+    const li = document.createElement('li'); li.className = conf ? 'confirmed' : 'open';
+    li.innerHTML = `<div><h4>${title}</h4><p>${why}</p></div><span class="state ${conf ? 'c' : 'o'}">${conf ? '✓ confirmed: keep' : 'open'}</span>` +
+      (conf ? '' : `<div class="choice" role="group" aria-label="${esc(title)}"><button type="button" data-v="keep">Keep</button><button type="button" data-v="change">Change</button></div>`);
+    if (!conf) {
+      const btns = li.querySelectorAll('button');
+      const paint = () => btns.forEach(b => b.setAttribute('aria-pressed', saved[id] === b.dataset.v));
+      btns.forEach(b => b.addEventListener('click', () => { saved[id] = saved[id] === b.dataset.v ? undefined : b.dataset.v; save(); paint() }));
+      paint();
+    }
+    list.appendChild(li);
+  }
+  document.getElementById('copyAns').addEventListener('click', async () => {
+    const txt = dec.map(([id, title, , conf]) => `- ${title.replace(/<[^>]+>/g, '')}: ${conf ? 'KEEP (confirmed)' : (saved[id] ? saved[id].toUpperCase() : 'undecided')}`).join('\n');
+    const msg = document.getElementById('copyMsg');
+    try { await navigator.clipboard.writeText(txt); msg.textContent = 'Copied.' } catch (e) { msg.textContent = 'Clipboard unavailable here.'; console.log(txt) }
+  });
+})();
+
+// ---------- nav + theme ----------
+(function () {
+  const links = [...document.querySelectorAll('nav.toc a')];
+  const secs = links.map(a => document.querySelector(a.getAttribute('href')));
+  const io = new IntersectionObserver(es => {
+    es.forEach(e => { if (e.isIntersecting) { links.forEach(a => a.classList.toggle('on', a.getAttribute('href') === '#' + e.target.id)); const on = links.find(a => a.classList.contains('on')); if (on && innerWidth <= 900) on.scrollIntoView({block:'nearest', inline:'nearest'}) } });
+  }, {rootMargin: '-30% 0px -60% 0px'});
+  secs.forEach(s => s && io.observe(s));
+  const btn = document.getElementById('themebtn'), modes = ['auto', 'light', 'dark'];
+  let m = 'auto'; try { m = localStorage.getItem('tt-theme') || 'auto' } catch (e) {}
+  const apply = () => { if (m === 'auto') document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme', m); btn.textContent = 'Theme: ' + m };
+  btn.addEventListener('click', () => { m = modes[(modes.indexOf(m) + 1) % 3]; try { localStorage.setItem('tt-theme', m) } catch (e) {} apply() });
+  apply();
+})();
+</script>
+</body>
+</html>

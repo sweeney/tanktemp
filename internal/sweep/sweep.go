@@ -131,7 +131,7 @@ func sensorFrom(c config.Sensor, r reading.Reading) Sensor {
 		s.Code = reading.ReadError // the Source broke its contract; say so
 	}
 	if r.Code == reading.OK && r.MilliC != nil {
-		raw := float64(*r.MilliC) / 1000
+		raw := rawC(*r.MilliC)
 		t := calibrate(*r.MilliC, c.OffsetC)
 		s.RawC, s.TempC = &raw, &t
 	}
@@ -141,6 +141,13 @@ func sensorFrom(c config.Sensor, r reading.Reading) Sensor {
 // calibrate applies the offset and rounds to 4 decimals, so a published
 // value never carries float noise (61.375 - 0.19 is 61.185, not
 // 61.18499999999999).
+// rawC recovers the register's exact value. A Source reports millidegrees
+// as the kernel computes them, raw*1000/16 truncated toward zero, which
+// drops the half millidegree of every odd sixteenth (12.0625 °C arrives as
+// 12062). Rounding back to the nearest sixteenth is exact for every value
+// the DS18B20 can report.
+func rawC(milliC int) float64 { return math.Round(float64(milliC)*16/1000) / 16 }
+
 func calibrate(milliC int, offsetC float64) float64 {
-	return math.Round((float64(milliC)/1000+offsetC)*1e4) / 1e4
+	return math.Round((rawC(milliC)+offsetC)*1e4) / 1e4
 }
