@@ -357,7 +357,7 @@ real() { PATH="${PATH//$RSTUBS:/}" "$@"; }
 fmt="$2" f="$3"
 [ -e "$f" ] || { echo "stat: cannot statx '$f': No such file or directory" >&2; exit 1; }
 og=$("$RSTUBS/owner_of" "$f")
-mode=$(real stat -f %Lp "$f" 2>/dev/null || real stat -c %a "$f")
+mode=$(real stat -c %a "$f" 2>/dev/null || real stat -f %Lp "$f") # GNU first: GNU's -f is file-system status
 out="${fmt//%U/${og%%:*}}"
 out="${out//%G/${og#*:}}"
 echo "${out//%a/$mode}"
@@ -372,7 +372,7 @@ user="$1" f="$2"
 [ -e "$f" ] || exit 1
 og=$(awk -v f="$f" '$1 == f {r = $2} END {print r}' "$FAKE_STATE/owners" 2>/dev/null)
 [ -n "$og" ] || exit 0
-mode=$(PATH="${PATH//$RSTUBS:/}" stat -f %Lp "$f" 2>/dev/null || PATH="${PATH//$RSTUBS:/}" stat -c %a "$f")
+mode=$(PATH="${PATH//$RSTUBS:/}" stat -c %a "$f" 2>/dev/null || PATH="${PATH//$RSTUBS:/}" stat -f %Lp "$f")
 mode="${mode: -3}"
 if [ "$user" = "${og%%:*}" ]; then d="${mode:0:1}"
 elif [ "$user" = tanktemp ] && [ "${og#*:}" = tanktemp ]; then d="${mode:1:1}"
@@ -595,7 +595,7 @@ pi_link() { readlink "$1" || echo MISSING; }
 # snapshot: everything on the fake Pi that a read-only run must not change.
 snapshot() {
     (cd "$CASE" && find home etc bin boot w1 opt -print 2>/dev/null | sort | while read -r f; do
-        if [ -L "$f" ]; then echo "$f -> $(readlink "$f")"; elif [ -f "$f" ]; then echo "$(stat -f %Lp "$f" 2>/dev/null || stat -c %a "$f") $(shasum "$f")"; else echo "$f/"; fi
+        if [ -L "$f" ]; then echo "$f -> $(readlink "$f")"; elif [ -f "$f" ]; then echo "$(stat -c %a "$f" 2>/dev/null || stat -f %Lp "$f") $(shasum "$f")"; else echo "$f/"; fi
     done
     cat state/active.* state/enabled.* state/running state/owners
     cat state/loaded_unit state/running_user state/user.* 2>/dev/null || true)
