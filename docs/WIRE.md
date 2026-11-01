@@ -35,7 +35,7 @@ not to a tank.
   "sensors": [
     {"position": "top", "order": 1, "height_mm": 1500, "rom": "28-0000117287e6",
      "temp_c": 61.185, "raw_c": 61.375, "offset_c": -0.19,
-     "error": null, "suspect": null, "attempts": 1, "bus": "w1_bus_master2"}
+     "error": null, "suspect": null}
   ]
 }
 ```
@@ -55,8 +55,6 @@ not to a tank.
 | `offset_c` | the calibration applied, `0` when uncalibrated |
 | `error` | `null`, or why there is no value: one of `not_present`, `bus_low`, `crc`, `power_on_reset`, `bad_scratchpad`, `out_of_range`, `malformed`, `read_error` |
 | `suspect` | `null`, or `85c_unverified`: a value of exactly 85.000 °C that passed every check, and that one extra read didn't replace with a different good value (it read 85 again, or that read failed). It's probably real (a cylinder can reach it), but 85 °C is also the sensor's power-on value. While a probe is suspect, tanktemp's `/healthz` reports `degraded` |
-| `attempts` | reads it took |
-| `bus` | the kernel's bus name, for diagnostics only: bus numbers change across reboots. `null` when the sensor is on no bus |
 
 The retained state means a consumer that connects late gets the last
 reading. Its `timestamp` says how old it is.
@@ -104,6 +102,13 @@ What MQTT does and doesn't guarantee here:
 - **A SHUTDOWN that can't be sent becomes the last will.** Without a clean
   disconnect the broker publishes `LWT`, so a consumer sees `online:false`
   either way.
+
+## Changes
+
+- **2026-11-01, before any consumer:** `attempts` and `bus` are no longer
+  in the state message. They were diagnostics (bus names change across
+  reboots), and they're on tanktemp's own status page and `/api/status`
+  instead.
 
 ## For consumers
 

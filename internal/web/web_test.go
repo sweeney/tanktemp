@@ -145,9 +145,13 @@ func TestAPIStatus(t *testing.T) {
 	tk := tanks[0].(map[string]any)
 	sensors := tk["sensors"].([]any)
 	s := sensors[0].(map[string]any)
-	// The tanks are the wire payload itself, so the page and MQTT never disagree.
+	// The tanks are the wire payload plus diagnostics, so the page and MQTT never disagree.
 	if tk["device_id"] != "cyl" || s["temp_c"].(float64) != 61.185 || s["error"] != nil {
 		t.Errorf("tank = %v", tk)
+	}
+	// Plus the diagnostics the wire leaves out (WIRE.md, Changes).
+	if s["attempts"] != float64(1) || s["bus"] != "w1_bus_master1" {
+		t.Errorf("diagnostics: attempts %v bus %v", s["attempts"], s["bus"])
 	}
 	if body["topic_prefix"] != "test/energy/hot_water" || body["calibrated"] != true || body["interval_s"].(float64) != 30 {
 		t.Errorf("body = %v", body)

@@ -18,6 +18,12 @@ You kept 19 of the 25 as they are. The other six:
 | G24 | Remove templog after the cutover | after tanktemp has run for a week, from 2026-11-08 at the earliest (PLAN.md, build status) |
 | G25 | A dedicated `tanktemp` system user | done in the scripts; the Pi isn't migrated yet. tanktemp runs as the `tanktemp` user from `/opt/tanktemp`, with `ProtectHome=yes` back on. The config is root:tanktemp 0640. No extra group is needed, because the 1-Wire files are world-readable. `setup-pi.sh` creates the user and moves an existing install over (README, "Deploying") |
 
+Then the wire review (`docs/wire-walkthrough.html`, 2026-11-01): you kept
+the prefix and topic shape and the retained/QoS choices, and confirmed G2,
+G10, G14, G15 and G19. One change: `attempts` and `bus` are off the wire.
+They're on tanktemp's status page and `/api/status` only (WIRE.md,
+"Changes").
+
 The table below is the original record of each guess.
 
 | # | Guess | Why | To change |

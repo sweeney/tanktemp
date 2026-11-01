@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -39,6 +40,25 @@ func TestGoldenStateOK(t *testing.T) {
 		{Position: "bottom", Order: 2, ROM: "28-000011721ce9", TempC: f(12.0625), RawC: f(12.0625), Code: reading.OK, Attempts: 1, Bus: "w1_bus_master1"},
 	}}
 	golden(t, "state-ok.golden", State(sw, tank))
+}
+
+// The diagnostic state, for tanktemp's own status page, is the wire state
+// with each sensor's attempts and bus appended: the same bytes otherwise.
+func TestStateDiagnostic(t *testing.T) {
+	sw := sweep.Sweep{At: time.Date(2026, 11, 2, 21, 6, 26, 0, time.UTC), Duration: 3988 * time.Millisecond, ClockSynced: true}
+	tank := sweep.Tank{DeviceID: "hot-water-cylinder", Sensors: []sweep.Sensor{
+		{Position: "top", Order: 1, ROM: "28-0000117287e6", TempC: f(61.185), RawC: f(61.375), Code: reading.OK, Attempts: 2, Bus: "w1_bus_master2"},
+		{Position: "middle", Order: 2, ROM: "28-000011721ab6", Code: reading.NotPresent, Attempts: 1},
+	}}
+	wire, diag := string(State(sw, tank)), string(StateDiagnostic(sw, tank))
+	if strings.Contains(wire, "attempts") || strings.Contains(wire, `"bus"`) {
+		t.Errorf("the wire state carries diagnostics: %s", wire)
+	}
+	want := strings.NewReplacer(`"suspect":null}`, `"suspect":null,"attempts":2,"bus":"w1_bus_master2"}`).Replace(wire)
+	want = strings.Replace(want, `"error":"not_present","suspect":null,"attempts":2,"bus":"w1_bus_master2"}`, `"error":"not_present","suspect":null,"attempts":1,"bus":null}`, 1)
+	if diag != want {
+		t.Errorf("diagnostic state\n got %s\nwant %s", diag, want)
+	}
 }
 
 func TestGoldenStateFailures(t *testing.T) {

@@ -154,7 +154,7 @@ func (s *Server) apiStatus(w http.ResponseWriter, _ *http.Request) {
 	out.StartupProblems = problems(snap)
 	if snap.Last != nil {
 		for _, t := range snap.Last.Tanks {
-			out.Tanks = append(out.Tanks, payload.State(*snap.Last, t))
+			out.Tanks = append(out.Tanks, payload.StateDiagnostic(*snap.Last, t))
 			for _, x := range t.Sensors {
 				if x.OffsetC != 0 {
 					out.Calibrated = true

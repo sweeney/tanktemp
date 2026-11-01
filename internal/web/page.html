@@ -104,6 +104,9 @@ function render(s) {
       name.appendChild(el("div", "pos", x.position));
       const where = (x.height_mm !== null ? x.height_mm + " mm · " : "") + x.rom;
       name.appendChild(el("div", "sub", where));
+      // Diagnostics: on this page only, not on the wire (WIRE.md, Changes).
+      const diag = (x.bus || "on no bus") + " · " + x.attempts + (x.attempts === 1 ? " read" : " reads");
+      name.appendChild(el("div", "sub", diag));
       row.appendChild(name);
       const val = el("div");
       if (x.temp_c !== null) {

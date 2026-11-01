@@ -113,7 +113,6 @@ For each element of `sensors`:
 | `rom` | metadata (see Identity) |
 | `raw_c`, `offset_c` | publisher metadata. `temp_c` already includes the calibration; `raw_c` is for diagnosis. Statehouse need not keep either |
 | `order`, `height_mm` | config facts. Useful for a stratification view; not needed for the series |
-| `attempts`, `bus` | diagnostics only. Drop them. Bus names change across reboots |
 
 The **message-level** fields:
 
@@ -187,6 +186,6 @@ state messages.
 
 `internal/payload/testdata/*.golden` are exact payloads to use as adapter
 test fixtures: `state-ok`, `state-failures` (a suspect 85 °C, a probe
-`not_present` with `bus: null`, a `crc` failure, `clock_synced: false`),
+`not_present`, a `crc` failure, `clock_synced: false`),
 `status-startup` (with a bus-wide startup problem whose `rom` is `null`),
 `status-heartbeat`, `status-shutdown` and `lwt`.

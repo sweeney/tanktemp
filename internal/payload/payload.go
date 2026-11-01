@@ -46,8 +46,15 @@ type sensor struct {
 	OffsetC  float64  `json:"offset_c"`
 	Error    *string  `json:"error"`
 	Suspect  *string  `json:"suspect"`
-	Attempts int      `json:"attempts"`
-	Bus      *string  `json:"bus"`
+}
+
+// diagSensor is a sensor with the diagnostics the wire leaves out, for
+// tanktemp's own status page. Bus names change across reboots, which is why
+// they aren't on the wire (WIRE.md, Changes).
+type diagSensor struct {
+	sensor
+	Attempts int     `json:"attempts"`
+	Bus      *string `json:"bus"`
 }
 
 func nullable(s string) *string {
@@ -59,6 +66,25 @@ func nullable(s string) *string {
 
 // State is one tank's message for one sweep.
 func State(sw sweep.Sweep, tank sweep.Tank) []byte {
+	return mustMarshal(stateOf(sw, tank))
+}
+
+// StateDiagnostic is State with each sensor's attempts and bus, for
+// /api/status. It is not a wire payload.
+func StateDiagnostic(sw sweep.Sweep, tank sweep.Tank) []byte {
+	m := stateOf(sw, tank)
+	d := struct {
+		state
+		Sensors []diagSensor `json:"sensors"`
+	}{state: m, Sensors: []diagSensor{}}
+	for i, s := range m.Sensors {
+		x := tank.Sensors[i]
+		d.Sensors = append(d.Sensors, diagSensor{sensor: s, Attempts: x.Attempts, Bus: nullable(x.Bus)})
+	}
+	return mustMarshal(d)
+}
+
+func stateOf(sw sweep.Sweep, tank sweep.Tank) state {
 	m := state{
 		DeviceID:    tank.DeviceID,
 		Timestamp:   timestamp(sw.At),
@@ -81,11 +107,9 @@ func State(sw sweep.Sweep, tank sweep.Tank) []byte {
 			OffsetC:  s.OffsetC,
 			Error:    errCode,
 			Suspect:  nullable(s.Suspect),
-			Attempts: s.Attempts,
-			Bus:      nullable(s.Bus),
 		})
 	}
-	return mustMarshal(m)
+	return m
 }
 
 // StatusInput is everything a status message reports.

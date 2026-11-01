@@ -292,7 +292,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--info); outline-
   <div class="tablewrap"><table>
     <thead><tr><th>Code</th><th>What physically happened</th><th>Passes kernel CRC?</th><th>Retried</th><th>Consumer should</th></tr></thead>
     <tbody>
-      <tr><td class="code">not_present</td><td><code>w1_slave</code> is missing (ENOENT): the probe isn't on any bus. It was unplugged, or the kernel dropped it after failed bus searches. If discovery itself fails (no bus masters, for example), every sensor reads this (G11). <code>bus</code> is <code>null</code>.</td><td>n/a</td><td>no (attempts 1)</td><td>Write nothing. If it lasts N minutes, the probe is down. STATEHOUSE.md leaves N open.</td></tr>
+      <tr><td class="code">not_present</td><td><code>w1_slave</code> is missing (ENOENT): the probe isn't on any bus. It was unplugged, or the kernel dropped it after failed bus searches. If discovery itself fails (no bus masters, for example), every sensor reads this (G11).</td><td>n/a</td><td>no (attempts 1)</td><td>Write nothing. If it lasts N minutes, the probe is down. STATEHOUSE.md leaves N open.</td></tr>
       <tr><td class="code">bus_low</td><td>All nine scratchpad bytes are <code>00</code> and <code>t=0</code>. The data line was held low: the pull-up was lost or DQ was shorted to GND. Because the CRC of all zeros is 0, the kernel says <em>YES</em> and reports a fake 0.000 °C. Seen for real on 2026-09-28 and 2026-10-18.</td><td><b>yes</b></td><td>yes</td><td>Write nothing. This is a wiring fault, not a cold tank.</td></tr>
       <tr><td class="code">crc</td><td>The kernel's verdict was NO, or tanktemp's own CRC check disagreed. Usually noise or a marginal contact. A floating line (all <code>ff</code>, nothing answering) also fails here.</td><td>no</td><td>yes</td><td>Write nothing. One on its own is transient; if it persists, look at the contact.</td></tr>
       <tr><td class="code">power_on_reset</td><td>raw = 0x0550 (85.000 °C) <em>and</em> scratchpad byte 6 = <code>0x0C</code>. The sensor restarted (it lost 3.3 V) and hasn't converted yet. The pattern comes from the datasheet: <b>a real one has never been captured</b> (G5, synthetic fixture).</td><td><b>yes</b></td><td>yes; usually clears on the next read</td><td>Write nothing. Several probes resetting together points to the power rail.</td></tr>
@@ -396,7 +396,6 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--info); outline-
       <tr><td class="code">rom</td><td>metadata; a change under the same primary means "probe replaced"</td></tr>
       <tr><td class="code">raw_c, offset_c</td><td>publisher metadata; need not be kept (<code>temp_c</code> is already calibrated)</td></tr>
       <tr><td class="code">order, height_mm</td><td>config facts; useful for a stratification view</td></tr>
-      <tr><td class="code">attempts, bus</td><td>diagnostics: drop them</td></tr>
       <tr><td class="code">timestamp</td><td>reading time for every probe in the message</td></tr>
       <tr><td class="code">clock_synced: false</td><td>use the broker receive time instead, or drop the reading</td></tr>
       <tr><td class="code">sweep_ms</td><td>diagnostics</td></tr>
@@ -466,8 +465,8 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--info); outline-
 <script>
 // ---------- data, copied from the goldens ----------
 const G = {
-  stateOk: '{"device_id":"hot-water-cylinder","timestamp":"2026-11-02T21:06:26Z","clock_synced":true,"sweep_ms":3988,"sensors":[{"position":"top","order":1,"height_mm":1500,"rom":"28-0000117287e6","temp_c":61.185,"raw_c":61.375,"offset_c":-0.19,"error":null,"suspect":null,"attempts":1,"bus":"w1_bus_master2"},{"position":"bottom","order":2,"height_mm":null,"rom":"28-000011721ce9","temp_c":12.0625,"raw_c":12.0625,"offset_c":0,"error":null,"suspect":null,"attempts":1,"bus":"w1_bus_master1"}]}',
-  stateFail: '{"device_id":"hot-water-cylinder","timestamp":"2026-11-02T21:06:56Z","clock_synced":false,"sweep_ms":6402,"sensors":[{"position":"top","order":1,"height_mm":1500,"rom":"28-0000117287e6","temp_c":85,"raw_c":85,"offset_c":0,"error":null,"suspect":"85c_unverified","attempts":2,"bus":"w1_bus_master2"},{"position":"middle","order":2,"height_mm":800,"rom":"28-000011721ab6","temp_c":null,"raw_c":null,"offset_c":0.05,"error":"not_present","suspect":null,"attempts":1,"bus":null},{"position":"bottom","order":3,"height_mm":100,"rom":"28-000011721ce9","temp_c":null,"raw_c":null,"offset_c":0,"error":"crc","suspect":null,"attempts":3,"bus":"w1_bus_master1"}]}',
+  stateOk: '{"device_id":"hot-water-cylinder","timestamp":"2026-11-02T21:06:26Z","clock_synced":true,"sweep_ms":3988,"sensors":[{"position":"top","order":1,"height_mm":1500,"rom":"28-0000117287e6","temp_c":61.185,"raw_c":61.375,"offset_c":-0.19,"error":null,"suspect":null},{"position":"bottom","order":2,"height_mm":null,"rom":"28-000011721ce9","temp_c":12.0625,"raw_c":12.0625,"offset_c":0,"error":null,"suspect":null}]}',
+  stateFail: '{"device_id":"hot-water-cylinder","timestamp":"2026-11-02T21:06:56Z","clock_synced":false,"sweep_ms":6402,"sensors":[{"position":"top","order":1,"height_mm":1500,"rom":"28-0000117287e6","temp_c":85,"raw_c":85,"offset_c":0,"error":null,"suspect":"85c_unverified"},{"position":"middle","order":2,"height_mm":800,"rom":"28-000011721ab6","temp_c":null,"raw_c":null,"offset_c":0.05,"error":"not_present","suspect":null},{"position":"bottom","order":3,"height_mm":100,"rom":"28-000011721ce9","temp_c":null,"raw_c":null,"offset_c":0,"error":"crc","suspect":null}]}',
   startup: '{"online":true,"event":"STARTUP","timestamp":"2026-11-02T21:00:00Z","version":"4aba4d5","ready":false,"uptime_s":0,"tanks":["hot-water-cylinder","second"],"sensors_ok":null,"sensors_failed":null,"unexpected":null,"startup_problems":[{"rom":"28-0000117287e6","code":"parasite_power","message":"28-0000117287e6 is in parasite-power mode; wire VDD to 3.3 V"},{"rom":null,"code":"discover_failed","message":"no 1-Wire bus masters"}]}',
   heartbeat: '{"online":true,"event":"HEARTBEAT","timestamp":"2026-11-03T21:00:00Z","version":"4aba4d5","ready":true,"uptime_s":86400,"tanks":["hot-water-cylinder"],"sensors_ok":9,"sensors_failed":1,"unexpected":["28-000011721aa5"],"startup_problems":[]}',
   shutdown: '{"online":false,"event":"SHUTDOWN","timestamp":"2026-11-03T21:00:05Z","version":"4aba4d5","ready":true,"uptime_s":86405,"tanks":["hot-water-cylinder"],"sensors_ok":10,"sensors_failed":0,"unexpected":[],"startup_problems":[],"reason":"SIGTERM"}',
@@ -695,8 +694,6 @@ renderJSON('jsonOk', 'notesOk', 'rawOk', G.stateOk, {
   'sensors.0.offset_c': 'The calibration from config. <code>0</code> when uncalibrated: always a number, never <code>null</code>.',
   'sensors.0.error': '<code>null</code>, or a failure code (§04).',
   'sensors.0.suspect': '<code>null</code>, or <code>85c_unverified</code>.',
-  'sensors.0.attempts': 'How many reads it took. Diagnostics.',
-  'sensors.0.bus': 'The kernel\'s bus name, for diagnostics only: bus numbers swap across reboots.',
   'sensors.1.height_mm': '<code>null</code>: not configured. Unknown is <code>null</code>, never 0. The probe can still be placed by <code>order</code>.',
   'sensors.1.temp_c': 'No offset, so <code>temp_c</code> equals <code>raw_c</code>.'
 });
@@ -705,16 +702,11 @@ renderJSON('jsonFail', 'notesFail', 'rawFail', G.stateFail, {
   'sweep_ms': '6.4 s, longer than state-ok\'s 4 s: three CRC attempts on one probe, plus the extra 85 °C read.',
   'sensors.0.temp_c': 'Exactly 85: published, not dropped.',
   'sensors.0.suspect': '<code>85c_unverified</code>: it passed every check, and the extra read didn\'t give a different good value.',
-  'sensors.0.attempts': '2 = one read plus the extra 85 °C read, which sits <em>outside</em> the attempt budget (G2). So attempts can exceed <code>sweep.attempts</code>.',
   'sensors.1.temp_c': '<code>null</code>, never 0: there is no value.',
   'sensors.1.raw_c': '<code>null</code> too.',
   'sensors.1.offset_c': 'Still the configured 0.05: it\'s a config fact, reported even with no reading.',
   'sensors.1.error': '<code>not_present</code>: <code>w1_slave</code> is missing, so it isn\'t retried.',
-  'sensors.1.attempts': '1: <code>not_present</code> stops at once.',
-  'sensors.1.bus': '<code>null</code>: the probe is on no bus.',
   'sensors.2.error': '<code>crc</code>: retried, and every try failed.',
-  'sensors.2.attempts': '3: the whole budget (<code>sweep.attempts</code>, default 3).',
-  'sensors.2.bus': 'Still known: the probe is on a bus, it just didn\'t read cleanly.'
 });
 
 // ---------- 5. status ----------
@@ -793,7 +785,7 @@ renderJSON('jsonFail', 'notesFail', 'rawFail', G.stateFail, {
         S('text', {x:x+16, y:y+4, 'font-size':11.5, fill:'var(--bad)'}, ch, `${s.position}: temp_c null · ${s.error}`);
       }
       const hit = S('circle', {cx: s.temp_c !== null ? xOf(s.temp_c) : X0 + 14, cy:y, r:16, fill:'transparent'}, ch);
-      bindTip(hit, `<b>${esc(s.position)}</b> (order ${s.order})<br>height_mm: ${s.height_mm ?? 'null'}<br>temp_c: ${s.temp_c ?? 'null'} · raw_c: ${s.raw_c ?? 'null'}<br>error: ${s.error ?? 'null'} · suspect: ${s.suspect ?? 'null'}<br>attempts: ${s.attempts} · bus: ${s.bus ?? 'null'}`);
+      bindTip(hit, `<b>${esc(s.position)}</b> (order ${s.order})<br>height_mm: ${s.height_mm ?? 'null'}<br>temp_c: ${s.temp_c ?? 'null'} · raw_c: ${s.raw_c ?? 'null'}<br>error: ${s.error ?? 'null'} · suspect: ${s.suspect ?? 'null'}`);
     }
     note.innerHTML = which === 'ok'
       ? 'state-ok: the bottom probe has <code>height_mm: null</code>, so it can\'t go on the height axis. It sits in the "null" lane, and is still ordered below <code>top</code> by <code>order: 2</code>. Two points don\'t make a profile; a real tank would have more probes.'
@@ -965,7 +957,7 @@ renderJSON('jsonFail', 'notesFail', 'rawFail', G.stateFail, {
     y += H + GAP;
   });
   S('text', {x:CX, y:y+4, 'text-anchor':'middle', 'font-size':11, fill:'var(--muted)'}, svg, 'suspect "85c_unverified": write the value, keep the flag if possible');
-  S('text', {x:CX, y:y+20, 'text-anchor':'middle', 'font-size':11, fill:'var(--muted)'}, svg, 'drop attempts, bus, sweep_ms; keep rom as metadata');
+  S('text', {x:CX, y:y+20, 'text-anchor':'middle', 'font-size':11, fill:'var(--muted)'}, svg, 'drop sweep_ms; keep rom as metadata');
   svg.setAttribute('viewBox', `0 0 760 ${y + 34}`);
 })();
 
@@ -978,8 +970,8 @@ renderJSON('jsonFail', 'notesFail', 'rawFail', G.stateFail, {
     ['G19', 'HEARTBEAT on reconnect, not a new event (G19)', 'Replaces the broker\'s retained LWT at once, using an event consumers already handle.', true],
     ['G10', '4 dp rounding of temp_c (G10)', 'Removes float noise (61.185, not 61.18499…). Note §09 #1: raw_c is actually millidegree-truncated.', true],
     ['G15', 'startup_problems carries a human sentence (G15)', 'The most useful thing on a dashboard. Consumers match on <code>code</code>, never the message.', true],
-    ['G2', '85 °C extra read outside attempts (G2)', 'An 85 is never published unchecked, even on the last attempt. So attempts can be sweep.attempts + 1.', true],
-    ['diag', 'Per-probe attempts and bus are diagnostics', 'On the wire for debugging. Bus names swap across reboots, and the consumer spec says to drop both. Keep them, or move them to the status page only?', false]
+    ['G2', '85 °C extra read outside attempts (G2)', 'An 85 is never published unchecked, even on the last attempt. So a probe\'s read count (on the status page) can be sweep.attempts + 1.', true],
+    ['diag', 'Per-probe attempts and bus: moved off the wire', 'Changed on 2026-11-01: they are on tanktemp\'s status page and /api/status only (WIRE.md, Changes). Bus names swap across reboots, so they never belonged in the house\'s history.', true]
   ];
   let saved = {}; try { saved = JSON.parse(localStorage.getItem('tt-wire-decisions') || '{}') } catch (e) {}
   const list = document.getElementById('decList');

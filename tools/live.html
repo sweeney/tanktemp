@@ -439,12 +439,11 @@ function startDemo() {
     for (const t of D.tanks) {
       const sensors = t.probes.map(([pos, h, base, off], i) => {
         base += (Math.random() - 0.52) * 0.12; t.probes[i][2] = base;  // slow drift, a little draw-off
-        let raw = Math.round(base * 16) / 16, error = null, attempts = 1;
-        if (D.fault > 0 && t.id === "hot-water-cylinder" && pos === "middle") { error = D.fault > 2 ? "crc" : "not_present"; attempts = error === "crc" ? 3 : 1; }
+        let raw = Math.round(base * 16) / 16, error = null;
+        if (D.fault > 0 && t.id === "hot-water-cylinder" && pos === "middle") error = D.fault > 2 ? "crc" : "not_present";
         error ? fail++ : ok++;
         return {position: pos, order: i + 1, height_mm: h, rom: "28-00000000" + (0x1000 + i + t.id.length * 16).toString(16).padStart(4, "0"),
-          temp_c: error ? null : Math.round((raw + off) * 1e4) / 1e4, raw_c: error ? null : raw, offset_c: off, error, suspect: null, attempts,
-          bus: error === "not_present" ? null : "w1_bus_master" + (1 + (i % 2))};
+          temp_c: error ? null : Math.round((raw + off) * 1e4) / 1e4, raw_c: error ? null : raw, offset_c: off, error, suspect: null};
       });
       pub(t.id + "/state", {device_id: t.id, timestamp: stamp(), clock_synced: true, sweep_ms: 3900 + Math.round(Math.random() * 200), sensors}, retained, 0);
     }
