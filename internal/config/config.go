@@ -92,9 +92,9 @@ func defaults() Config {
 const (
 	MaxAttempts = 10
 	// MaxOffsetC bounds a calibration offset. DS18B20s are within ±0.5 °C
-	// out of the box; a surface-mounted probe reads somewhat low. Anything
-	// beyond this is far more likely a typo than a calibration.
-	MaxOffsetC = 5.0
+	// out of the box, so anything beyond ±2 °C is far more likely a typo
+	// than a calibration (decided 2026-11-01, GUESSES G7).
+	MaxOffsetC = 2.0
 	// ReadTime is one DS18B20 conversion at 12-bit, with margin.
 	ReadTime = 800 * time.Millisecond
 )

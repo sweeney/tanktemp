@@ -18,14 +18,15 @@ mqtt:
   # client_id: tanktemp-<hostname>
   # topic_prefix: energy/hot_water   # use test/energy/hot_water while testing
   # username: ""
-  # password_file: /etc/tanktemp/mqtt-password
+  # password_file: /etc/tanktemp/mqtt-password   # root:tanktemp 0640
 
 tanks:
   # device_id is the tank's key in devices_<site>, and its MQTT topic segment.
   - device_id: hot-water-cylinder
     sensors:
       # order: 1 is the top. height_mm and offset_c are optional; offset_c
-      # (calibration, added to the raw reading) defaults to 0.
+      # (calibration, added to the raw reading) defaults to 0 and must be
+      # within ±2 °C.
       - {rom: 28-000000000001, position: top, order: 1, height_mm: 1500}
       - {rom: 28-000000000002, position: middle, order: 2, height_mm: 800}
       - {rom: 28-000000000003, position: bottom, order: 3, height_mm: 100}
