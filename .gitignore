@@ -8,3 +8,4 @@
 /deploy/host
 /bin/
 /tools/guessreview/answers.json
+/*.local.json

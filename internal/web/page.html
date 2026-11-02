@@ -95,7 +95,8 @@ function render(s) {
     newest = t.timestamp;
     const card = el("article", "tank");
     card.appendChild(el("h2", "", t.device_id));
-    for (const x of t.sensors) {
+    // The wire lists bottom first (order 1 = bottom); show the tank top first.
+    for (const x of [...t.sensors].reverse()) {
       const row = el("div", "sensor");
       const sw = el("div", "swatch");
       if (x.temp_c !== null) sw.style.background = colour(x.temp_c);

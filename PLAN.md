@@ -182,9 +182,9 @@ tanks:
   - device_id: hot-water-cylinder   # the devices_<site> key; also the topic segment
     sensors:
       - rom: 28-0000117287e6
-        position: top               # [a-z0-9_]+, unique within the tank
-        order: 1                    # explicit; 1 = top
-        height_mm: 1500             # optional; mm, matching the devices cylinder block
+        position: bottom            # [a-z0-9_]+, unique within the tank
+        order: 1                    # explicit; 1 = bottom (it was 1 = top until 2026-11-02, WIRE.md Changes)
+        height_mm: 100              # optional; mm, matching the devices cylinder block
         offset_c: 0                 # optional, default 0; added to the raw reading
 ```
 

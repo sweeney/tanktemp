@@ -225,10 +225,10 @@ function cylinderSVG(id, m) {
   const ss = [...m.sensors].sort((a, b) => a.order - b.order);
   const heights = ss.map(s => s.height_mm).filter(h => h != null);
   const maxH = heights.length ? Math.max(...heights) * 1.08 : null;
-  // y for each probe: from height_mm if every probe has one, else spread by order.
+  // y for each probe: from height_mm if every probe has one, else spread by order (1 = bottom).
   const useHeight = heights.length === ss.length && maxH > 0;
   const ys = ss.map((s, i) => useHeight ? bot - dome - (s.height_mm / maxH) * (bot - top - 2 * dome)
-                                        : top + dome + (i + 0.5) * (bot - top - 2 * dome) / ss.length);
+                                        : bot - dome - (i + 0.5) * (bot - top - 2 * dome) / ss.length);
   const gid = "g-" + id.replace(/[^a-z0-9_-]/gi, "");
   const known = ss.map((s, i) => ({y: ys[i], c: tempColour(s.temp_c)})).filter(p => p.c);
   const stops = known.length ? known.map(p => `<stop offset="${((p.y - top) / (bot - top) * 100).toFixed(1)}%" stop-color="${p.c}"/>`).join("")
@@ -442,7 +442,7 @@ function startDemo() {
         let raw = Math.round(base * 16) / 16, error = null;
         if (D.fault > 0 && t.id === "hot-water-cylinder" && pos === "middle") error = D.fault > 2 ? "crc" : "not_present";
         error ? fail++ : ok++;
-        return {position: pos, order: i + 1, height_mm: h, rom: "28-00000000" + (0x1000 + i + t.id.length * 16).toString(16).padStart(4, "0"),
+        return {position: pos, order: t.probes.length - i, height_mm: h, rom: "28-00000000" + (0x1000 + i + t.id.length * 16).toString(16).padStart(4, "0"),
           temp_c: error ? null : Math.round((raw + off) * 1e4) / 1e4, raw_c: error ? null : raw, offset_c: off, error, suspect: null};
       });
       pub(t.id + "/state", {device_id: t.id, timestamp: stamp(), clock_synced: true, sweep_ms: 3900 + Math.round(Math.random() * 200), sensors}, retained, 0);

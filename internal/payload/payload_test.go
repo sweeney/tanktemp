@@ -36,8 +36,8 @@ func i(v int) *int         { return &v }
 func TestGoldenStateOK(t *testing.T) {
 	sw := sweep.Sweep{At: time.Date(2026, 11, 2, 21, 6, 26, 0, time.UTC), Duration: 3988 * time.Millisecond, ClockSynced: true}
 	tank := sweep.Tank{DeviceID: "hot-water-cylinder", Sensors: []sweep.Sensor{
-		{Position: "top", Order: 1, HeightMM: i(1500), ROM: "28-0000117287e6", TempC: f(61.185), RawC: f(61.375), OffsetC: -0.19, Code: reading.OK, Attempts: 1, Bus: "w1_bus_master2"},
-		{Position: "bottom", Order: 2, ROM: "28-000011721ce9", TempC: f(12.0625), RawC: f(12.0625), Code: reading.OK, Attempts: 1, Bus: "w1_bus_master1"},
+		{Position: "bottom", Order: 1, ROM: "28-000011721ce9", TempC: f(12.0625), RawC: f(12.0625), Code: reading.OK, Attempts: 1, Bus: "w1_bus_master1"},
+		{Position: "top", Order: 2, HeightMM: i(1500), ROM: "28-0000117287e6", TempC: f(61.185), RawC: f(61.375), OffsetC: -0.19, Code: reading.OK, Attempts: 1, Bus: "w1_bus_master2"},
 	}}
 	golden(t, "state-ok.golden", State(sw, tank))
 }
@@ -64,9 +64,9 @@ func TestStateDiagnostic(t *testing.T) {
 func TestGoldenStateFailures(t *testing.T) {
 	sw := sweep.Sweep{At: time.Date(2026, 11, 2, 21, 6, 56, 0, time.UTC), Duration: 6402 * time.Millisecond}
 	tank := sweep.Tank{DeviceID: "hot-water-cylinder", Sensors: []sweep.Sensor{
-		{Position: "top", Order: 1, HeightMM: i(1500), ROM: "28-0000117287e6", TempC: f(85), RawC: f(85), Code: reading.OK, Suspect: reading.Suspect85, Attempts: 2, Bus: "w1_bus_master2"},
+		{Position: "bottom", Order: 1, HeightMM: i(100), ROM: "28-000011721ce9", Code: reading.CRC, Attempts: 3, Bus: "w1_bus_master1"},
 		{Position: "middle", Order: 2, HeightMM: i(800), ROM: "28-000011721ab6", OffsetC: 0.05, Code: reading.NotPresent, Attempts: 1},
-		{Position: "bottom", Order: 3, HeightMM: i(100), ROM: "28-000011721ce9", Code: reading.CRC, Attempts: 3, Bus: "w1_bus_master1"},
+		{Position: "top", Order: 3, HeightMM: i(1500), ROM: "28-0000117287e6", TempC: f(85), RawC: f(85), Code: reading.OK, Suspect: reading.Suspect85, Attempts: 2, Bus: "w1_bus_master2"},
 	}}
 	golden(t, "state-failures.golden", State(sw, tank))
 }

@@ -33,7 +33,10 @@ not to a tank.
   "clock_synced": true,
   "sweep_ms": 3988,
   "sensors": [
-    {"position": "top", "order": 1, "height_mm": 1500, "rom": "28-0000117287e6",
+    {"position": "bottom", "order": 1, "height_mm": null, "rom": "28-000011721ce9",
+     "temp_c": 12.0625, "raw_c": 12.0625, "offset_c": 0,
+     "error": null, "suspect": null},
+    {"position": "top", "order": 2, "height_mm": 1500, "rom": "28-0000117287e6",
      "temp_c": 61.185, "raw_c": 61.375, "offset_c": -0.19,
      "error": null, "suspect": null}
   ]
@@ -48,7 +51,7 @@ not to a tank.
 | `timestamp` | when the sweep started |
 | `clock_synced` | whether NTP had synced. The Pi has no real-time clock, so `false` means the timestamp may be wrong |
 | `sweep_ms` | how long the whole sweep took, all tanks |
-| `sensors` | **every** configured sensor of this tank, in `order` (1 = top). A failing sensor is never left out |
+| `sensors` | **every** configured sensor of this tank, in `order`: 1 is the bottom, so the list runs bottom to top, the way heights and probe labels count. A failing sensor is never left out |
 | `position`, `order`, `height_mm`, `rom` | from the config. `height_mm` is `null` if not configured. The ROM is the physical sensor; it changes when a probe is replaced, while the position doesn't |
 | `temp_c` | calibrated °C: `raw_c + offset_c`, at most 4 decimals. `null` when the read failed |
 | `raw_c` | the sensor's own value, exactly: a multiple of 0.0625 (the kernel's `t=` truncates odd sixteenths, e.g. 12.0625 to 12.062; tanktemp doesn't). `null` when the read failed |
@@ -105,6 +108,10 @@ What MQTT does and doesn't guarantee here:
 
 ## Changes
 
+- **2026-11-02, before any consumer:** `order` counts from the **bottom**
+  (1 = bottom), so it rises with `height_mm` and with the numbers on the
+  probes. It was 1 = top. The `sensors` list is still sorted by `order`, so
+  it now runs bottom to top.
 - **2026-11-01, before any consumer:** `attempts` and `bus` are no longer
   in the state message. They were diagnostics (bus names change across
   reboots), and they're on tanktemp's own status page and `/api/status`

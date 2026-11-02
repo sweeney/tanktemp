@@ -465,8 +465,8 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--info); outline-
 <script>
 // ---------- data, copied from the goldens ----------
 const G = {
-  stateOk: '{"device_id":"hot-water-cylinder","timestamp":"2026-11-02T21:06:26Z","clock_synced":true,"sweep_ms":3988,"sensors":[{"position":"top","order":1,"height_mm":1500,"rom":"28-0000117287e6","temp_c":61.185,"raw_c":61.375,"offset_c":-0.19,"error":null,"suspect":null},{"position":"bottom","order":2,"height_mm":null,"rom":"28-000011721ce9","temp_c":12.0625,"raw_c":12.0625,"offset_c":0,"error":null,"suspect":null}]}',
-  stateFail: '{"device_id":"hot-water-cylinder","timestamp":"2026-11-02T21:06:56Z","clock_synced":false,"sweep_ms":6402,"sensors":[{"position":"top","order":1,"height_mm":1500,"rom":"28-0000117287e6","temp_c":85,"raw_c":85,"offset_c":0,"error":null,"suspect":"85c_unverified"},{"position":"middle","order":2,"height_mm":800,"rom":"28-000011721ab6","temp_c":null,"raw_c":null,"offset_c":0.05,"error":"not_present","suspect":null},{"position":"bottom","order":3,"height_mm":100,"rom":"28-000011721ce9","temp_c":null,"raw_c":null,"offset_c":0,"error":"crc","suspect":null}]}',
+  stateOk: '{"device_id":"hot-water-cylinder","timestamp":"2026-11-02T21:06:26Z","clock_synced":true,"sweep_ms":3988,"sensors":[{"position":"bottom","order":1,"height_mm":null,"rom":"28-000011721ce9","temp_c":12.0625,"raw_c":12.0625,"offset_c":0,"error":null,"suspect":null},{"position":"top","order":2,"height_mm":1500,"rom":"28-0000117287e6","temp_c":61.185,"raw_c":61.375,"offset_c":-0.19,"error":null,"suspect":null}]}',
+  stateFail: '{"device_id":"hot-water-cylinder","timestamp":"2026-11-02T21:06:56Z","clock_synced":false,"sweep_ms":6402,"sensors":[{"position":"bottom","order":1,"height_mm":100,"rom":"28-000011721ce9","temp_c":null,"raw_c":null,"offset_c":0,"error":"crc","suspect":null},{"position":"middle","order":2,"height_mm":800,"rom":"28-000011721ab6","temp_c":null,"raw_c":null,"offset_c":0.05,"error":"not_present","suspect":null},{"position":"top","order":3,"height_mm":1500,"rom":"28-0000117287e6","temp_c":85,"raw_c":85,"offset_c":0,"error":null,"suspect":"85c_unverified"}]}',
   startup: '{"online":true,"event":"STARTUP","timestamp":"2026-11-02T21:00:00Z","version":"4aba4d5","ready":false,"uptime_s":0,"tanks":["hot-water-cylinder","second"],"sensors_ok":null,"sensors_failed":null,"unexpected":null,"startup_problems":[{"rom":"28-0000117287e6","code":"parasite_power","message":"28-0000117287e6 is in parasite-power mode; wire VDD to 3.3 V"},{"rom":null,"code":"discover_failed","message":"no 1-Wire bus masters"}]}',
   heartbeat: '{"online":true,"event":"HEARTBEAT","timestamp":"2026-11-03T21:00:00Z","version":"4aba4d5","ready":true,"uptime_s":86400,"tanks":["hot-water-cylinder"],"sensors_ok":9,"sensors_failed":1,"unexpected":["28-000011721aa5"],"startup_problems":[]}',
   shutdown: '{"online":false,"event":"SHUTDOWN","timestamp":"2026-11-03T21:00:05Z","version":"4aba4d5","ready":true,"uptime_s":86405,"tanks":["hot-water-cylinder"],"sensors_ok":10,"sensors_failed":0,"unexpected":[],"startup_problems":[],"reason":"SIGTERM"}',
@@ -684,29 +684,29 @@ renderJSON('jsonOk', 'notesOk', 'rawOk', G.stateOk, {
   'timestamp': 'When the sweep <em>started</em>. UTC, RFC 3339, to the second. It is the reading time for every probe in the message.',
   'clock_synced': 'Whether NTP had synced. The Pi has no real-time clock, so <code>false</code> means the timestamp may be wrong.',
   'sweep_ms': 'How long the whole sweep took, across all tanks. Diagnostics.',
-  'sensors': '<b>Every</b> configured probe of this tank, in <code>order</code>, top first. A failing probe is never left out.',
-  'sensors.0.position': 'From config. Together with <code>device_id</code> it is the consumer\'s identity: <code>hot-water-cylinder.top</code>.',
-  'sensors.0.order': 'From config: 1 = top.',
-  'sensors.0.height_mm': 'From config, in millimetres.',
-  'sensors.0.rom': 'The physical sensor. It changes when a probe is replaced; the position doesn\'t.',
-  'sensors.0.temp_c': '<code>raw_c + offset_c</code>, rounded to 4 dp (G10): 61.375 − 0.19 = 61.185, without float noise. <code>null</code> when the read failed.',
-  'sensors.0.raw_c': 'The sensor\'s own value, before calibration. <code>null</code> when the read failed. See §09 #1 on its real precision.',
-  'sensors.0.offset_c': 'The calibration from config. <code>0</code> when uncalibrated: always a number, never <code>null</code>.',
-  'sensors.0.error': '<code>null</code>, or a failure code (§04).',
-  'sensors.0.suspect': '<code>null</code>, or <code>85c_unverified</code>.',
-  'sensors.1.height_mm': '<code>null</code>: not configured. Unknown is <code>null</code>, never 0. The probe can still be placed by <code>order</code>.',
-  'sensors.1.temp_c': 'No offset, so <code>temp_c</code> equals <code>raw_c</code>.'
+  'sensors': '<b>Every</b> configured probe of this tank, in <code>order</code>, bottom first. A failing probe is never left out.',
+  'sensors.0.height_mm': '<code>null</code>: not configured. Unknown is <code>null</code>, never 0. The probe can still be placed by <code>order</code>.',
+  'sensors.0.temp_c': 'No offset, so <code>temp_c</code> equals <code>raw_c</code>.',
+  'sensors.1.position': 'From config. Together with <code>device_id</code> it is the consumer\'s identity: <code>hot-water-cylinder.top</code>.',
+  'sensors.1.order': 'From config: 1 = bottom, so this two-probe tank\'s top is 2 (changed 2026-11-02; it was 1 = top).',
+  'sensors.1.height_mm': 'From config, in millimetres.',
+  'sensors.1.rom': 'The physical sensor. It changes when a probe is replaced; the position doesn\'t.',
+  'sensors.1.temp_c': '<code>raw_c + offset_c</code>, rounded to 4 dp (G10): 61.375 − 0.19 = 61.185, without float noise. <code>null</code> when the read failed.',
+  'sensors.1.raw_c': 'The sensor\'s own value, before calibration. <code>null</code> when the read failed. See §09 #1 on its real precision.',
+  'sensors.1.offset_c': 'The calibration from config. <code>0</code> when uncalibrated: always a number, never <code>null</code>.',
+  'sensors.1.error': '<code>null</code>, or a failure code (§04).',
+  'sensors.1.suspect': '<code>null</code>, or <code>85c_unverified</code>.'
 });
 renderJSON('jsonFail', 'notesFail', 'rawFail', G.stateFail, {
   'clock_synced': '<code>false</code>: NTP hadn\'t synced, typically in the first minute after a reboot. Consumers should use the receive time or drop the reading.',
   'sweep_ms': '6.4 s, longer than state-ok\'s 4 s: three CRC attempts on one probe, plus the extra 85 °C read.',
-  'sensors.0.temp_c': 'Exactly 85: published, not dropped.',
-  'sensors.0.suspect': '<code>85c_unverified</code>: it passed every check, and the extra read didn\'t give a different good value.',
+  'sensors.0.error': '<code>crc</code>: retried, and every try failed.',
   'sensors.1.temp_c': '<code>null</code>, never 0: there is no value.',
   'sensors.1.raw_c': '<code>null</code> too.',
   'sensors.1.offset_c': 'Still the configured 0.05: it\'s a config fact, reported even with no reading.',
   'sensors.1.error': '<code>not_present</code>: <code>w1_slave</code> is missing, so it isn\'t retried.',
-  'sensors.2.error': '<code>crc</code>: retried, and every try failed.',
+  'sensors.2.temp_c': 'Exactly 85: published, not dropped.',
+  'sensors.2.suspect': '<code>85c_unverified</code>: it passed every check, and the extra read didn\'t give a different good value.'
 });
 
 // ---------- 5. status ----------
@@ -788,7 +788,7 @@ renderJSON('jsonFail', 'notesFail', 'rawFail', G.stateFail, {
       bindTip(hit, `<b>${esc(s.position)}</b> (order ${s.order})<br>height_mm: ${s.height_mm ?? 'null'}<br>temp_c: ${s.temp_c ?? 'null'} · raw_c: ${s.raw_c ?? 'null'}<br>error: ${s.error ?? 'null'} · suspect: ${s.suspect ?? 'null'}`);
     }
     note.innerHTML = which === 'ok'
-      ? 'state-ok: the bottom probe has <code>height_mm: null</code>, so it can\'t go on the height axis. It sits in the "null" lane, and is still ordered below <code>top</code> by <code>order: 2</code>. Two points don\'t make a profile; a real tank would have more probes.'
+      ? 'state-ok: the bottom probe has <code>height_mm: null</code>, so it can\'t go on the height axis. It sits in the "null" lane, and is still placed below <code>top</code> by its <code>order: 1</code>. Two points don\'t make a profile; a real tank would have more probes.'
       : 'state-failures: only the suspect top value can be plotted. The middle and bottom probes have a height but no value, so the profile line can\'t be drawn' + (zero ? '. <b style="color:var(--bad)">The dashed red line is what a consumer that wrote 0 for null would chart: a tank apparently at 0 °C below the top.</b>' : '. Turn on the zero view to see why <code>null</code> matters.');
   }
   document.querySelectorAll('[data-strat]').forEach(b => b.addEventListener('click', () => {

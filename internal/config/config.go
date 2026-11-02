@@ -66,7 +66,7 @@ type Tank struct {
 type Sensor struct {
 	ROM      string  `yaml:"rom"`
 	Position string  `yaml:"position"`
-	Order    int     `yaml:"order"`     // explicit: 1 = top
+	Order    int     `yaml:"order"`     // explicit: 1 = bottom
 	HeightMM *int    `yaml:"height_mm"` // optional
 	OffsetC  float64 `yaml:"offset_c"`  // optional calibration, added to the raw reading
 }
@@ -208,7 +208,7 @@ func (v *validator) check(c *Config) {
 		}
 		for o := 1; o <= len(tank.Sensors); o++ {
 			if !orders[o] {
-				v.add(v.lines.at(ti, -1, "sensors"), tp+".sensors", "order must number the %d sensors 1..%d exactly once (1 = top); %d is missing", len(tank.Sensors), len(tank.Sensors), o)
+				v.add(v.lines.at(ti, -1, "sensors"), tp+".sensors", "order must number the %d sensors 1..%d exactly once (1 = bottom); %d is missing", len(tank.Sensors), len(tank.Sensors), o)
 				break
 			}
 		}
@@ -220,7 +220,7 @@ func (v *validator) check(c *Config) {
 }
 
 // checkHeights cross-checks two declared facts: a higher order (further
-// down the tank) must have a strictly lower height, wherever both are given.
+// up the tank) must have a strictly greater height, wherever both are given.
 // Neither is derived from the other.
 func (v *validator) checkHeights(tp string, ti int, tank Tank) {
 	type oh struct{ order, height, idx int }
@@ -232,9 +232,9 @@ func (v *validator) checkHeights(tp string, ti int, tank Tank) {
 	}
 	sort.Slice(hs, func(a, b int) bool { return hs[a].order < hs[b].order })
 	for i := 1; i < len(hs); i++ {
-		if hs[i].height >= hs[i-1].height {
+		if hs[i].height <= hs[i-1].height {
 			v.add(v.lines.at(ti, hs[i].idx, "height_mm"), fmt.Sprintf("%s.sensors[%d].height_mm", tp, hs[i].idx),
-				"order %d is at %d mm, not below order %d at %d mm (1 = top)", hs[i].order, hs[i].height, hs[i-1].order, hs[i-1].height)
+				"order %d is at %d mm, not above order %d at %d mm (1 = bottom)", hs[i].order, hs[i].height, hs[i-1].order, hs[i-1].height)
 		}
 	}
 }

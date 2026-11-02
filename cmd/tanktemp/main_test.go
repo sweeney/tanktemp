@@ -34,8 +34,8 @@ clock_sync_wait: 0s
 tanks:
   - device_id: hot-water-cylinder
     sensors:
-      - {rom: 28-0000117287e6, position: top, order: 1, height_mm: 1500, offset_c: -0.19}
-      - {rom: 28-000011721ce9, position: bottom, order: 2, height_mm: 100}
+      - {rom: 28-0000117287e6, position: top, order: 2, height_mm: 1500, offset_c: -0.19}
+      - {rom: 28-000011721ce9, position: bottom, order: 1, height_mm: 100}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -149,7 +149,8 @@ func TestLifecycleWiring(t *testing.T) {
 		} `json:"sensors"`
 	}
 	_ = json.Unmarshal([]byte(msgs[1].Payload), &st)
-	if len(st.Sensors) != 2 || st.Sensors[0].Position != "top" || *st.Sensors[0].TempC != 61.185 {
+	// Bottom to top: order 1 is the bottom.
+	if len(st.Sensors) != 2 || st.Sensors[0].Position != "bottom" || st.Sensors[1].Position != "top" || *st.Sensors[1].TempC != 61.185 {
 		t.Errorf("state = %s", msgs[1].Payload)
 	}
 	if msgs[2].Topic != statusTopic || event(t, msgs[2]) != "HEARTBEAT" || !strings.Contains(msgs[2].Payload, `"ready":true`) {

@@ -41,7 +41,7 @@ type Sweep struct {
 // Tank is one tank's readings.
 type Tank struct {
 	DeviceID string
-	Sensors  []Sensor // in order: 1 = top
+	Sensors  []Sensor // in order: 1 = bottom
 }
 
 // Sensor is one probe's outcome: the config facts, the raw and calibrated

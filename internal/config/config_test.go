@@ -18,12 +18,12 @@ tanks:
     sensors:
       - rom: 28-0000117287e6
         position: top
-        order: 1
+        order: 2
         height_mm: 1500
         offset_c: -0.16
       - rom: 28-000011721ce9
         position: bottom
-        order: 2
+        order: 1
         height_mm: 100
 `
 
@@ -37,11 +37,12 @@ func TestDefaults(t *testing.T) {
 		c.MQTT.TopicPrefix != "energy/hot_water" {
 		t.Errorf("defaults = %+v", c)
 	}
-	s := c.Tanks[0].Sensors[0]
-	if s.ROM != "28-0000117287e6" || s.Position != "top" || s.Order != 1 || *s.HeightMM != 1500 || s.OffsetC != -0.16 {
+	// Sorted by order, and 1 is the bottom.
+	s := c.Tanks[0].Sensors[1]
+	if s.ROM != "28-0000117287e6" || s.Position != "top" || s.Order != 2 || *s.HeightMM != 1500 || s.OffsetC != -0.16 {
 		t.Errorf("sensor = %+v", s)
 	}
-	if b := c.Tanks[0].Sensors[1]; b.OffsetC != 0 {
+	if b := c.Tanks[0].Sensors[0]; b.Position != "bottom" || b.OffsetC != 0 {
 		t.Errorf("offset_c defaults to 0, got %v", b.OffsetC)
 	}
 }
@@ -73,14 +74,14 @@ mqtt: {broker: tcp://b:1883}
 tanks:
   - device_id: t
     sensors:
-      - {rom: 28-000011721ce9, position: bottom, order: 2}
-      - {rom: 28-0000117287e6, position: top, order: 1}
+      - {rom: 28-0000117287e6, position: top, order: 2}
+      - {rom: 28-000011721ce9, position: bottom, order: 1}
 `
 	c, err := Load([]byte(swapped))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Tanks[0].Sensors[0].Position != "top" {
+	if c.Tanks[0].Sensors[0].Position != "bottom" {
 		t.Errorf("sensors not sorted by order: %+v", c.Tanks[0].Sensors)
 	}
 }
@@ -111,7 +112,7 @@ func TestLoadRejects(t *testing.T) {
 		{"order with a gap", strings.Replace(valid, "order: 2", "order: 3", 1), "order", 0},
 		{"duplicate order", strings.Replace(valid, "order: 2", "order: 1", 1), "order", 0},
 		{"missing order", strings.Replace(valid, "        order: 2\n", "", 1), "order", 0},
-		{"order and height disagree", strings.Replace(strings.Replace(valid, "height_mm: 1500", "height_mm: 10", 1), "height_mm: 100", "height_mm: 900", 1), "height", 0},
+		{"order and height disagree", strings.Replace(strings.Replace(valid, "height_mm: 1500", "height_mm: 10", 1), "height_mm: 100", "height_mm: 900", 1), "1 = bottom", 0},
 		{"equal heights", strings.Replace(valid, "height_mm: 100", "height_mm: 1500", 1), "height", 0},
 		{"negative height", strings.Replace(valid, "height_mm: 100", "height_mm: -5", 1), "height_mm", 0},
 		{"offset too large", strings.Replace(valid, "offset_c: -0.16", "offset_c: 16", 1), "offset_c", 0},
