@@ -130,7 +130,7 @@ as it's given to `tools/guessreview/answers.json`, which is gitignored.
 
 ```sh
 ./setup-pi.sh --check user@host   # read-only: what a first install would do
-./setup-pi.sh user@host           # first install: config, unit, first build
+./setup-pi.sh user@host           # first install (full sudo): sudo rules, config, unit, first build
 ./deploy.sh --check user@host     # read-only pre-flight
 ./deploy.sh user@host             # build, upload, switch, verify, roll back on failure
 ./deploy.sh --rollback user@host
@@ -152,3 +152,36 @@ The host can also go in `deploy/host` (gitignored). The config comes from
 `deploy/config.local.yaml` (gitignored; start from
 `deploy/config.example.yaml`). `./deploy_test.sh` tests the scripts against
 stubs.
+
+### sudo
+
+The first `./setup-pi.sh` needs sudo on the Pi that asks for no password for
+anything (full sudo): the scripts run over ssh and cannot type one. It
+installs `/etc/sudoers.d/tanktemp` (root:root 0440, checked with
+`visudo -c` before it goes in), which lets the deploy user run, with no
+password, exactly the command lines the scripts use after that, each by its
+full path: `systemctl restart tanktemp`, `systemctl daemon-reload`, three
+`journalctl` reads of tanktemp's journal, the builds' `-check-config` as
+`tanktemp`, and `cat`, `install` and `cmp` of `/etc/tanktemp/config.yaml` and
+its staged copy in the deploy user's home. Nothing else, and no blanket
+`NOPASSWD`. From then on, full sudo can go:
+
+- `./deploy.sh` (and `--rollback`) needs no password.
+- A config change needs none either: edit `deploy/config.local.yaml`, then
+  `./setup-pi.sh --check` (shows the diff), then `./setup-pi.sh` (installs
+  it, restarts tanktemp and checks `/healthz`).
+
+Both scripts check before changing anything: full sudo, or else every one of
+those rules. If neither, they refuse and name the command that wants a
+password. With only the rules, `setup-pi.sh` refuses any step other than a
+config change (a missing link, a new user, stopping templog), naming it,
+before doing any of it: run it once more with full sudo for those. A run with
+full sudo also puts the rules back as they should be if they have changed,
+showing the diff first.
+
+The rules keep deploys from needing root for anything else, and keep a
+mistake in a script from doing more than these commands can. They do not stop
+a determined deploy user: that user owns `/opt/tanktemp`, including the unit
+file systemd runs (with `daemon-reload` and `restart` allowed) and the builds
+that `-check-config` runs as `tanktemp`. A unit file they write can run
+anything as root at the next allowed `daemon-reload` and `restart`.

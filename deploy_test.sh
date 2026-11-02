@@ -2,8 +2,8 @@
 # Tests for deploy.sh and setup-pi.sh. Each case runs the real script in a
 # throwaway git repo against stubs: ssh runs the "remote" commands locally with
 # HOME pointed at a fake Pi home, and curl, mosquitto_sub, rsync, go,
-# systemctl, journalctl, sudo, install, chown, stat, id, useradd and ps are
-# scripted from that fake Pi's state. A "build" is a small shell script that
+# systemctl, journalctl, sudo, visudo, install, mv, chown, stat, id, useradd
+# and ps are scripted from that fake Pi's state. A "build" is a small shell script that
 # answers -version and -check-config the way tanktemp does. File owners are
 # recorded in $FAKE_STATE/owners (the stubs cannot chown), and a build run as
 # the tanktemp user, or a unit started as it, fails the way the Pi would on a
@@ -183,22 +183,88 @@ EOF
 
 # ---------------------------------------------------------------- remote stubs
 
+# sudo, three ways. Full (the default): anything, as root or -u USER.
+# FAKE_SUDO_PW=1: nothing at all without a password. FAKE_SUDO=scoped: only
+# what the sudoers fragment on the fake Pi ($DEPLOY_SUDOERS, as setup-pi.sh
+# installed it) allows: the command is looked up on DEPLOY_SUDO_PATH (sudo's
+# secure_path) and its full command line matched against each rule's, as a
+# glob, for the right runas user. -l CMD says whether CMD is allowed without
+# running it. Each call is logged to $FAKE_STATE/sudo as "ok|DENIED|list
+# [-u USER] CMDLINE".
 cat >"$RSTUBS/sudo" <<'EOF'
 #!/usr/bin/env bash
-as=""
+as="" list=0
 while [ $# -gt 0 ]; do
     case "$1" in
         -n) shift ;;
+        -l) list=1; shift ;;
         -u) as="$2"; shift 2 ;;
         *) break ;;
     esac
 done
-[ "${FAKE_SUDO_PW:-0}" = 1 ] && exit 1
+asl=""
+[ -z "$as" ] || asl="-u $as "
+deny() {
+    echo "DENIED $asl$*" >>"$FAKE_STATE/sudo"
+    echo "sudo: a password is required" >&2
+    exit 1
+}
+[ "${FAKE_SUDO_PW:-0}" = 1 ] && deny "$@"
 if [ -n "$as" ]; then
     id "$as" >/dev/null 2>&1 || { echo "sudo: unknown user $as" >&2; exit 1; }
-    FAKE_RUN_AS="$as" exec "$@"
 fi
+if [ "${FAKE_SUDO:-full}" = scoped ] || [ $list = 1 ]; then
+    case "$1" in
+        /*) path="$1" ;;
+        *) path=$(PATH="$DEPLOY_SUDO_PATH" type -P "$1") || path="" ;;
+    esac
+    [ -n "$path" ] && [ -x "$path" ] || { echo "sudo: $1: command not found" >&2; exit 1; }
+    shift
+    line="$path${*:+ $*}"
+fi
+if [ "${FAKE_SUDO:-full}" = scoped ]; then
+    me=$(id -un) ok=0
+    while read -r rule; do
+        case "$rule" in "$me ALL=("*") NOPASSWD: "*) ;; *) continue ;; esac
+        runas="${rule#"$me ALL=("}" runas="${runas%%)*}"
+        [ "$runas" = "${as:-root}" ] || continue
+        # Unquoted: a glob, as sudoers' * is (it matches / and spaces too);
+        # a backslash quotes the next character, as \= does in sudoers.
+        # shellcheck disable=SC2053
+        if [[ "$line" == ${rule#*") NOPASSWD: "} ]]; then ok=1; break; fi
+    done < <(cat "$DEPLOY_SUDOERS" 2>/dev/null)
+    [ $ok = 1 ] || deny "$line"
+fi
+if [ $list = 1 ]; then
+    echo "list $asl$line" >>"$FAKE_STATE/sudo"
+    echo "$line"
+    exit 0
+fi
+if [ "${FAKE_SUDO:-full}" = scoped ]; then
+    echo "ok $asl$line" >>"$FAKE_STATE/sudo"
+    set -- "$path" "$@"
+fi
+[ -z "$as" ] || FAKE_RUN_AS="$as" exec "$@"
 FAKE_AS_ROOT=1 exec "$@"
+EOF
+
+# visudo -c -f FILE: FILE parses, unless FAKE_VISUDO_BAD=1.
+cat >"$RSTUBS/visudo" <<'EOF'
+#!/usr/bin/env bash
+echo "visudo $*" >>"$FAKE_STATE/log"
+f="${*: -1}"
+[ -f "$f" ] || { echo "visudo: unable to open $f: No such file or directory" >&2; exit 1; }
+if [ "${FAKE_VISUDO_BAD:-0}" = 1 ]; then echo "$f:3:30: syntax error" >&2; exit 1; fi
+echo "$f: parsed OK"
+EOF
+
+# mv: the real one, and the owner recorded for the source goes with it.
+cat >"$RSTUBS/mv" <<'EOF'
+#!/usr/bin/env bash
+PATH="${PATH//$RSTUBS:/}" mv "$@" || exit
+src="${*: -2:1}" dest="${*: -1}"
+og=$(awk -v f="$src" '$1 == f {r = $2} END {print r}' "$FAKE_STATE/owners" 2>/dev/null)
+[ -z "$og" ] || [ -d "$dest" ] || echo "$dest $og" >>"$FAKE_STATE/owners"
 EOF
 
 # systemctl, for two units: tanktemp and templog. State in
@@ -461,16 +527,40 @@ EOF
 
 ME=$(id -un) MYGROUP=$(id -gn)
 
+# Where the fake sudo looks commands up (sudo's secure_path, here), and so
+# the full paths the sudoers rules name.
+SPATH="$RSTUBS:/usr/bin:/bin"
+CAT=$(PATH="$SPATH" command -v cat) CMP=$(PATH="$SPATH" command -v cmp)
+
+# expected_sudoers: the fragment setup-pi.sh should make for this case's Pi,
+# written out by hand: what deploy.sh and a config change run with sudo,
+# each by its full path, and nothing else.
+expected_sudoers() {
+    cat <<EOF
+# Managed by tanktemp's setup-pi.sh: do not edit, the next run replaces it.
+# Only what deploy.sh and setup-pi.sh run with sudo once the Pi is set up.
+$ME ALL=(root) NOPASSWD: $RSTUBS/systemctl restart tanktemp
+$ME ALL=(root) NOPASSWD: $RSTUBS/systemctl daemon-reload
+$ME ALL=(root) NOPASSWD: $RSTUBS/journalctl -u tanktemp -n 30 --no-pager -o cat
+$ME ALL=(root) NOPASSWD: $RSTUBS/journalctl -u tanktemp --since * --no-pager -o cat
+$ME ALL=(root) NOPASSWD: $RSTUBS/journalctl _SYSTEMD_INVOCATION_ID\=* --no-pager -o cat
+$ME ALL=(tanktemp) NOPASSWD: $PI/tanktemp-* -check-config -config $CFG
+$ME ALL=(root) NOPASSWD: $CAT $CFG
+$ME ALL=(root) NOPASSWD: $RSTUBS/install -o root -g tanktemp -m 0640 $FAKE_HOME/.tanktemp-config.yaml.incoming $CFG
+$ME ALL=(root) NOPASSWD: $CMP -s $FAKE_HOME/.tanktemp-config.yaml.incoming $CFG
+EOF
+}
+
 # fresh: a fake Pi set up and running $CUR healthily as the tanktemp user
 # from /opt/tanktemp (here $CASE/opt/tanktemp, owned by the deploy user),
 # with its config root:tanktemp 0640, templog off, and a clean, pushed
 # checkout whose deploy/host names the Pi.
 fresh() {
     rm -rf "$CASE"
-    mkdir -p "$CASE"/{home,opt/tanktemp,state,bin,etc/tanktemp,boot,w1/w1_bus_master1,w1/w1_bus_master2}
+    mkdir -p "$CASE"/{home,opt/tanktemp,state,bin,etc/tanktemp,etc/sudoers.d,boot,w1/w1_bus_master1,w1/w1_bus_master2}
     FAKE_HOME="$CASE/home" FAKE_STATE="$CASE/state"
     PI="$CASE/opt/tanktemp" OLDPI="$FAKE_HOME/tanktemp"
-    CFG="$CASE/etc/tanktemp/config.yaml"
+    CFG="$CASE/etc/tanktemp/config.yaml" SUDOERS_F="$CASE/etc/sudoers.d/tanktemp"
     local b n=1
     for b in "$OLD1" "$OLD2" "$CUR"; do
         ln "$TPL/$b" "$PI/$b"
@@ -484,6 +574,9 @@ fresh() {
     config_yaml >"$CFG"
     chmod 0640 "$CFG"
     echo "$CFG root:tanktemp" >"$FAKE_STATE/owners"
+    expected_sudoers >"$SUDOERS_F"
+    chmod 0440 "$SUDOERS_F"
+    echo "$SUDOERS_F root:root" >>"$FAKE_STATE/owners"
     echo tanktemp >"$FAKE_STATE/user.tanktemp"
     cp "$HERE/tanktemp.service" "$FAKE_STATE/loaded_unit"
     echo tanktemp >"$FAKE_STATE/running_user"
@@ -543,6 +636,7 @@ old_layout() {
     ln -sfn "$OLDPI/tanktemp.service" "$CASE/etc/tanktemp.service"
     chmod 0644 "$CFG"
     echo "$CFG root:root" >"$FAKE_STATE/owners"
+    rm -f "$SUDOERS_F"
     rm "$FAKE_STATE/user.tanktemp"
     cp "$OLDPI/tanktemp.service" "$FAKE_STATE/loaded_unit"
     echo "$ME" >"$FAKE_STATE/running_user"
@@ -552,7 +646,7 @@ old_layout() {
 # bare: a Pi with 1-Wire set up and templog running, nothing of tanktemp.
 bare() {
     fresh
-    rm -rf "$CASE/opt" "$CASE/bin/tanktemp" "$CASE/etc/tanktemp.service" "$CASE/etc/tanktemp"
+    rm -rf "$CASE/opt" "$CASE/bin/tanktemp" "$CASE/etc/tanktemp.service" "$CASE/etc/tanktemp" "$SUDOERS_F"
     rm -f "$FAKE_STATE/user.tanktemp" "$FAKE_STATE/loaded_unit" "$FAKE_STATE/running_user"
     : >"$FAKE_STATE/owners"
     echo DOWN >"$FAKE_STATE/running"
@@ -577,7 +671,7 @@ run() {
         DEPLOY_PI_DIR="$PI" DEPLOY_BIN_LINK="$CASE/bin/tanktemp" DEPLOY_UNIT_LINK="$CASE/etc/tanktemp.service" \
         DEPLOY_CONFIG_PATH="$CASE/etc/tanktemp/config.yaml" DEPLOY_BOOT_CONFIG="$CASE/boot/config.txt" \
         DEPLOY_W1_DEVICES="$CASE/w1" DEPLOY_HTTP_HOST=pi.test DEPLOY_VERIFY_TIMEOUT=2 DEPLOY_SETTLE=0 \
-        DEPLOY_POLL=0.1 DEPLOY_BROKER_TIMEOUT=1 ${envs[@]+"${envs[@]}"} \
+        DEPLOY_POLL=0.1 DEPLOY_BROKER_TIMEOUT=1 DEPLOY_SUDOERS="$SUDOERS_F" DEPLOY_SUDO_PATH="$SPATH" ${envs[@]+"${envs[@]}"} \
         bash "$REPO/$script" "$@" 2>&1 <<<"$INPUT") && RC=0 || RC=$?
 }
 deploy() { run deploy.sh "$@"; }
@@ -616,7 +710,8 @@ orphan_units_none() {
 nothing_set_up() {
     [ ! -e "$PI" ] && [ ! -e "$FAKE_STATE/user.tanktemp" ] && [ "$(pi_link "$CASE/bin/tanktemp")" = MISSING ] &&
         [ "$(pi_link "$CASE/etc/tanktemp.service")" = MISSING ] &&
-        [ "$(cat "$FAKE_STATE/enabled.tanktemp")" = not-found ] && [ ! -e "$CASE/etc/tanktemp/config.yaml" ]
+        [ "$(cat "$FAKE_STATE/enabled.tanktemp")" = not-found ] && [ ! -e "$CASE/etc/tanktemp/config.yaml" ] &&
+        [ ! -e "$SUDOERS_F" ]
 }
 # owner_is PATH USER:GROUP MODE: as the stubs recorded it, and its real mode.
 owner_is() { [ "$(env RSTUBS="$RSTUBS" FAKE_STATE="$FAKE_STATE" PATH="$RSTUBS:$PATH" stat -c '%U:%G %a' "$1")" = "$2 $3" ]; }
@@ -628,6 +723,26 @@ restarted_once_as_tanktemp() { runs_as tanktemp && [ "$(restarts)" -eq 1 ]; }
 builds_copied() { local b; for b in "$OLD1" "$OLD2" "$CUR"; do cmp -s "$OLDPI/$b" "$PI/$b" || return 1; done; }
 config_unchanged() { config_yaml | cmp -s - "$CFG"; }
 newest_build() { find "$PI" -maxdepth 1 -name 'tanktemp-2*' -print0 | xargs -0 ls -1t | head -1 | xargs basename; }
+# sudoers_ok: the fragment is exactly what it should be, root:root 0440, with
+# nothing left staged beside it or in the home.
+sudoers_ok() {
+    expected_sudoers | cmp -s - "$SUDOERS_F" && owner_is "$SUDOERS_F" root:root 440 && no_sudoers_staged
+}
+no_sudoers_staged() { [ -z "$(find "$CASE/etc/sudoers.d" "$FAKE_HOME" -maxdepth 1 -name '.*incoming*' 2>/dev/null)" ]; }
+# sudo_ran PATTERN: a scoped sudo ran a command line matching PATTERN (ERE).
+sudo_ran() { grep -qE -- "^ok $1" "$FAKE_STATE/sudo" 2>/dev/null; }
+# no_sudo_denied: nothing a scoped sudo was asked for was refused, but the
+# probe for full sudo (sudo -n true).
+no_sudo_denied() { ! grep '^DENIED' "$FAKE_STATE/sudo" 2>/dev/null | grep -qvE '^DENIED [^ ]*/true$'; }
+# scoped_pi: a fresh Pi without the fragment, then setup-pi.sh (with full
+# sudo) run to install it, so the rules scoped cases use are setup's own.
+scoped_pi() {
+    fresh
+    rm -f "$SUDOERS_F"
+    setup -- --yes
+    check "setup installs the scoped sudo rules" sudoers_ok
+    : >"$FAKE_STATE/log"
+}
 templog_on() { [ "$(cat "$FAKE_STATE/active.templog")" = active ] && [ "$(cat "$FAKE_STATE/enabled.templog")" = enabled ]; }
 
 check() { # check NAME CONDITION...
@@ -1158,14 +1273,14 @@ case_50() {
 case_51() {
     bare
     setup --
-    check "declining the templog prompt stops setup (2)" rc_is 2
+    check "declining the first prompt (the sudo rules) stops setup (2)" rc_is 2
     check "templog still runs" templog_on
     check "nothing is set up after declining" nothing_set_up
 }
 
 case_52() {
     bare
-    INPUT=$'y\ny\nn\n' setup --
+    INPUT=$'y\ny\ny\nn\n' setup --
     check "declining the config prompt stops there" rc_is 2
     check "after templog was stopped (it was agreed)" not templog_on
     check "and the tanktemp user was made (it was agreed)" [ -f "$FAKE_STATE/user.tanktemp" ]
@@ -1175,7 +1290,7 @@ case_52() {
 
 case_53() {
     bare
-    INPUT=$'y\ny\ny\ny\n' setup --
+    INPUT=$'y\ny\ny\ny\ny\n' setup --
     check "answering yes to each prompt sets up" rc_is 0
     check "templog was disabled" [ "$(cat "$FAKE_STATE/enabled.templog")" = disabled ]
 }
@@ -1516,7 +1631,7 @@ case_78() {
 
 case_79() {
     old_layout
-    INPUT=$'y\nn\n' setup --
+    INPUT=$'y\ny\nn\n' setup --
     check "declining the migration stops (2)" rc_is 2
     check "the old service is not restarted" old_runs_untouched
     check "and nothing is moved" [ ! -e "$PI" ]
@@ -1592,6 +1707,205 @@ case_85() {
     check "a tanktemp running as someone else would be restarted" says "restart tanktemp as tanktemp \\(it runs as $ME now\\)"
     setup -- --yes
     check "and is (as tanktemp)" restarted_once_as_tanktemp
+}
+
+# ---------------------------------------------------------------- scoped sudo
+
+case_86() {
+    bare
+    setup -- --yes
+    check "setup on a bare Pi installs the scoped sudo rules" sudoers_ok
+    check "checked with visudo first" logged "visudo -c -f $CASE/etc/sudoers.d/.tanktemp.incoming"
+    check "before anything else changes" [ "$(grep -n 'visudo' "$FAKE_STATE/log" | cut -d: -f1)" -lt "$(grep -n 'disable --now templog' "$FAKE_STATE/log" | cut -d: -f1)" ]
+    before=$(snapshot)
+    setup -- --yes
+    check "setup again leaves the sudo rules alone" says 'already set up: nothing to do'
+    check "and changes nothing (sudoers)" [ "$(snapshot)" = "$before" ]
+}
+
+case_87() {
+    fresh
+    rm "$SUDOERS_F"
+    before=$(snapshot)
+    setup -- --check
+    check "--check reports the missing sudo rules" says "install $SUDOERS_F: sudo rules for $ME"
+    check "and passes (sudoers)" rc_is 0
+    check "--check installs no sudo rules" [ "$(snapshot)" = "$before" ]
+    check "or stages any" no_sudoers_staged
+    setup -- --yes
+    check "setup on a set-up Pi installs just the sudo rules" sudoers_ok
+    check "and restarts nothing for them" [ "$(restarts)" -eq 0 ]
+    check "says it is set up" says 'is set up'
+    setup -- --check
+    check "then has nothing to do (sudoers)" says 'already set up: nothing to do'
+}
+
+case_88() {
+    fresh
+    chmod 0640 "$SUDOERS_F"
+    sed -i.bak '/daemon-reload/d' "$SUDOERS_F"
+    rm -f "$SUDOERS_F.bak"
+    echo "$ME ALL=(root) NOPASSWD: ALL" >>"$SUDOERS_F"
+    chmod 0440 "$SUDOERS_F"
+    cp "$SUDOERS_F" "$GDIR/sudoers.before"
+    setup -- --check
+    check "a changed sudoers fragment is reported" says "replace $SUDOERS_F"
+    check "with a diff: the rule it lacks" says "^ *\+$ME ALL=\(root\) NOPASSWD: .*systemctl daemon-reload"
+    check "and the one it should not have" says "^ *-$ME ALL=\(root\) NOPASSWD: ALL"
+    check "--check leaves it as it is" cmp -s "$SUDOERS_F" "$GDIR/sudoers.before"
+    setup --
+    check "replacing it is asked first, and no is a no" rc_is 2
+    check "so it stays as it was" cmp -s "$SUDOERS_F" "$GDIR/sudoers.before"
+    setup -- --yes
+    check "--yes replaces it" sudoers_ok
+    check "and restarts nothing (sudoers replaced)" [ "$(restarts)" -eq 0 ]
+}
+
+case_89() {
+    bare
+    setup FAKE_VISUDO_BAD=1 -- --yes
+    check "a fragment visudo rejects is refused" rc_is 2
+    check "saying so" says 'visudo rejects'
+    check "and is not installed" [ ! -e "$SUDOERS_F" ]
+    check "nor left staged" no_sudoers_staged
+    check "and nothing else is done (visudo)" nothing_set_up
+    check "templog still runs (visudo)" templog_on
+    fresh
+    chmod 0640 "$SUDOERS_F"
+    echo "# hand edit" >>"$SUDOERS_F"
+    chmod 0440 "$SUDOERS_F"
+    cp "$SUDOERS_F" "$GDIR/sudoers.before"
+    setup FAKE_VISUDO_BAD=1 -- --yes
+    check "an installed fragment stays when the new one is rejected" cmp -s "$SUDOERS_F" "$GDIR/sudoers.before"
+}
+
+case_90() {
+    scoped_pi
+    deploy FAKE_SUDO=scoped -- --check
+    check "deploy --check passes with only the scoped rules" rc_is 0
+    check "and says the rules are scoped" says 'scoped rules'
+    deploy FAKE_SUDO=scoped -- --yes
+    check "deploy succeeds with only the scoped rules" rc_is 0
+    check "the new build runs (scoped)" new_build_is_running
+    check "full sudo was not there" grep -qE '^DENIED [^ ]*/true$' "$FAKE_STATE/sudo"
+    check "it checked the running build's config through the rule" sudo_ran "-u tanktemp $PI/tanktemp-bin -check-config -config $CFG\$"
+    check "and the new build's" sudo_ran "-u tanktemp $PI/tanktemp-2[^ ]*-$VERSION -check-config"
+    check "it restarted through the rule" sudo_ran "$RSTUBS/systemctl restart tanktemp\$"
+    check "it read the new process's journal through the rule" sudo_ran "$RSTUBS/journalctl _SYSTEMD_INVOCATION_ID=[^ ]+ --no-pager -o cat\$"
+    check "and the journal since the restart" sudo_ran "$RSTUBS/journalctl -u tanktemp --since @[0-9]+ --no-pager -o cat\$"
+    check "and nothing sudo ran was refused" no_sudo_denied
+    deploy FAKE_SUDO=scoped -- --rollback --yes
+    check "--rollback works with only the scoped rules" rc_is 0
+    check "and is back on the build before" link_is "$CUR"
+    check "nothing refused (scoped rollback)" no_sudo_denied
+}
+
+case_91() {
+    scoped_pi
+    change_unit
+    deploy FAKE_SUDO=scoped -- --yes
+    check "a deploy with a new unit file works with only the scoped rules" rc_is 0
+    check "systemd is reloaded through the rule" sudo_ran "$RSTUBS/systemctl daemon-reload\$"
+    check "the new unit is used" unit_is "$REPO/tanktemp.service"
+    check "nothing refused (scoped unit)" no_sudo_denied
+}
+
+case_92() {
+    scoped_pi
+    change_unit
+    deploy FAKE_SUDO=scoped FAKE_PANIC=1 -- --yes
+    check "a scoped deploy that fails verification is rolled back" rolled_back
+    check "the old unit is put back, reloaded through the rule" [ "$(grep -c "^ok $RSTUBS/systemctl daemon-reload" "$FAKE_STATE/sudo")" -eq 2 ]
+    check "the failure shows the journal since the restart" says "   \| tanktemp tanktemp-2[^ ]*-$VERSION starting"
+    check "nothing refused (scoped rollback after a failure)" no_sudo_denied
+}
+
+case_93() {
+    scoped_pi
+    deploy FAKE_SUDO=scoped FAKE_RESTART_FAIL="*" -- --yes
+    check "a scoped rollback that does not come up needs a person (3)" rc_is 3
+    check "and shows the last of the journal, through the rule" sudo_ran "$RSTUBS/journalctl -u tanktemp -n 30 --no-pager -o cat\$"
+    check "which is printed" says "tanktemp $CUR running"
+    check "nothing refused (needs a person)" no_sudo_denied
+}
+
+case_94() {
+    fresh
+    rm "$SUDOERS_F"
+    deploy FAKE_SUDO=scoped -- --yes
+    check "neither full sudo nor the scoped rules: refused" rc_is 2
+    check "naming the command that needs a password" says "needs a password for 'journalctl -u tanktemp -n 30 --no-pager -o cat'"
+    check "and to run setup-pi.sh once" says 'run ./setup-pi.sh once'
+    check "having changed nothing (no rules)" untouched
+    fresh
+    sed -i.bak '/daemon-reload/d' "$SUDOERS_F"
+    deploy FAKE_SUDO=scoped -- --check
+    check "rules lacking one the deploy needs: refused" rc_is 2
+    check "naming it" says "needs a password for 'systemctl daemon-reload'"
+    fresh
+    sed -i.bak "s#^\($ME ALL=\)(tanktemp)#\1(root)#" "$SUDOERS_F"
+    deploy FAKE_SUDO=scoped -- --check
+    check "a -check-config rule for the wrong user does not count" says "needs a password for '$PI/tanktemp-bin -check-config -config $CFG' as tanktemp"
+}
+
+case_95() {
+    scoped_pi
+    sed -i.bak 's/30s/60s/' "$REPO/deploy/config.local.yaml"
+    before=$(snapshot)
+    setup FAKE_SUDO=scoped -- --check
+    check "setup --check with only the scoped rules sees the config change" says 'install .*config.local.yaml as '
+    check "and would make it" rc_is 0
+    check "and changes nothing (scoped --check)" [ "$(snapshot)" = "$before" ]
+    setup FAKE_SUDO=scoped -- --yes
+    check "setup with only the scoped rules installs a changed config" rc_is 0
+    check "the new config is in place (scoped)" cmp -s "$CFG" "$REPO/deploy/config.local.yaml"
+    check "root:tanktemp 0640 (scoped)" owner_is "$CFG" root:tanktemp 640
+    check "read through the rule" sudo_ran "$CAT $CFG\$"
+    check "installed through the rule" sudo_ran "$RSTUBS/install -o root -g tanktemp -m 0640 $FAKE_HOME/.tanktemp-config.yaml.incoming $CFG\$"
+    check "and compared through the rule" sudo_ran "$CMP -s $FAKE_HOME/.tanktemp-config.yaml.incoming $CFG\$"
+    check "the stage is gone" [ ! -e "$FAKE_HOME/.tanktemp-config.yaml.incoming" ]
+    check "and restarted onto it" [ "$(restarts)" -eq 1 ]
+    check "and seen healthy" says 'is running on'
+    check "the sudo rules are left as they are" sudoers_ok
+    check "nothing refused (scoped config)" no_sudo_denied
+    setup FAKE_SUDO=scoped -- --yes
+    check "then nothing to do (scoped)" says 'already set up: nothing to do'
+}
+
+case_96() {
+    scoped_pi
+    sed -i.bak 's/30s/60s/' "$REPO/deploy/config.local.yaml"
+    setup FAKE_SUDO=scoped FAKE_MQTT_DOWN=1 -- --yes
+    check "a scoped config change that does not come up healthy exits 1" rc_is 1
+    check "showing the journal through the rule" sudo_ran "$RSTUBS/journalctl -u tanktemp -n 30 --no-pager -o cat\$"
+    check "nothing refused (scoped unhealthy)" no_sudo_denied
+}
+
+case_97() {
+    scoped_pi
+    rm "$CASE/bin/tanktemp"
+    sed -i.bak 's/30s/60s/' "$REPO/deploy/config.local.yaml"
+    before=$(snapshot)
+    setup FAKE_SUDO=scoped -- --yes
+    check "a step needing full sudo is refused with only the scoped rules" rc_is 2
+    check "naming the step" says "need full sudo.*link $CASE/bin/tanktemp"
+    check "and how to do it once" says 'run ./setup-pi.sh once'
+    check "before changing anything, the config too" [ "$(snapshot)" = "$before" ]
+    setup FAKE_SUDO=scoped -- --check
+    check "--check says setup would refuse it" rc_is 2
+    check "and why" says "need full sudo"
+    scoped_pi
+    echo active >"$FAKE_STATE/active.templog"
+    setup FAKE_SUDO=scoped -- --yes
+    check "stopping templog needs full sudo too" says "need full sudo.*stop and disable templog"
+    check "and templog is left running" [ "$(cat "$FAKE_STATE/active.templog")" = active ]
+}
+
+case_98() {
+    fresh
+    setup FAKE_SUDO_PW=1 -- --check
+    check "setup --check without any sudo is refused" rc_is 2
+    check "naming the command" says "needs a password for 'journalctl -u tanktemp -n 30 --no-pager -o cat'"
 }
 
 case_99() {

@@ -18,6 +18,14 @@ UNITS=.units        # PI_DIR/.units/<build>.service: each build's unit file
 BIN_LINK="${DEPLOY_BIN_LINK:-/usr/local/bin/tanktemp}"
 UNIT_LINK="${DEPLOY_UNIT_LINK:-/etc/systemd/system/tanktemp.service}"
 CONFIG_PATH="${DEPLOY_CONFIG_PATH:-/etc/tanktemp/config.yaml}"
+CONFIG_STAGE=".$SERVICE-config.yaml.incoming" # in the deploy user's home (0700): a new config on its way
+# The deploy user's sudo rules: setup-pi.sh installs them (with full sudo,
+# once), and then deploy.sh and config changes need no password.
+SUDOERS="${DEPLOY_SUDOERS:-/etc/sudoers.d/tanktemp}"
+# Where sudo looks up a command given by name (Debian's secure_path). The
+# rules name each command by the full path found here, on the Pi.
+SUDO_PATH="${DEPLOY_SUDO_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
+SUDO_CMDS="systemctl journalctl cat install cmp" # the commands sudo_rules names
 BOOT_CONFIG="${DEPLOY_BOOT_CONFIG:-/boot/firmware/config.txt}"
 W1_DEVICES="${DEPLOY_W1_DEVICES:-/sys/bus/w1/devices}"
 VERIFY_TIMEOUT="${DEPLOY_VERIFY_TIMEOUT:-60}"
@@ -59,6 +67,83 @@ need_remote() {
     fi
     [ -n "$REMOTE" ] || refuse "no host. Give one (./$(basename "$0") user@host), or put user@host on one line in $HOST_FILE (gitignored)"
     HTTP_HOST="${DEPLOY_HTTP_HOST:-${REMOTE#*@}}"
+}
+
+# sudo_rules HOME: everything deploy.sh and setup-pi.sh run with sudo once the
+# Pi is set up, one per line as RUNAS|COMMAND|RULE: the command line as the
+# scripts run it (the command by name, or a full path), then the same as
+# sudoers has it, if it needs a wildcard. sudoers matches the whole command
+# line, so the scripts must run exactly these, arguments in this order. HOME
+# is the deploy user's home ('$HOME' for the Pi's shell to fill in).
+sudo_rules() {
+    local h="$1"
+    cat <<EOF
+root|systemctl restart $SERVICE|
+root|systemctl daemon-reload|
+root|journalctl -u $SERVICE -n 30 --no-pager -o cat|
+root|journalctl -u $SERVICE --since @0 --no-pager -o cat|journalctl -u $SERVICE --since * --no-pager -o cat
+root|journalctl _SYSTEMD_INVOCATION_ID=0 --no-pager -o cat|journalctl _SYSTEMD_INVOCATION_ID\\=* --no-pager -o cat
+$SVC_USER|$PI_DIR/$LINK -check-config -config $CONFIG_PATH|$PI_DIR/$SERVICE-* -check-config -config $CONFIG_PATH
+root|cat $CONFIG_PATH|
+root|install -o root -g $SVC_USER -m 0640 $h/$CONFIG_STAGE $CONFIG_PATH|
+root|cmp -s $h/$CONFIG_STAGE $CONFIG_PATH|
+EOF
+}
+
+# sudo_probe: shell for the Pi that prints one line: "full" if sudo needs no
+# password for anything; else "scoped" if it needs none for each of
+# sudo_rules; else "none RUNAS CMD", the first that needs one. sudo -l says a
+# command is allowed even where the rule that allows it wants a password, so
+# one rule is run for real first (read-only), and a complaint from sudo
+# itself, rather than from journalctl, means the rules are not in force.
+sudo_probe() {
+    local runas cmd _ u
+    printf 'if sudo -n true 2>/dev/null; then echo full\n'
+    printf "elif sudo -n journalctl -u %s -n 30 --no-pager -o cat 2>&1 >/dev/null | grep -q '^sudo:'; then echo 'none root journalctl -u %s -n 30 --no-pager -o cat'\n" "$SERVICE" "$SERVICE"
+    # shellcheck disable=SC2016 # $HOME is for the Pi's shell
+    while IFS='|' read -r runas cmd _; do
+        u=""
+        [ "$runas" = root ] || u="-u $runas "
+        printf 'elif ! sudo -n %s-l %s >/dev/null 2>&1; then echo "none %s %s"\n' "$u" "$cmd" "$runas" "$cmd"
+    done < <(sudo_rules '$HOME')
+    printf 'else echo scoped; fi\n'
+}
+
+# need_sudo ANSWER: from sudo_probe's ANSWER, SUDO_MODE full or scoped; or
+# refuse, naming the command sudo wants a password for.
+need_sudo() {
+    case "$1" in
+        full) SUDO_MODE=full ;;
+        scoped)
+            SUDO_MODE=scoped
+            info "sudo: the scoped rules in $SUDOERS, no password (no full sudo)" ;;
+        "none "*)
+            local runas="${1#none }" cmd
+            cmd="${runas#* }" runas="${runas%% *}"
+            refuse "sudo on $REMOTE needs a password for '$cmd'$([ "$runas" = root ] || echo " as $runas"), and this script cannot type it. To fix it, run ./setup-pi.sh once while sudo on $REMOTE needs no password: it installs $SUDOERS, after which ./deploy.sh and config changes need none" ;;
+        *) refuse "cannot tell what sudo allows on $REMOTE (it answered '$1')" ;;
+    esac
+}
+
+# sudoers_fragment USER HOME NAME=PATH...: the sudoers fragment for the
+# deploy user USER, with each command of sudo_rules named by its full PATH.
+sudoers_fragment() {
+    local user="$1" home="$2" runas cmd rule name pair path
+    shift 2
+    echo "# Managed by $SERVICE's setup-pi.sh: do not edit, the next run replaces it."
+    echo "# Only what deploy.sh and setup-pi.sh run with sudo once the Pi is set up."
+    while IFS='|' read -r runas cmd rule; do
+        rule="${rule:-$cmd}" name="${rule%% *}"
+        case "$name" in
+            /*) ;;
+            *)
+                path=""
+                for pair; do [ "${pair%%=*}" != "$name" ] || path="${pair#*=}"; done
+                [ -n "$path" ] || return 1
+                rule="$path${rule#"$name"}" ;;
+        esac
+        echo "$user ALL=($runas) NOPASSWD: $rule"
+    done < <(sudo_rules "$home")
 }
 
 # would_refuse WHY: under --check, note what would be refused and carry on

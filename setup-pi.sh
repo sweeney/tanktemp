@@ -14,6 +14,26 @@
 # Each step runs only if it is still needed, so it is safe to re-run: on a Pi
 # that is already set up it changes nothing and says so, and after a failure
 # it carries on from where it stopped.
+#
+# sudo: the first run needs sudo with no password for anything (full sudo).
+# It installs /etc/sudoers.d/tanktemp, after which ./deploy.sh, and this
+# script for a config change, need no password and no full sudo. With only
+# those rules, this script installs a changed config (one the Pi already has
+# a version of) and restarts onto it; any other step is refused, naming it,
+# before anything is done. To change the config: edit
+# deploy/config.local.yaml, then ./setup-pi.sh --check, then ./setup-pi.sh.
+#
+# The steps, in order:
+#   S. The sudo rules (with full sudo; first, so that if they are wrong
+#      nothing else has changed): /etc/sudoers.d/tanktemp, root:root 0440,
+#      for the deploy user, one NOPASSWD line for each command line deploy.sh
+#      and a config change run with sudo, each command by its full path on
+#      the Pi: systemctl restart tanktemp, systemctl daemon-reload, journalctl
+#      -u tanktemp -n 30 / --since * / _SYSTEMD_INVOCATION_ID=*, the builds'
+#      -check-config as tanktemp, and cat, install and cmp of the config and
+#      its staged copy (~/.tanktemp-config.yaml.incoming). Checked with visudo
+#      -c before it goes in, never installed if that fails. One that differs
+#      is shown as a diff and replaced (asking first).
 #   0. Checks only: 1-Wire must be set up already. /boot/firmware/config.txt
 #      needs a dtoverlay=w1-gpio line and /sys/bus/w1/devices a
 #      w1_bus_master. This script never edits config.txt and never reboots:
@@ -125,7 +145,7 @@ facts=$(r "uname -m
 echo \$HOME
 id -un
 id -gn
-sudo -n true 2>/dev/null && echo sudo-ok || echo sudo-no
+$(sudo_probe)
 if [ -r $BOOT_CONFIG ]; then grep -c '^[[:space:]]*dtoverlay=w1-gpio' $BOOT_CONFIG || true; else echo UNREADABLE; fi
 ls -d $W1_DEVICES/w1_bus_master* 2>/dev/null | wc -l
 id -gn $SVC_USER 2>/dev/null || echo NONE
@@ -141,13 +161,15 @@ v=\$(systemctl show -p NeedDaemonReload --value $SERVICE 2>/dev/null) || true; e
 pid=\$(systemctl show -p MainPID --value $SERVICE 2>/dev/null) || true
 if [ \"\${pid:-0}\" -gt 0 ] 2>/dev/null; then u=\$(ps -o user:32= -p \$pid) || true; echo \${u:-NONE}; else echo NONE; fi
 $(state templog)
-$(perms "$CONFIG_PATH")") || refuse "cannot ssh to $REMOTE"
+$(perms "$CONFIG_PATH")
+[ -e $SUDOERS ] && echo yes || echo no
+for c in $SUDO_CMDS; do p=\$(PATH=$SUDO_PATH command -v \$c) || p=MISSING; printf '%s=%s ' \$c \"\$p\"; done; echo") || refuse "cannot ssh to $REMOTE"
 {
     read -r remote_arch
     read -r pi_home
     read -r deploy_user
     read -r deploy_group
-    read -r sudo_ok
+    read -r sudo_answer
     read -r overlays
     read -r masters
     read -r user_group
@@ -165,12 +187,14 @@ $(perms "$CONFIG_PATH")") || refuse "cannot ssh to $REMOTE"
     read -r templog_enabled
     read -r templog_active
     read -r config_perms
+    read -r have_sudoers
+    read -r sudo_paths
 } <<<"$facts"
 pi_has_config=no
 [ "$config_perms" = MISSING ] || pi_has_config=yes
 
 goarch_for "$remote_arch" || refuse "$REMOTE is '$remote_arch', which this script does not build for"
-[ "$sudo_ok" = sudo-ok ] || refuse "sudo on $REMOTE needs a password; this script cannot type it"
+need_sudo "$sudo_answer"
 info "arch $remote_arch, $SERVICE $active$([ "$running_as" = NONE ] || echo " as $running_as")"
 
 # 1-Wire: checked, never changed here.
@@ -276,6 +300,35 @@ else
     refuse "no config: $REMOTE has no $CONFIG_PATH and there is no $CONFIG here (copy deploy/config.example.yaml to it, or give --config PATH)"
 fi
 
+# The deploy user's sudo rules: made here for this Pi and compared with the
+# installed ones, which only full sudo can read (or replace). With only the
+# rules themselves, need_sudo has seen they allow all they should.
+SUDOERS_CHANGE=0 # 1: install them, 2: replace them
+if [ "$SUDO_MODE" = full ]; then
+    [[ "$deploy_user" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]] || refuse "the deploy user '$deploy_user' is not a name this script will put in $SUDOERS"
+    [[ "$pi_home" =~ ^/[A-Za-z0-9_./-]+$ ]] || refuse "the deploy user's home '$pi_home' has characters sudoers would read specially; not making $SUDOERS"
+    read -r -a cmd_paths <<<"$sudo_paths"
+    for pair in "${cmd_paths[@]}"; do
+        case "${pair#*=}" in
+            /*) ;;
+            *) refuse "cannot find ${pair%%=*} on $REMOTE (looked in $SUDO_PATH), for $SUDOERS" ;;
+        esac
+    done
+    sudoers_fragment "$deploy_user" "$pi_home" "${cmd_paths[@]}" >"$TMP/sudoers" || refuse "cannot make $SUDOERS: a command's path is missing"
+    if [ "$have_sudoers" = yes ]; then
+        r "sudo cat $SUDOERS" >"$TMP/pi-sudoers" || refuse "cannot read $SUDOERS on $REMOTE"
+        if cmp -s "$TMP/pi-sudoers" "$TMP/sudoers"; then
+            info "$SUDOERS on $REMOTE is as it should be"
+        else
+            SUDOERS_CHANGE=2
+            info "$SUDOERS on $REMOTE differs from what setup makes:"
+            diff -u -L "$REMOTE:$SUDOERS" -L "setup-pi.sh's" "$TMP/pi-sudoers" "$TMP/sudoers" | sed 's/^/        /' || true
+        fi
+    else
+        SUDOERS_CHANGE=1
+    fi
+fi
+
 # Who may read what: the config and its password_file, root:SVC_USER 0640.
 SECRET_PERMS="root:$SVC_USER 640"
 fix_perms=() # paths to chown root:SVC_USER and chmod 0640
@@ -297,9 +350,13 @@ if [ "$build" = MISSING ] && [ $migrate -eq 0 ]; then
 fi
 
 todo=()
+if [ $SUDOERS_CHANGE -ne 0 ]; then
+    todo+=("$([ $SUDOERS_CHANGE -eq 1 ] && echo install || echo replace) $SUDOERS: sudo rules for $deploy_user scoped to what ./deploy.sh and config changes run, with no password (checked with visudo first)")
+fi
 [ $templog_on -eq 0 ] || todo+=("stop and disable templog (to bring it back: $TEMPLOG_BACK)")
 [ "$user_group" != NONE ] || todo+=("create the $SVC_USER system user (no home, no login shell)")
-[ $CONFIG_CHANGE -eq 0 ] || todo+=("install $CONFIG as $CONFIG_PATH (root:$SVC_USER 0640)")
+CONFIG_TODO="install $CONFIG as $CONFIG_PATH (root:$SVC_USER 0640)"
+[ $CONFIG_CHANGE -eq 0 ] || todo+=("$CONFIG_TODO")
 for fp in ${fix_perms[@]+"${fix_perms[@]}"}; do
     todo+=("make ${fp%%|*} root:$SVC_USER 0640 (it is ${fp#*|})")
 done
@@ -332,7 +389,7 @@ if [ "$unit_link" != "$want_unit" ] || [ "$have_unit" != yes ] || [ "$need_reloa
         install+=("reload systemd (it has not loaded $SERVICE.service as it is now)")
 fi
 [ "$enabled" = enabled ] || install+=("enable $SERVICE")
-start=0
+start=0 RESTART_TODO=""
 if [ "$active" != active ] || { [ "$build" = MISSING ] && [ $migrate -eq 0 ]; }; then
     start=1
     install+=("start $SERVICE and wait for /healthz to answer for it")
@@ -341,9 +398,27 @@ elif [ "$running_as" != "$SVC_USER" ]; then
     install+=("restart $SERVICE as $SVC_USER (it runs as $running_as now) and wait for /healthz")
 elif [ $CONFIG_CHANGE -eq 1 ]; then
     start=2
-    install+=("restart $SERVICE onto the new config and wait for /healthz")
+    RESTART_TODO="restart $SERVICE onto the new config and wait for /healthz"
+    install+=("$RESTART_TODO")
 fi
 todo+=(${install[@]+"${install[@]}"})
+
+# With only the scoped rules, setup can install a config that the Pi has one
+# of already and restart onto it, and nothing else: anything more is refused
+# here, before any of it is done.
+if [ "$SUDO_MODE" = scoped ]; then
+    full=()
+    for t in ${todo[@]+"${todo[@]}"}; do
+        if [ "$t" = "$RESTART_TODO" ] || { [ "$t" = "$CONFIG_TODO" ] && [ "$pi_has_config" = yes ]; }; then
+            continue
+        fi
+        full+=("$t")
+    done
+    if [ ${#full[@]} -gt 0 ]; then
+        why="sudo on $REMOTE allows only the scoped rules in $SUDOERS, and these steps need full sudo: $(printf '%s; ' "${full[@]}")so run ./setup-pi.sh once while sudo on $REMOTE needs no password"
+        if [ "$CHECK" -eq 1 ]; then would_refuse "$why"; else refuse "$why"; fi
+    fi
+fi
 
 if [ ${#todo[@]} -eq 0 ] && [ ${#PROBLEMS[@]} -eq 0 ]; then
     [ -z "$leftover" ] || info "$leftover"
@@ -373,6 +448,27 @@ fi
 # --------------------------------------------------------------------------
 # Each step only if needed, each asked for. From here a failure stops with
 # exit 3, and a "no" with exit 2, keeping what is done.
+
+# The sudo rules first: if visudo rejects them, nothing else has changed.
+# They go in beside the old ones under a name with a dot, which sudo does
+# not read, then are checked there as root:root 0440 and moved into place.
+if [ $SUDOERS_CHANGE -ne 0 ]; then
+    confirm "$([ $SUDOERS_CHANGE -eq 1 ] && echo Install || echo Replace) $SUDOERS on $REMOTE, as above?"
+    say "installing $SUDOERS"
+    sudoers_stage=".$SERVICE-sudoers.incoming"
+    sudoers_tmp="$(dirname "$SUDOERS")/.$SERVICE.incoming"
+    rsync -e "ssh ${SSHOPTS[*]}" "$TMP/sudoers" "$REMOTE:$sudoers_stage" || stopped "uploading $SUDOERS failed"
+    r "sudo install -m 0440 -o root -g root ~/$sudoers_stage $sudoers_tmp; rc=\$?; rm -f ~/$sudoers_stage; exit \$rc" ||
+        stopped "staging $SUDOERS failed"
+    if ! visudo_out=$(r "sudo visudo -c -f $sudoers_tmp 2>&1"); then
+        r "sudo rm -f $sudoers_tmp" || warn "could not remove $sudoers_tmp from $REMOTE (sudo ignores it)"
+        refuse "visudo rejects the $SUDOERS setup-pi.sh made, so it was not installed (a bug here). visudo says:
+$visudo_out"
+    fi
+    r "sudo mv -f $sudoers_tmp $SUDOERS" || stopped "moving $SUDOERS into place failed"
+    CHANGED=1
+    info "$SUDOERS installed: ./deploy.sh and config changes need no password from here"
+fi
 
 if [ $templog_on -eq 1 ]; then
     confirm "Stop and disable templog on $REMOTE (sudo systemctl disable --now templog)?"
@@ -404,9 +500,10 @@ install_config() {
     if [ $CONFIG_CHANGE -eq 1 ]; then
         say "installing $CONFIG_PATH"
         # Staged in the deploy user's home (0700): it may hold secrets.
-        stage=".$SERVICE-config.yaml.incoming"
+        # The sudo rules allow exactly these install and cmp command lines.
+        stage="$CONFIG_STAGE"
         rsync -e "ssh ${SSHOPTS[*]}" "$CONFIG" "$REMOTE:$stage" || stopped "uploading the config failed"
-        r "sudo install -d -m 0755 \"\$(dirname $CONFIG_PATH)\" &&
+        r "{ [ -d \"\$(dirname $CONFIG_PATH)\" ] || sudo install -d -m 0755 \"\$(dirname $CONFIG_PATH)\"; } &&
             sudo install -o root -g $SVC_USER -m 0640 ~/$stage $CONFIG_PATH &&
             sudo cmp -s ~/$stage $CONFIG_PATH && rm -f ~/$stage" ||
             stopped "installing $CONFIG_PATH failed"

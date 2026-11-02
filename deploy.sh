@@ -17,8 +17,14 @@
 #   ./deploy.sh [opts] user@host the Pi; without it, the one line of deploy/host
 #                                (gitignored). The repo names no host.
 #
+# sudo: no password. Either sudo needs none for anything, or (once
+# ./setup-pi.sh has installed them) the rules in /etc/sudoers.d/tanktemp allow
+# each command this runs with sudo: systemctl restart and daemon-reload, three
+# journalctl reads and -check-config as tanktemp. Otherwise it refuses, naming
+# the command that wants a password.
+#
 # What a deploy does:
-#   1. Pre-flight, all read-only: the Pi reachable with passwordless sudo, the
+#   1. Pre-flight, all read-only: the Pi reachable, sudo as above, the
 #      service, its config and its symlinks as expected (a Pi still on the
 #      first install's ~/tanktemp layout is refused: ./setup-pi.sh moves it), the running build
 #      healthy (/healthz: ready, MQTT connected, not "starting"; "degraded" is
@@ -157,7 +163,7 @@ readlink $BIN_LINK || echo MISSING
 readlink $UNIT_LINK || echo MISSING
 [ -L ~/$OLD_PI_DIR/$LINK ] && echo old-layout || echo no-old-layout
 systemctl is-active $SERVICE || true
-sudo -n true 2>/dev/null && echo sudo-ok || echo sudo-no
+$(sudo_probe)
 { df -Pk $PI_DIR 2>/dev/null || true; } | awk 'NR==2 {v = \$4} END {print v + 0}'
 cat $PI_DIR/.previous 2>/dev/null || echo NONE
 [ -f $CONFIG_PATH ] && echo config-yes || echo config-no
@@ -171,7 +177,7 @@ ls -1t $PI_DIR 2>/dev/null | grep '^$SERVICE-2' || true") || refuse "cannot ssh 
     read -r unit_link
     read -r old_layout
     read -r active
-    read -r sudo_ok
+    read -r sudo_answer
     read -r free_kb
     read -r recorded_prev
     read -r have_config
@@ -181,7 +187,7 @@ ls -1t $PI_DIR 2>/dev/null | grep '^$SERVICE-2' || true") || refuse "cannot ssh 
 
 goarch_for "$remote_arch" || refuse "$REMOTE is '$remote_arch', which this script does not build for"
 info "arch $remote_arch, service $active"
-[ "$sudo_ok" = sudo-ok ] || refuse "sudo on $REMOTE needs a password; this script cannot type it"
+need_sudo "$sudo_answer"
 if [ "$CURRENT" = MISSING ] && [ "$old_layout" = old-layout ]; then
     refuse "$REMOTE still has its builds in ~/$OLD_PI_DIR, where the $SVC_USER user cannot reach them: run ./setup-pi.sh to move them to $PI_DIR"
 fi
