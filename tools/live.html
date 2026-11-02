@@ -230,19 +230,26 @@ function cylinderSVG(id, m) {
   const ys = ss.map((s, i) => useHeight ? bot - dome - (s.height_mm / maxH) * (bot - top - 2 * dome)
                                         : bot - dome - (i + 0.5) * (bot - top - 2 * dome) / ss.length);
   const gid = "g-" + id.replace(/[^a-z0-9_-]/gi, "");
-  const known = ss.map((s, i) => ({y: ys[i], c: tempColour(s.temp_c)})).filter(p => p.c);
+  // Gradient stops must run top to bottom (ascending offset); the sensors run bottom first.
+  const known = ss.map((s, i) => ({y: ys[i], c: tempColour(s.temp_c)})).filter(p => p.c).sort((a, b) => a.y - b.y);
   const stops = known.length ? known.map(p => `<stop offset="${((p.y - top) / (bot - top) * 100).toFixed(1)}%" stop-color="${p.c}"/>`).join("")
                              : `<stop offset="0" stop-color="${css("--grid")}"/>`;
   const ink = css("--ink"), muted = css("--muted"), line = css("--line"), bad = css("--bad"), warn = css("--warn");
+  // Labels: at the probe's height, but at least GAP apart (probes can sit
+  // close together), kept inside the drawing; a leader line joins them.
+  const GAP = 32, ly = [...ys], byY = ys.map((_, i) => i).sort((a, b) => ys[a] - ys[b]);
+  byY.forEach((k, j) => { if (j > 0) ly[k] = Math.max(ly[k], ly[byY[j - 1]] + GAP); });
+  const over = byY.length ? ly[byY[byY.length - 1]] - (bot - 6) : 0;
+  if (over > 0) byY.forEach((k, j) => { ly[k] = Math.max(ly[k] - over, top + 12 + j * GAP); });
   let probes = "";
   ss.forEach((s, i) => {
-    const y = ys[i], failing = s.temp_c == null;
+    const y = ys[i], l = ly[i], failing = s.temp_c == null;
     const val = failing ? (s.error || "null") : `${s.temp_c.toFixed(2)} °C`;
-    probes += `<line x1="${cx + cw}" y1="${y}" x2="${cx + cw + 22}" y2="${y}" stroke="${line}" stroke-width="1.5"/>
+    probes += `<polyline points="${cx + cw},${y} ${cx + cw + 10},${y} ${cx + cw + 22},${l}" fill="none" stroke="${line}" stroke-width="1.5"/>
       <circle cx="${cx + cw}" cy="${y}" r="5" fill="${failing ? css("--panel") : tempColour(s.temp_c)}" stroke="${failing ? bad : ink}" stroke-width="1.5"/>
-      <text x="${cx + cw + 28}" y="${y - 3}" font-family="var(--f-mono)" font-size="14" font-weight="500" fill="${failing ? bad : ink}">${esc(val)}${s.suspect ? " ⚑" : ""}</text>
-      <text x="${cx + cw + 28}" y="${y + 13}" font-family="var(--f-body)" font-size="11" fill="${muted}">${esc(s.position)}${s.height_mm != null ? " · " + s.height_mm + " mm" : ""}${s.offset_c ? " · " + (s.offset_c > 0 ? "+" : "") + s.offset_c : ""}</text>
-      ${sparkPath(id, s.position, W - 58, y - 12, 52, 20, s.suspect ? warn : muted)}`;
+      <text x="${cx + cw + 28}" y="${l - 3}" font-family="var(--f-mono)" font-size="14" font-weight="500" fill="${failing ? bad : ink}">${esc(val)}${s.suspect ? " ⚑" : ""}</text>
+      <text x="${cx + cw + 28}" y="${l + 13}" font-family="var(--f-body)" font-size="11" fill="${muted}">${esc(s.position)}${s.height_mm != null ? " · " + s.height_mm + " mm" : ""}${s.offset_c ? " · " + (s.offset_c > 0 ? "+" : "") + s.offset_c : ""}</text>
+      ${sparkPath(id, s.position, W - 58, l - 12, 52, 20, s.suspect ? warn : muted)}`;
   });
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(id)} cylinder with ${ss.length} probes">
     <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">${stops}</linearGradient></defs>
@@ -444,7 +451,7 @@ function startDemo() {
         error ? fail++ : ok++;
         return {position: pos, order: t.probes.length - i, height_mm: h, rom: "28-00000000" + (0x1000 + i + t.id.length * 16).toString(16).padStart(4, "0"),
           temp_c: error ? null : Math.round((raw + off) * 1e4) / 1e4, raw_c: error ? null : raw, offset_c: off, error, suspect: null};
-      });
+      }).reverse(); // probes are listed top first here; the wire is bottom first (order 1 = bottom)
       pub(t.id + "/state", {device_id: t.id, timestamp: stamp(), clock_synced: true, sweep_ms: 3900 + Math.round(Math.random() * 200), sensors}, retained, 0);
     }
     D.okCount = ok; D.failCount = fail;
