@@ -6,7 +6,7 @@
 # warms. Read-only on the Pi: it lists the buses and reads w1_slave (a fresh
 # conversion), nothing else.
 #
-# Usage: deploy/probes.sh [--host user@host] [--config FILE] [--watch]
+# Usage: deploy/probes.sh [--host user@host | --local] [--config FILE] [--watch]
 #   --watch       report arrivals and departures until Ctrl-C
 #   --interval S  seconds between polls in --watch (default 3)
 #   --count N     stop --watch after N polls (default: never)
@@ -14,6 +14,9 @@
 #   --config      the config whose tanks and positions to show
 #                 (default deploy/config.local.yaml)
 #   --host        ssh target (default: the contents of deploy/host)
+#   --local       run on the Pi itself, without ssh; the config is optional
+#                 (default: deploy/config.local.yaml, else
+#                 /etc/tanktemp/config.yaml, else none)
 #
 # The kernel searches each bus about every 10 s, so a probe appears up to
 # ~10 s after it's connected, and leaves only after a few failed searches.
@@ -23,7 +26,7 @@ set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
 CONFIG="$ROOT/deploy/config.local.yaml"
-HOST="" WATCH=0 CHECK=0 INTERVAL=3 COUNT=0
+HOST="" WATCH=0 CHECK=0 INTERVAL=3 COUNT=0 LOCAL=0 CONFIG_SET=0
 W1=/sys/bus/w1/devices
 WARM_C=0.5 # how much a held probe must warm to be named
 
@@ -34,9 +37,10 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --watch) WATCH=1 ;;
         --check) CHECK=1 ;;
+        --local) LOCAL=1 ;;
         --interval) [ $# -ge 2 ] || die "--interval needs seconds"; INTERVAL="$2"; shift ;;
         --count) [ $# -ge 2 ] || die "--count needs a number"; COUNT="$2"; shift ;;
-        --config) [ $# -ge 2 ] || die "--config needs a file"; CONFIG="$2"; shift ;;
+        --config) [ $# -ge 2 ] || die "--config needs a file"; CONFIG="$2"; CONFIG_SET=1; shift ;;
         --host) [ $# -ge 2 ] || die "--host needs user@host"; HOST="$2"; shift ;;
         -h|--help) usage; exit 0 ;;
         *) die "unknown option $1 (try --help)" ;;
@@ -45,11 +49,30 @@ while [ $# -gt 0 ]; do
 done
 [[ "$INTERVAL" =~ ^[0-9]+(\.[0-9]+)?$ ]] || die "--interval must be a number of seconds"
 [[ "$COUNT" =~ ^[0-9]+$ ]] || die "--count must be a number"
-[ -f "$CONFIG" ] || die "no config at $CONFIG (pass --config)"
-if [ -z "$HOST" ]; then
-    [ -f "$ROOT/deploy/host" ] || die "no --host and no deploy/host file"
-    HOST=$(tr -d '[:space:]' <"$ROOT/deploy/host")
+if [ "$LOCAL" -eq 1 ]; then
+    [ -z "$HOST" ] || die "--local and --host don't mix"
+    if [ "$CONFIG_SET" -eq 0 ]; then
+        CONFIG=""
+        for c in ${PROBES_CONFIGS:-$ROOT/deploy/config.local.yaml /etc/tanktemp/config.yaml}; do
+            if [ -r "$c" ]; then CONFIG=$c; break; fi
+        done
+        [ -n "$CONFIG" ] || echo "no config found: positions unknown"
+    fi
+    WHAT="this machine"
+else
+    if [ -z "$HOST" ]; then
+        [ -f "$ROOT/deploy/host" ] || die "no --host and no deploy/host file"
+        HOST=$(tr -d '[:space:]' <"$ROOT/deploy/host")
+    fi
+    WHAT=$HOST
 fi
+[ -z "$CONFIG" ] || [ -f "$CONFIG" ] || die "no config at $CONFIG (pass --config)"
+
+# Run a command on the Pi: over ssh, or here with --local.
+# shellcheck disable=SC2029 # the command is built here on purpose
+on_pi() {
+    if [ "$LOCAL" -eq 1 ]; then "${PROBES_SHELL:-bash}" -c "$1"; else ssh "$HOST" "$1"; fi
+}
 
 # rom -> tank/position, from the config, in flow or block style.
 declare -A WHERE=()
@@ -57,13 +80,13 @@ while read -r rom where; do WHERE[$rom]=$where; done < <(awk '
     match($0, /device_id: *[a-z0-9_-]+/) { tank = substr($0, RSTART, RLENGTH); sub(/device_id: */, "", tank) }
     match($0, /rom: *28-[0-9a-f]+/) { cur = substr($0, RSTART, RLENGTH); sub(/rom: */, "", cur) }
     match($0, /position: *[a-z0-9_]+/) { p = substr($0, RSTART, RLENGTH); sub(/position: */, "", p); if (cur != "") print cur, tank "/" p; cur = "" }
-' "$CONFIG")
+' ${CONFIG:+"$CONFIG"} </dev/null)
 where() { echo "${WHERE[$1]:-not in config}"; }
 
 # One line per bus ("BUS") and per probe ("BUS ROM").
 presence() {
     # shellcheck disable=SC2016 # expanded on the Pi
-    ssh "$HOST" 'for m in '"$W1"'/w1_bus_master*; do [ -d "$m" ] || continue; b=${m##*/}; echo "$b"; grep "^28-" "$m/w1_master_slaves" | sed "s/^/$b /"; done'
+    on_pi 'for m in '"$W1"'/w1_bus_master*; do [ -d "$m" ] || continue; b=${m##*/}; echo "$b"; grep "^28-" "$m/w1_master_slaves" | sed "s/^/$b /"; done'
 }
 
 # "ROM KIND MILLI" per ROM: KIND is ok, crc, bus_low, power_on_reset or
@@ -71,7 +94,7 @@ presence() {
 temps() {
     [ $# -gt 0 ] || return 0
     # shellcheck disable=SC2016 # expanded on the Pi
-    ssh "$HOST" 'for r in '"$*"'; do f='"$W1"'/$r/w1_slave; if [ -r "$f" ]; then echo "$r $(tr "\n" " " <"$f")" & else echo "$r MISSING"; fi; done; wait' |
+    on_pi 'for r in '"$*"'; do f='"$W1"'/$r/w1_slave; if [ -r "$f" ]; then echo "$r $(tr "\n" " " <"$f")" & else echo "$r MISSING"; fi; done; wait' |
         awk '{
             if ($2 == "MISSING" || NF < 23) { print $1, "missing", "-"; next }
             zeros = 1; for (i = 2; i <= 10; i++) if ($i != "00") zeros = 0
@@ -87,13 +110,13 @@ show() { # KIND MILLI -> what to print
     if [ "$1" = ok ]; then awk -v t="$2" 'BEGIN { printf "%.3f °C", t / 1000 }'; else echo "$1"; fi
 }
 
-state=$(presence) || die "can't ssh to $HOST"
+state=$(presence) || die "can't ssh to $WHAT"
 buses=$(grep -c '^[^ ][^ ]*$' <<<"$state" || true)
-[ "$buses" -gt 0 ] || die "$HOST has no 1-Wire bus masters"
+[ "$buses" -gt 0 ] || die "$WHAT has no 1-Wire bus masters"
 probes=$(grep -c ' ' <<<"$state" || true)
 
 if [ "$CHECK" -eq 1 ]; then
-    echo "ok: $buses buses, $probes probes on $HOST"
+    echo "ok: $buses buses, $probes probes on $WHAT"
     exit 0
 fi
 
@@ -122,7 +145,7 @@ prev=$state polls=1
 now() { date +%H:%M:%S; }
 while [ "$COUNT" -eq 0 ] || [ "$polls" -lt "$COUNT" ]; do
     sleep "$INTERVAL"
-    cur=$(presence) || { echo "$(now) can't reach $HOST; retrying" >&2; continue; }
+    cur=$(presence) || { echo "$(now) can't reach $WHAT; retrying" >&2; continue; }
     polls=$((polls + 1))
     arrived=$(comm -13 <(awk 'NF == 2' <<<"$prev" | sort) <(awk 'NF == 2' <<<"$cur" | sort))
     left=$(comm -23 <(awk 'NF == 2' <<<"$prev" | sort) <(awk 'NF == 2' <<<"$cur" | sort))

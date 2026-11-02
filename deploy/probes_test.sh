@@ -44,10 +44,10 @@ mqtt: {broker: tcp://broker.example:1883}
 tanks:
   - device_id: hot-water-cylinder
     sensors:
-      - {rom: 28-00001172de60, position: top, order: 1, height_mm: 1500}
+      - {rom: 28-00001172de60, position: top, order: 2, height_mm: 1500}
       - rom: 28-00001171f570
         position: bottom
-        order: 2
+        order: 1
 EOF
 
 fresh() {
@@ -119,6 +119,42 @@ check "two: both reported" [ "$(lines_matching '^[0-9:]+ \+ 28-')" -eq 2 ]
 check "two: asks for a hand" says '2 arrived together: hold ONE in your hand'
 check "two: names the warm one" says '28-00001171f570 is warming \(\+1\.0 °C\): it.s the one in your hand \(hot-water-cylinder/bottom\)'
 check "two: not the other" not says '28-00001172de60 is warming'
+
+# --local: run on the Pi itself, no ssh. PROBES_SHELL stands in for bash
+# so the tests can show it the fake trees, as the ssh stub does.
+cat >"$STUBS/localsh" <<'EOF2'
+#!/usr/bin/env bash
+[ "$1" = -c ] || exit 99
+echo "local: $2" >>"$FAKE_STATE/local"
+exec "$(dirname "$0")/ssh" pi "$2"
+EOF2
+chmod +x "$STUBS/localsh"
+runlocal() { set +e; OUT=$(PATH="$STUBS:$PATH" PROBES_SHELL="$STUBS/localsh" "$HERE/probes.sh" --local "$@" 2>&1 </dev/null); RC=$?; set -e; }
+
+fresh "$FULL"
+runlocal --config "$WORK/config.yaml"
+check "local: ok" rc_is 0
+check "local: all ten" [ "$(lines_matching '^w1_bus_master[12] +28-')" -eq 10 ]
+check "local: the kernel's value and config" says '28-00001172de60 +16\.250 °C +hot-water-cylinder/top$'
+check "local: runs commands locally" [ -s "$FAKE_STATE/local" ]
+check "local: names no host" not says 'pi@|on $'
+
+# --local with no config anywhere: still lists, positions unknown.
+fresh "$FULL"
+PROBES_CONFIGS="$WORK/none.yaml $WORK/nor.yaml" runlocal
+check "local, no config: ok" rc_is 0
+check "local, no config: lists" says '28-00001172de60 +16\.250 °C +not in config$'
+check "local, no config: says so" says 'no config found'
+
+fresh "$EMPTY $ONE"
+PROBES_CONFIGS="$WORK/config.yaml" runlocal --watch --interval 0 --count 2
+check "local watch: arrival" says '\+ 28-00001172de60 on w1_bus_master1: 16\.250 °C \(hot-water-cylinder/top\)'
+
+fresh "$FULL"
+runlocal --check --config "$WORK/config.yaml"
+check "local check: counts" says '^ok: 2 buses, 10 probes on this machine$'
+run --local --host pi@example
+check "local and host: refused" rc_is 1
 
 # --check and refusals.
 fresh "$FULL"
