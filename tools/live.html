@@ -13,7 +13,7 @@
 
   Open it with ./tools/live.sh, which fills in the broker from
   deploy/config.local.yaml, or open the file and type a ws:// URL.
-  Parameters (in the URL hash): ws=ws://host:9001  prefix=test/energy/hot_water
+  Parameters (in the URL hash): ws=ws://host:9001  prefix=energy/hot_water
   demo=1
 -->
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Public+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
@@ -96,7 +96,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--info); outl
       <label class="label" for="ws">Broker</label>
       <input type="text" id="ws" placeholder="ws://broker:9001" spellcheck="false" autocomplete="off">
       <label class="label" for="prefix">Prefix</label>
-      <input type="text" id="prefix" value="test/energy/hot_water" spellcheck="false" autocomplete="off">
+      <input type="text" id="prefix" value="energy/hot_water" spellcheck="false" autocomplete="off">
       <button class="primary" id="go" type="submit">Connect</button>
       <button id="demoBtn" type="button">Demo</button>
       <span class="pill off" id="link">offline</span>
@@ -162,7 +162,7 @@ function params() {
   const p = new URLSearchParams(location.hash.slice(1));
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem("tanktemp-live") || "{}") } catch {}
-  return { ws: p.get("ws") || saved.ws || "", prefix: p.get("prefix") || saved.prefix || "test/energy/hot_water", demo: p.get("demo") === "1" };
+  return { ws: p.get("ws") || saved.ws || "", prefix: p.get("prefix") || saved.prefix || "energy/hot_water", demo: p.get("demo") === "1" };
 }
 function remember() { try { localStorage.setItem("tanktemp-live", JSON.stringify({ws: $("ws").value, prefix: $("prefix").value})) } catch {} }
 

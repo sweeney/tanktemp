@@ -5,17 +5,32 @@ This is for statehouse to implement a `tanktemp` adapter, following its
 code. The MQTT contract this builds on is [`WIRE.md`](WIRE.md), which is
 normative; this document says what statehouse should do with it.
 
-Status: **spec, not implemented.** tanktemp publishes under
-`test/energy/hot_water` until it has been reviewed; `energy/hot_water` is
-the production prefix.
+Status: **tanktemp is live; the adapter is not implemented.** Since
+2026-11-02 tanktemp publishes on the production prefix, `energy/hot_water`,
+with one cylinder of five probes (a second cylinder is to follow). Nothing
+consumes it yet. The contract was reviewed with its owner, and its changes
+since are listed in WIRE.md's Changes section.
+
+Before the adapter is switched on, in this order:
+
+1. statehouse moves to `github.com/sweeney/common/devices` **v0.2.0**
+   (tagged; statehouse pins v0.1.0 today), which decodes `part_of`,
+   `telemetry`, `cylinder` and the asset fields, and gives `SendsTelemetry`
+   and `PlaceOf`.
+2. statehouse leaves `telemetry: false` entries out of liveness and
+   readings (see "devices_<site> entries"). How statehouse, countinghouse
+   and greenhouse treat a configured device they never hear from is still
+   to be checked first.
+3. The `devices_<site>` entries for the cylinder and its probes go in.
+4. The adapter is enabled.
 
 ## What tanktemp publishes, in one paragraph
 
 Every 30 s it reads every DS18B20 probe on every configured cylinder. For
 each cylinder it publishes one retained message on
 `{prefix}/{device_id}/state` (QoS 0). The message lists **every** configured
-probe, top first, each with its calibrated temperature or `null` and an
-error code. On `{prefix}/status` (QoS 1, retained) it publishes STARTUP, a
+probe, bottom first (`order` 1 is the bottom), each with its calibrated
+temperature or `null` and an error code. On `{prefix}/status` (QoS 1, retained) it publishes STARTUP, a
 HEARTBEAT when the first sweep is in, a HEARTBEAT every 15 minutes, and
 SHUTDOWN. Its last will on that topic is `{"online":false,"event":"LWT"}`.
 
@@ -54,9 +69,11 @@ primary = "<device_id>.<position>"     e.g. "hot-water-cylinder.top"
 ## devices_<site> entries
 
 The cylinder gets one entry, and each probe gets its own, related by
-`part_of`. Both `part_of` and `telemetry` belong to the `devices` follow-up
-(tanktemp's PLAN.md, "common/devices follow-up"); until statehouse reads
-them, they decode as unknown keys. The example is made up:
+`part_of`. `part_of`, `telemetry`, `cylinder` and the asset fields are in
+`common/devices` v0.2.0. Until statehouse reads that version they decode as
+unknown keys (and warn), which is why the entries wait for step 1 above.
+The keys follow the namespace's existing style (`probe_<appliance>` for a
+probe, as for the fridge probes). The example is made up:
 
 ```json
 {
@@ -71,7 +88,7 @@ them, they decode as unknown keys. The example is made up:
     "installed": "2019-05-14",
     "cylinder": {"capacity_l": 210, "height_mm": 1480, "diameter_mm": 550}
   },
-  "hot-water-cylinder-top": {
+  "probe_hot-water-cylinder_top": {
     "class": "appliance_probe",
     "display_name": "Cylinder: top",
     "scheme": "tanktemp",
@@ -91,10 +108,14 @@ them, they decode as unknown keys. The example is made up:
 - **`target_temperature` is optional on a cylinder probe,** relayed raw like
   the fridge and freezer targets. What counts as too cold for stored hot
   water is the consumer's policy.
-- **The entries must exist before the first production deploy.** A probe
-  with no entry resolves to `unclassified` (or a name hint) in
+- **The entries must exist before the adapter is enabled.** A probe with no
+  entry resolves to `unclassified` (or a name hint) in
   `internal/device/profiles.go`, and greenhouse doesn't chart `unclassified`
   at all, so the probes would be invisible.
+- **Heights stay out of the namespace.** Each state message carries every
+  probe's `height_mm` (and `order`), so a consumer can model the cylinder
+  from the wire; a copy in `devices_<site>` could drift from tanktemp's
+  config. The cylinder's own `cylinder.height_mm` is its external height.
 - **The cylinder entry has `telemetry: false`:** it sends nothing itself.
   statehouse should leave such entries out of anything about liveness or
   readings ("never heard from", online counts) once it reads the key.
@@ -112,7 +133,7 @@ For each element of `sensors`:
 | `suspect: "85c_unverified"` | the value is published and probably real; keep the flag if statehouse can carry per-reading quality, otherwise write the value |
 | `rom` | metadata (see Identity) |
 | `raw_c`, `offset_c` | publisher metadata. `temp_c` already includes the calibration; `raw_c` is for diagnosis. Statehouse need not keep either |
-| `order`, `height_mm` | config facts. Useful for a stratification view; not needed for the series |
+| `order`, `height_mm` | config facts: `order` counts from 1 at the bottom, and `height_mm` (mm above the cylinder's base, or `null`) rises with it. Useful for a stratification view; not needed for the series |
 
 The **message-level** fields:
 
@@ -158,8 +179,11 @@ online.
   are additive, and an adapter must ignore unknown fields.
 - Renaming or removing a field, or changing an error code, is a major
   change, announced in WIRE.md first.
-- The topic prefix will move from `test/energy/hot_water` to
-  `energy/hot_water` once reviewed. Keep the base configurable.
+- Two changes were made before any consumer, both in WIRE.md's Changes:
+  `attempts` and `bus` left the state message (2026-11-01), and `order`
+  now counts from the bottom (2026-11-02; it was 1 = top).
+- Keep the base configurable. It was `test/energy/hot_water` until
+  2026-11-02; nothing is published there now.
 
 ## A worked example: the data-line fault
 

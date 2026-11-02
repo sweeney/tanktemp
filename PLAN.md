@@ -771,7 +771,7 @@ Everything is local. Nothing is pushed, tagged or merged.
 | 8 web + main | done; run end to end on the Mac against Mosquitto, including the last will |
 | 9 deploy | done: `setup-pi.sh`, `deploy.sh`, 267 stub tests |
 | 10 devices follow-up | built in common: asset fields, `cylinder`, `part_of`, `telemetry` |
-| 11 the rig | **running on the rig Pi**, publishing under `test/energy/hot_water`, with `templog` stopped. The hardware check passes. Not done: real power-on-reset and data-line captures (they need your hands), and the water-bath calibration |
+| 11 the rig | **running on the rig Pi**, publishing under `test/energy/hot_water` (on `energy/hot_water` with the first real cylinder since 2026-11-02), with `templog` stopped. The hardware check passes. Not done: real power-on-reset and data-line captures (they need your hands), and the water-bath calibration |
 | follow-up (2026-11-01) | **Remove templog** (G24) once tanktemp has run for a week, from 2026-11-08 at the earliest. Until then it stays disabled, as the fallback |
 | 12 hand-off | `docs/STATEHOUSE.md` written |
 

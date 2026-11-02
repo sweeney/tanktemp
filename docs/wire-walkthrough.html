@@ -204,7 +204,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--info); outline-
       <span class="chip cu">2 topics</span>
       <span class="chip">6 goldens</span>
       <span class="chip">8 error codes</span>
-      <span class="chip">test prefix: test/energy/hot_water</span>
+      <span class="chip">prefix: energy/hot_water (test/ until 2026-11-02)</span>
       <span class="chip warn">nothing subscribes yet</span>
     </div>
   </div>
@@ -224,7 +224,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--info); outline-
 <section id="topics">
   <div class="kicker">01 · Where messages go</div>
   <h2>The topic tree</h2>
-  <p class="lede">There are two topics. One carries a state message per tank per sweep. The other carries the daemon's lifecycle and its last will. <code>{prefix}</code> is <code>mqtt.topic_prefix</code>: <code>energy/hot_water</code> by default, <code>test/energy/hot_water</code> for the test deploy until this review is done.</p>
+  <p class="lede">There are two topics. One carries a state message per tank per sweep. The other carries the daemon's lifecycle and its last will. <code>{prefix}</code> is <code>mqtt.topic_prefix</code>: <code>energy/hot_water</code> by default, <code>test/energy/hot_water</code> for the test deploy until 2026-11-02, when the first real cylinder went live on the default.</p>
   <figure>
     <div class="scroll"><svg id="topicSvg" viewBox="0 0 760 330" role="img" aria-label="Topic tree: prefix, then device_id/state and status"></svg></div>
     <figcaption>The <code>{device_id}</code> is the tank's key in <code>devices_&lt;site&gt;</code>, so it matches <code>[a-z0-9_-]+</code> and is safe to use as a topic segment. The dashed branch is made up: it stands for a topic tanktemp might add one day.</figcaption>
@@ -423,7 +423,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--info); outline-
       <ul style="margin:6px 0;padding-left:18px;font-size:14px">
         <li>Renaming or removing a field.</li>
         <li>Changing an error code.</li>
-        <li>Moving the prefix from <code>test/energy/hot_water</code> to <code>energy/hot_water</code> is planned once this review is done. Adapters keep the base configurable.</li>
+        <li>The prefix moved from <code>test/energy/hot_water</code> to <code>energy/hot_water</code> on 2026-11-02. Adapters keep the base configurable.</li>
       </ul>
     </div>
   </div>

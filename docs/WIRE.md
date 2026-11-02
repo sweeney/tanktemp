@@ -52,7 +52,7 @@ not to a tank.
 | `clock_synced` | whether NTP had synced. The Pi has no real-time clock, so `false` means the timestamp may be wrong |
 | `sweep_ms` | how long the whole sweep took, all tanks |
 | `sensors` | **every** configured sensor of this tank, in `order`: 1 is the bottom, so the list runs bottom to top, the way heights and probe labels count. A failing sensor is never left out |
-| `position`, `order`, `height_mm`, `rom` | from the config. `height_mm` is `null` if not configured. The ROM is the physical sensor; it changes when a probe is replaced, while the position doesn't |
+| `position`, `order`, `height_mm`, `rom` | from the config. `height_mm` is the probe's height above the cylinder's base in mm, `null` if not configured. The ROM is the physical sensor; it changes when a probe is replaced, while the position doesn't |
 | `temp_c` | calibrated °C: `raw_c + offset_c`, at most 4 decimals. `null` when the read failed |
 | `raw_c` | the sensor's own value, exactly: a multiple of 0.0625 (the kernel's `t=` truncates odd sixteenths, e.g. 12.0625 to 12.062; tanktemp doesn't). `null` when the read failed |
 | `offset_c` | the calibration applied, `0` when uncalibrated |
