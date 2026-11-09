@@ -217,9 +217,11 @@ default, straight to `fast.interval` when any probe's rate of change (between
 two consecutive OK, non-suspect readings, and at least two sensor steps)
 reaches `trigger_c_per_min`, held for `hold`, then an exponential ease back
 over `decay`. The interval is a pure function of the time since the last
-trigger, in `internal/cadence`, which sees time only through sweep
-timestamps. `cmd/tanktemp`'s scheduler turns it into lifecycle's ticks: one
-interval after the tick before, overruns skipped, never queued. Nothing on
+trigger, in `internal/cadence`, which times rates and the curve on each
+sweep's monotonic start (so NTP can't move it). lifecycle's `Config.Next`
+(common#14, after review on #4) asks for each next sweep's time once it has
+seen the last one finish: one interval after the previous due time,
+overruns skipped, never queued. Nothing on
 the wire changes (WIRE.md, Cadence): staleness stays 3 × the slow interval,
 and `/api/status`'s `sweep` block and the verbose log are where it shows.
 Draw detection itself stays downstream.

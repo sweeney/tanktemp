@@ -28,9 +28,9 @@ probes on each, is set in a local config file.
 `cmd/tanktemp` wires these together with
 [`common/lifecycle`](https://github.com/sweeney/common) (signals, STARTUP,
 heartbeats, SHUTDOWN, cancellable sweeps), `common/mqttpub` (the resilient
-publisher) and `common/health` (`/healthz`, `sysinfo`). Its scheduler
-feeds lifecycle's ticks, as far apart as `internal/cadence` decides
-(below).
+publisher) and `common/health` (`/healthz`, `sysinfo`). lifecycle's
+`Next` hook asks when each next sweep is due, and `internal/cadence`
+decides (below).
 
 ## Adaptive cadence (sweep fast while probes are changing)
 
