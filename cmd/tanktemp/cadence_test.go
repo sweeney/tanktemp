@@ -193,6 +193,7 @@ func TestCheckConfigShowsTheCadence(t *testing.T) {
 		{"sweep: {interval: 1m}\n", ", sweep every 1m, verbose log off, "},
 		{"sweep: {fast: {}}\n", ", sweep every 30s, 10s while a probe changes 1.5 °C/min (hold 2m, decay 5m), verbose log off, "},
 		{"sweep: {fast: {interval: 5s, trigger_c_per_min: 2, hold: 0s, decay: 90s}}\n", ", sweep every 30s, 5s while a probe changes 2 °C/min (hold 0s, decay 1m30s), "},
+		{"sweep: {interval: 2h, fast: {hold: 1h, decay: 3h0m}}\n", ", sweep every 2h, 10s while a probe changes 1.5 °C/min (hold 1h, decay 3h), "},
 	} {
 		path := filepath.Join(dir, "c.yaml")
 		_ = os.WriteFile(path, []byte(base+tt.extra), 0o644)

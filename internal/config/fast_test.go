@@ -37,15 +37,20 @@ func TestFastAbsentIsNil(t *testing.T) {
 	}
 }
 
-// fast: null (or a bare "fast:") is the same as leaving it out. YAML can't
-// tell "fast:" from "fast: null", and neither says "on".
-func TestFastNullIsAbsent(t *testing.T) {
-	c, err := Load([]byte(valid + "sweep:\n  fast:\n"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c.Sweep.Fast != nil {
-		t.Errorf("fast: (null) gave Fast = %+v, want nil", *c.Sweep.Fast)
+// "fast:" with nothing after it (say every key under it commented out)
+// is YAML null. Taken as "absent", it would silently turn the fast cadence
+// off, so it's refused with what to write instead (review on #4).
+func TestFastNullIsRefused(t *testing.T) {
+	for _, y := range []string{
+		valid + "sweep:\n  fast:\n",
+		valid + "sweep:\n  fast: null\n",
+		valid + "sweep:\n  fast: ~\n",
+		valid + "sweep:\n  interval: 30s\n  fast:\n  #  interval: 10s\n",
+	} {
+		_, err := Load([]byte(y))
+		if err == nil || !strings.Contains(err.Error(), "sweep.fast is empty") || !strings.Contains(err.Error(), "fast: {}") {
+			t.Errorf("%q: err = %v, want it refused, suggesting fast: {}", y, err)
+		}
 	}
 }
 
@@ -122,6 +127,9 @@ func TestFastRejects(t *testing.T) {
 		{"unknown fast key", valid + "sweep:\n  fast: {intervl: 10s}\n", "intervl"},
 		{"trigger written as a step", valid + "sweep:\n  fast: {trigger_c: 0.5}\n", "trigger_c"},
 		{"a scalar instead of a block", valid + "sweep:\n  fast: 10s\n", "yaml"},
+		// Right keys, wrong types: the block's own decode refuses them.
+		{"a word for a duration", valid + "sweep:\n  fast: {interval: banana}\n", "banana"},
+		{"a list for the trigger", valid + "sweep:\n  fast: {trigger_c_per_min: [1]}\n", "yaml"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

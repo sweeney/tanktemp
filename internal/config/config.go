@@ -62,6 +62,7 @@ type Sweep struct {
 // Any key left out of the block takes its DefaultFast value, so "fast: {}"
 // turns it on with the defaults. An explicit value is always kept, even a
 // zero: "hold: 0s" is a real choice (ease back at once), not a missing key.
+// "fast:" with no value at all is refused (checkFastNotNull).
 type Fast struct {
 	Interval       time.Duration `yaml:"interval"`
 	TriggerCPerMin float64       `yaml:"trigger_c_per_min"`
@@ -231,6 +232,7 @@ func Load(data []byte) (Config, error) {
 	var doc yaml.Node
 	_ = yaml.Unmarshal(data, &doc) // already known to parse
 	v := validator{lines: lineIndex(&doc)}
+	v.checkFastNotNull(&doc)
 	v.check(&c)
 	if len(v.problems) > 0 {
 		return Config{}, &ValidationError{Problems: v.problems}
@@ -321,6 +323,20 @@ func (v *validator) check(c *Config) {
 		v.add(0, "sweep.interval", "%v is shorter than one clean read of all %d sensors (%v)", c.Sweep.Interval, total, need)
 	}
 	v.checkFast(c.Sweep, total)
+}
+
+// checkFastNotNull refuses "fast:" with no value (YAML null), which yaml
+// decodes as an absent block. That's what's left after commenting out every
+// key under it, and taken as "absent" it would silently turn the fast
+// cadence off (review on #4). Leaving the block out, or writing fast: {},
+// says which was meant.
+func (v *validator) checkFastNotNull(doc *yaml.Node) {
+	if len(doc.Content) == 0 {
+		return
+	}
+	if f := mapValue(mapValue(doc.Content[0], "sweep"), "fast"); f != nil && f.Tag == "!!null" {
+		v.add(f.Line, "sweep.fast", "sweep.fast is empty: leave the block out for a fixed interval, or write fast: {} for the defaults")
+	}
 }
 
 // checkFast checks sweep.fast (issue #1), if there is one. Each rule is
