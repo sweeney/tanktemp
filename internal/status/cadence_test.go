@@ -47,3 +47,12 @@ func TestFastCadenceDoesNotChangeStaleness(t *testing.T) {
 		t.Errorf("80 s after a sweep, fast cadence: %s %v, want ok", h.Status, h.Detail)
 	}
 }
+
+// A tracker made without Options.Cadence still reports a real cadence:
+// slow, at the slow interval, never an empty mode.
+func TestNewDefaultsTheCadenceToSlow(t *testing.T) {
+	got := New(Options{Start: start, Interval: interval}).Snapshot().Cadence
+	if got.Mode != cadence.Slow || got.Interval != interval || got.Enabled {
+		t.Errorf("default cadence = %+v, want slow at %v, not adaptive", got, interval)
+	}
+}

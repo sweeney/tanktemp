@@ -38,7 +38,8 @@ type Options struct {
 	Verbose bool
 	// Cadence is the adaptive cadence's state before the first sweep
 	// (issue #1): cadence.New(...).Status(), so /api/status says slow, at
-	// the slow interval, and whether fast is configured at all.
+	// the slow interval, and whether fast is configured at all. Left
+	// zero, it's slow at Interval and not adaptive.
 	Cadence cadence.Status
 }
 
@@ -59,6 +60,10 @@ type Tracker struct {
 func New(o Options) *Tracker {
 	if o.Connected == nil {
 		o.Connected = func() bool { return false }
+	}
+	if o.Cadence.Mode == "" {
+		// Not given: fixed, at the slow interval, as before issue #1.
+		o.Cadence = cadence.Status{Mode: cadence.Slow, Interval: o.Interval}
 	}
 	return &Tracker{opts: o, cadence: copyCadence(o.Cadence)}
 }
