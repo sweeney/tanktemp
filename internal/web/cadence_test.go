@@ -98,7 +98,7 @@ func TestAPIStatusNextInIsNegativeWhileOverdue(t *testing.T) {
 // second (review on #4).
 func TestPageBacksOffWhileOverdue(t *testing.T) {
 	rec, _ := get(t, server(true, sweepAt(reading.OK)), "/")
-	for _, want := range []string{"next_in_s", "overdueBackoff", "Math.min(interval, overdueBackoff * 2)"} {
+	for _, want := range []string{"next_in_s", "overdueBackoff", "pollDelay(nextInS, overdueBackoff, interval)"} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Errorf("page lacks %q", want)
 		}

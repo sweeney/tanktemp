@@ -163,15 +163,21 @@ let overdueBackoff = 1000;
 function schedulePoll(nextInS) {
   clearTimeout(pending);
   let delay;
-  if (nextInS > 0) {
-    overdueBackoff = 1000;
-    delay = nextInS * 1000 + 2000;
-  } else {
-    overdueBackoff = Math.min(interval, overdueBackoff * 2);
-    delay = overdueBackoff;
-  }
+  [delay, overdueBackoff] = pollDelay(nextInS, overdueBackoff, interval);
   pending = setTimeout(poll, delay);
 }
+
+// pollDelay: begin
+// pollDelay is the polling rule, pure so it can be tested on its own
+// (internal/web/pagejs_test.go runs this block under node). Given the Pi's
+// next_in_s, the current back-off and the regular interval (both ms), it
+// returns [the delay before the next poll, the new back-off].
+function pollDelay(nextInS, backoff, interval) {
+  if (nextInS > 0) return [nextInS * 1000 + 2000, 1000];
+  const next = Math.min(interval, backoff * 2);
+  return [next, next];
+}
+// pollDelay: end
 
 async function poll() {
   try {
