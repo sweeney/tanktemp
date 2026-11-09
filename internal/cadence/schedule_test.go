@@ -73,3 +73,34 @@ func TestNextDueWithNoInterval(t *testing.T) {
 		t.Errorf("zero interval: %v, %d", due, skipped)
 	}
 }
+
+// Schedule is what lifecycle's Config.Next calls after each sweep: it
+// anchors each due time on the one before (a ticker's grid), not on when
+// the sweep actually started, so latency can't accumulate.
+func TestSchedule(t *testing.T) {
+	var s Schedule
+	// The first sweep (lifecycle's Immediate one) anchors the grid.
+	due, skipped := s.Next(t0, t0.Add(4*time.Second), 30*time.Second)
+	if !due.Equal(t0.Add(30*time.Second)) || skipped != 0 {
+		t.Fatalf("first: +%v, %d skipped; want +30s, 0", due.Sub(t0), skipped)
+	}
+	// It started 2 ms late; the next is still 10 s after +30s, not +30.002.
+	due, skipped = s.Next(t0.Add(30*time.Second+2*time.Millisecond), t0.Add(34*time.Second), 10*time.Second)
+	if !due.Equal(t0.Add(40*time.Second)) || skipped != 0 {
+		t.Fatalf("second: +%v, %d skipped; want +40s, 0", due.Sub(t0), skipped)
+	}
+	// It overran by 15 s: +50 and +60 are skipped, not queued.
+	due, skipped = s.Next(t0.Add(40*time.Second), t0.Add(65*time.Second), 10*time.Second)
+	if !due.Equal(t0.Add(70*time.Second)) || skipped != 2 {
+		t.Errorf("overrun: +%v, %d skipped; want +70s, 2", due.Sub(t0), skipped)
+	}
+}
+
+// lifecycle's started is zero only when it asks for the first sweep's time
+// without Immediate, which tanktemp never does. Then the first is now.
+func TestScheduleWithNoStart(t *testing.T) {
+	var s Schedule
+	if due, _ := s.Next(time.Time{}, t0, 30*time.Second); !due.Equal(t0) {
+		t.Errorf("no start: %v, want now", due)
+	}
+}

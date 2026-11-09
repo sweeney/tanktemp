@@ -389,7 +389,7 @@ func run(ctx context.Context, cfg config.Config, d deps) error {
 		Immediate: true,
 		Interval:  cfg.Sweep.Interval, // unused while Tick is set, which it always is
 		Heartbeat: cfg.Heartbeat,
-		Work: func(ctx context.Context, _ time.Time) error {
+		Work: func(ctx context.Context, started time.Time) error {
 			// Every Work reports, even one that fails (a cancelled sweep at
 			// shutdown), or the scheduler would wait for it for ever. A
 			// sweep that didn't complete leaves the cadence as it was.
@@ -400,7 +400,10 @@ func run(ctx context.Context, cfg config.Config, d deps) error {
 			if err != nil {
 				return err
 			}
-			decision := cad.Observe(sw)
+			// started is lifecycle's start for this unit, from deps.Now
+			// (time.Now: monotonic), so a wall-clock step can't move the
+			// cadence; sw.At is the wall-clock timestamp it publishes.
+			decision := cad.Observe(sw, started)
 			next = decision.Interval
 			tracker.RecordSweep(sw)
 			tracker.RecordCadence(cad.Status())

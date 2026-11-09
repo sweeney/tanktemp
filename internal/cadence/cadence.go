@@ -9,9 +9,14 @@
 // overnight cooling.
 //
 // It is core logic, as pure as sweep: no os, no clock, no MQTT, no 1-Wire.
-// It sees time only through the sweeps' own timestamps (Sweep.At), and its
-// only state is the previous sweep's readings and the last trigger. That
-// makes it a table test, with no fake clock at all.
+// It sees time only as it's handed in: each sweep's start on the monotonic
+// clock (lifecycle's start time for that unit of work), which times the
+// rates and the curve, and Sweep.At, the wall-clock timestamp, which only
+// labels the trigger it reports. So a wall-clock step (NTP at boot, on a Pi
+// with no real-time clock) can't move the cadence (review on #4; this
+// retired GUESSES G45). Its only state is the previous sweep's readings,
+// the curve's anchor and the last trigger. That makes it a table test, with
+// no fake clock at all.
 //
 // The rules (the issue's numbering):
 //
@@ -26,8 +31,9 @@
 //  3. The interval depends only on t, the time since the last trigger:
 //     fast during the hold, an exponential ease from fast to slow during
 //     the decay, and slow after (or before any trigger). See Settings.at.
-//  4. The next sweep is due one interval after the previous tick, and an
-//     overrun skips ticks rather than queueing them. See NextDue.
+//  4. The next sweep is due one interval after the previous one was due,
+//     and an overrun skips ticks rather than queueing them. See Schedule
+//     and NextDue; lifecycle's Config.Next calls them.
 //
 // What it decides is never published: the MQTT payloads carry no cadence
 // (docs/WIRE.md, Cadence). It goes to /api/status and, with log.verbose,
@@ -105,25 +111,32 @@ func (s Settings) Enabled() bool { return s.Fast > 0 }
 // millisecond (nothing finer means anything for a multi-second sweep) and
 // clamped to [Fast, Slow] so float error can never step outside.
 //
-// With hold: 0s, the triggering sweep itself (since = 0) is already Decay,
-// at exactly Fast. It's only called with fast enabled; Observe handles
-// "never triggered".
-func (s Settings) at(since time.Duration) (Mode, time.Duration) {
+// atFast is the rule for "still at the fast interval", stated rather than
+// read off a rounded interval: since ≤ hold. That's the hold itself, and
+// the decay's very first instant (since = hold, where the curve is exactly
+// Fast; with hold: 0s, the triggering sweep). A trigger while atFast
+// extends the fast spell; one after it is a new fast entry. Just past the
+// hold the interval still rounds to exactly Fast, but the cadence has left
+// it (TestAtFastIsExplicit).
+//
+// It's only called with fast enabled; Observe handles "never triggered".
+func (s Settings) at(since time.Duration) (mode Mode, interval time.Duration, atFast bool) {
+	atFast = since <= s.Hold
 	switch {
 	case since < s.Hold:
-		return Hold, s.Fast
+		return Hold, s.Fast, atFast
 	case since >= s.Hold+s.Decay:
-		return Slow, s.Slow
+		return Slow, s.Slow, atFast
 	}
 	x := float64(since-s.Hold) / float64(s.Decay) // 0 ≤ x < 1
 	d := time.Duration(float64(s.Fast) * math.Pow(float64(s.Slow)/float64(s.Fast), x)).Round(time.Millisecond)
-	return Decay, min(max(d, s.Fast), s.Slow)
+	return Decay, min(max(d, s.Fast), s.Slow), atFast
 }
 
 // Trigger is a probe changing fast enough to go fast: the fastest such
 // probe in one sweep.
 type Trigger struct {
-	At       time.Time // the sweep that saw the change (its start, Sweep.At)
+	At       time.Time // the sweep that saw the change: its timestamp, Sweep.At (wall clock, as published)
 	DeviceID string
 	Position string
 	ROM      string
@@ -145,6 +158,9 @@ type Decision struct {
 	// Changed: Mode differs from the decision before. A trigger lands at
 	// Fast: in Hold, or, with hold: 0s, at the very start of Decay.
 	Changed bool
+	// AtFast: still at the fast interval (Settings.at). Decides whether
+	// the next trigger is a new fast entry.
+	AtFast bool
 }
 
 // Line is the verbose log's line for this decision (log.verbose, issue #2),
@@ -177,10 +193,10 @@ type Status struct {
 	Mode        Mode
 	Interval    time.Duration
 	LastTrigger *Trigger // nil until the first trigger; a copy
-	// FastEntries counts the times since start that a trigger took the
-	// interval down to Fast from above (from Slow, or a snap back from
-	// the decay). A trigger while already at Fast extends the fast spell
-	// and isn't counted, so this is roughly "events", not "fast sweeps".
+	// FastEntries counts the times since start that a trigger came while
+	// the cadence wasn't AtFast (from Slow, or a snap back from the
+	// decay). A trigger while AtFast extends the fast spell and isn't
+	// counted, so this is roughly "events", not "fast sweeps".
 	FastEntries int
 }
 
@@ -194,9 +210,10 @@ type last struct {
 // status tracker, which is.
 type Cadence struct {
 	s        Settings
-	prevAt   time.Time
+	prevAt   time.Time       // the previous sweep's start, monotonic
 	prev     map[string]last // by ROM: probes OK and not suspect in the previous sweep
-	trigger  *Trigger        // the last trigger; nil before the first
+	anchor   time.Time       // the last trigger's sweep start, monotonic: the curve's t = 0
+	trigger  *Trigger        // the last trigger, as observed and reported; nil before the first
 	decision Decision        // the last decision
 	entries  int
 }
@@ -206,12 +223,15 @@ func New(s Settings) *Cadence {
 	return &Cadence{s: s, decision: Decision{Mode: Slow, Interval: s.Slow}}
 }
 
-// Observe takes the sweep just completed and decides the interval until
-// the next one. Each sweep is compared only with the one observed before it
-// (rule 2), so a sweep must be observed exactly once, in order.
-func (c *Cadence) Observe(sw sweep.Sweep) Decision {
-	trig := c.fastest(sw)
-	c.remember(sw)
+// Observe takes the sweep just completed and when it started on the
+// monotonic clock (lifecycle hands each unit of work its start time; in
+// production that's time.Now, which carries a monotonic reading), and
+// decides the interval until the next one. Each sweep is compared only with
+// the one observed before it (rule 2), so a sweep must be observed exactly
+// once, in order.
+func (c *Cadence) Observe(sw sweep.Sweep, started time.Time) Decision {
+	trig := c.fastest(sw, started)
+	c.remember(sw, started)
 	if !c.s.Enabled() {
 		c.decision = Decision{Mode: Slow, Interval: c.s.Slow}
 		return c.decision
@@ -219,28 +239,19 @@ func (c *Cadence) Observe(sw sweep.Sweep) Decision {
 
 	prev := c.decision
 	if trig != nil {
-		// An entry is the interval dropping to Fast from above: from Slow,
-		// or a snap back from the decay. A trigger while already at Fast
-		// (in the hold, or at the very start of a decay with hold: 0s)
-		// only extends the fast spell.
-		if prev.Interval != c.s.Fast {
+		// An entry is a trigger when the cadence wasn't AtFast: from Slow,
+		// or a snap back from the decay. A trigger while AtFast (in the
+		// hold, or at the decay's first instant) only extends the spell.
+		if !prev.AtFast {
 			c.entries++
 		}
-		c.trigger = trig
+		c.trigger, c.anchor = trig, started
 	}
 	d := Decision{Mode: Slow, Interval: c.s.Slow, Trigger: trig}
 	if c.trigger != nil {
-		since := sw.At.Sub(c.trigger.At)
-		if since < 0 {
-			// The wall clock stepped back past the last trigger (an NTP
-			// correction, say). Taken literally that would hold fast until
-			// the clock caught up, which could be hours. Re-anchoring the
-			// trigger here bounds the fast spell to hold + decay from now,
-			// erring towards more samples rather than fewer.
-			c.trigger.At = sw.At
-			since = 0
-		}
-		d.Mode, d.Interval = c.s.at(since)
+		// Monotonic, so never negative; max is only for a caller that
+		// hands in times out of order.
+		d.Mode, d.Interval, d.AtFast = c.s.at(max(0, started.Sub(c.anchor)))
 	}
 	d.Changed = d.Mode != prev.Mode
 	c.decision = d
@@ -250,13 +261,13 @@ func (c *Cadence) Observe(sw sweep.Sweep) Decision {
 // fastest is rules 1 and 2: the probe changing fastest since the previous
 // sweep, if any is changing at least as fast as the trigger and by at least
 // MinChangeC. Ties go to the first in config order. It needs fast on, and a
-// positive gap since the previous sweep: no rate can be had from two sweeps
-// at the same instant, or from a clock that stepped back between them.
-func (c *Cadence) fastest(sw sweep.Sweep) *Trigger {
+// positive monotonic gap since the previous sweep: no rate can be had from
+// two sweeps at the same instant.
+func (c *Cadence) fastest(sw sweep.Sweep, started time.Time) *Trigger {
 	if !c.s.Enabled() || c.prev == nil {
 		return nil
 	}
-	dt := sw.At.Sub(c.prevAt)
+	dt := started.Sub(c.prevAt)
 	if dt <= 0 {
 		return nil
 	}
@@ -287,8 +298,8 @@ func (c *Cadence) fastest(sw sweep.Sweep) *Trigger {
 // remember keeps this sweep's usable readings, and only those, for the
 // next comparison. A probe that isn't usable now has no previous reading
 // next time, which is what makes a just-recovered probe unable to trigger.
-func (c *Cadence) remember(sw sweep.Sweep) {
-	c.prevAt = sw.At
+func (c *Cadence) remember(sw sweep.Sweep, started time.Time) {
+	c.prevAt = started
 	c.prev = map[string]last{}
 	for _, t := range sw.Tanks {
 		for _, x := range t.Sensors {

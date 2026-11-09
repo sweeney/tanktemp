@@ -73,6 +73,10 @@ func sweepAt(at time.Duration, ps ...probe) sweep.Sweep {
 	return sw
 }
 
+// obs observes sw as having started at its own timestamp on the monotonic
+// clock too: the usual case, where nothing has stepped the wall clock.
+func obs(c *Cadence, sw sweep.Sweep) Decision { return c.Observe(sw, sw.At) }
+
 // steady is a quiet tank: both probes as they were.
 func steady(at time.Duration) sweep.Sweep { return sweepAt(at, ok(inlet, 12), ok(outlet, 60)) }
 
@@ -99,13 +103,13 @@ func TestIntervalCurve(t *testing.T) {
 		{time.Hour, Slow, 30 * time.Second},
 	}
 	for _, tt := range tests {
-		mode, got := issue.at(tt.since)
+		mode, got, _ := issue.at(tt.since)
 		if mode != tt.mode || got != tt.want {
 			t.Errorf("%v after a trigger: %s %v, want %s %v", tt.since, mode, got, tt.mode, tt.want)
 		}
 	}
 	// Half way through the decay is the geometric mean of fast and slow.
-	if _, mid := issue.at(2*time.Minute + 150*time.Second); mid != 17321*time.Millisecond {
+	if _, mid, _ := issue.at(2*time.Minute + 150*time.Second); mid != 17321*time.Millisecond {
 		t.Errorf("mid-decay = %v, want 17.321s (10 s × √3)", mid)
 	}
 }
@@ -115,7 +119,7 @@ func TestIntervalCurve(t *testing.T) {
 func TestDecayRisesMonotonicallyWithinBounds(t *testing.T) {
 	prev := time.Duration(0)
 	for since := issue.Hold; since <= issue.Hold+issue.Decay+time.Second; since += 250 * time.Millisecond {
-		_, got := issue.at(since)
+		_, got, _ := issue.at(since)
 		if got < prev {
 			t.Fatalf("at %v the interval fell, %v → %v", since, prev, got)
 		}
@@ -131,7 +135,7 @@ func TestDecayRisesMonotonicallyWithinBounds(t *testing.T) {
 func TestSteadyReadingsStaySlow(t *testing.T) {
 	c := New(issue)
 	for i := 0; i < 10; i++ {
-		d := c.Observe(steady(time.Duration(i) * 30 * time.Second))
+		d := obs(c, steady(time.Duration(i)*30*time.Second))
 		if d.Mode != Slow || d.Interval != 30*time.Second || d.Trigger != nil {
 			t.Fatalf("sweep %d: %+v, want slow at 30s and no trigger", i, d)
 		}
@@ -141,8 +145,8 @@ func TestSteadyReadingsStaySlow(t *testing.T) {
 // A 2 °C fall over 30 s is 4 °C/min: fast on the very next tick.
 func TestADrawGoesFastAtOnce(t *testing.T) {
 	c := New(issue)
-	c.Observe(steady(0))
-	d := c.Observe(sweepAt(30*time.Second, ok(inlet, 10), ok(outlet, 60)))
+	obs(c, steady(0))
+	d := obs(c, sweepAt(30*time.Second, ok(inlet, 10), ok(outlet, 60)))
 	if d.Mode != Hold || d.Interval != 10*time.Second {
 		t.Fatalf("after a 2 °C drop: %s %v, want hold at 10s", d.Mode, d.Interval)
 	}
@@ -158,8 +162,8 @@ func TestADrawGoesFastAtOnce(t *testing.T) {
 // Rule 1: either direction. A rising outlet triggers as a falling inlet does.
 func TestARiseTriggersToo(t *testing.T) {
 	c := New(issue)
-	c.Observe(steady(0))
-	d := c.Observe(sweepAt(30*time.Second, ok(inlet, 12), ok(outlet, 61)))
+	obs(c, steady(0))
+	d := obs(c, sweepAt(30*time.Second, ok(inlet, 12), ok(outlet, 61)))
 	if d.Trigger == nil || d.Trigger.ROM != outlet || d.Trigger.CPerMin != 2 {
 		t.Fatalf("a 1 °C rise in 30 s: trigger %+v, want outlet at +2 °C/min", d.Trigger)
 	}
@@ -182,8 +186,8 @@ func TestTheTriggerIsARate(t *testing.T) {
 		{"0.1875 °C in 10 s, 1.125", 10 * time.Second, 0.1875, false},
 	} {
 		c := New(issue)
-		c.Observe(steady(0))
-		d := c.Observe(sweepAt(tt.gap, ok(inlet, 12-tt.deltaC), ok(outlet, 60)))
+		obs(c, steady(0))
+		d := obs(c, sweepAt(tt.gap, ok(inlet, 12-tt.deltaC), ok(outlet, 60)))
 		if (d.Trigger != nil) != tt.trigger {
 			t.Errorf("%s: trigger %+v, want triggered=%v", tt.name, d.Trigger, tt.trigger)
 		}
@@ -195,8 +199,8 @@ func TestTheTriggerIsARate(t *testing.T) {
 // are exact sixteenths, so the two-step minimum is an exact comparison.
 func TestTheRateUsesRawValues(t *testing.T) {
 	c := New(issue)
-	c.Observe(steady(0))
-	d := c.Observe(sweepAt(30*time.Second, ok(inlet, 10), ok(outlet, 60)))
+	obs(c, steady(0))
+	d := obs(c, sweepAt(30*time.Second, ok(inlet, 10), ok(outlet, 60)))
 	if d.Trigger == nil || d.Trigger.DeltaC != -2 {
 		t.Fatalf("trigger %+v, want ΔT exactly -2 (raw 12 → 10)", d.Trigger)
 	}
@@ -215,13 +219,13 @@ func TestAOneStepFlickerNeverTriggers(t *testing.T) {
 		} else {
 			v = 12.0
 		}
-		d := c.Observe(sweepAt(time.Duration(i)*2*time.Second, ok(inlet, v), ok(outlet, 60)))
+		d := obs(c, sweepAt(time.Duration(i)*2*time.Second, ok(inlet, v), ok(outlet, 60)))
 		if d.Trigger != nil {
 			t.Fatalf("sweep %d: a one-step flicker triggered: %+v", i, d.Trigger)
 		}
 	}
 	// Two steps in 2 s (3.75 °C/min) does.
-	d := c.Observe(sweepAt(40*time.Second, ok(inlet, v+0.125), ok(outlet, 60)))
+	d := obs(c, sweepAt(40*time.Second, ok(inlet, v+0.125), ok(outlet, 60)))
 	if d.Trigger == nil {
 		t.Errorf("two steps in 2 s didn't trigger")
 	}
@@ -243,8 +247,8 @@ func TestOnlyTwoOKReadingsCanTrigger(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := New(issue)
-			c.Observe(sweepAt(0, tt.prev, ok(outlet, 60)))
-			if d := c.Observe(sweepAt(30*time.Second, tt.curr, ok(outlet, 60))); d.Trigger != nil {
+			obs(c, sweepAt(0, tt.prev, ok(outlet, 60)))
+			if d := obs(c, sweepAt(30*time.Second, tt.curr, ok(outlet, 60))); d.Trigger != nil {
 				t.Errorf("triggered: %+v", d.Trigger)
 			}
 		})
@@ -255,10 +259,10 @@ func TestOnlyTwoOKReadingsCanTrigger(t *testing.T) {
 // the sweep before) has nothing to compare with.
 func TestFirstSeenNeverTriggers(t *testing.T) {
 	c := New(issue)
-	if d := c.Observe(sweepAt(0, ok(inlet, 85), ok(outlet, 10))); d.Trigger != nil || d.Mode != Slow {
+	if d := obs(c, sweepAt(0, ok(inlet, 85), ok(outlet, 10))); d.Trigger != nil || d.Mode != Slow {
 		t.Fatalf("first sweep: %+v", d)
 	}
-	if d := c.Observe(sweepAt(30*time.Second, ok(inlet, 85), ok(outlet, 10), ok(other, 70))); d.Trigger != nil {
+	if d := obs(c, sweepAt(30*time.Second, ok(inlet, 85), ok(outlet, 10), ok(other, 70))); d.Trigger != nil {
 		t.Fatalf("a probe new to this sweep triggered: %+v", d.Trigger)
 	}
 }
@@ -268,9 +272,9 @@ func TestFirstSeenNeverTriggers(t *testing.T) {
 // though there's an older one.
 func TestRecoveredComparesWithTheSweepJustBefore(t *testing.T) {
 	c := New(issue)
-	c.Observe(sweepAt(0, ok(inlet, 12), ok(outlet, 60)))
-	c.Observe(sweepAt(30*time.Second, failed(inlet, reading.CRC), ok(outlet, 60)))
-	if d := c.Observe(sweepAt(60*time.Second, ok(inlet, 5), ok(outlet, 60))); d.Trigger != nil {
+	obs(c, sweepAt(0, ok(inlet, 12), ok(outlet, 60)))
+	obs(c, sweepAt(30*time.Second, failed(inlet, reading.CRC), ok(outlet, 60)))
+	if d := obs(c, sweepAt(60*time.Second, ok(inlet, 5), ok(outlet, 60))); d.Trigger != nil {
 		t.Errorf("recovered probe triggered against an older reading: %+v", d.Trigger)
 	}
 }
@@ -278,8 +282,8 @@ func TestRecoveredComparesWithTheSweepJustBefore(t *testing.T) {
 // Every probe of every tank is checked, and the fastest one is reported.
 func TestTheFastestProbeOnAnyTankIsTheTrigger(t *testing.T) {
 	c := New(issue)
-	c.Observe(sweepAt(0, ok(inlet, 12), ok(outlet, 60), ok(other, 40)))
-	d := c.Observe(sweepAt(30*time.Second, ok(inlet, 11), ok(outlet, 61.5), ok(other, 36)))
+	obs(c, sweepAt(0, ok(inlet, 12), ok(outlet, 60), ok(other, 40)))
+	d := obs(c, sweepAt(30*time.Second, ok(inlet, 11), ok(outlet, 61.5), ok(other, 36)))
 	if d.Trigger == nil || d.Trigger.DeviceID != "second" || d.Trigger.Position != "middle" || d.Trigger.CPerMin != -8 {
 		t.Fatalf("trigger = %+v, want second/middle at -8 °C/min (the fastest of -2, +3, -8)", d.Trigger)
 	}
@@ -290,8 +294,8 @@ func TestTheFastestProbeOnAnyTankIsTheTrigger(t *testing.T) {
 func TestNoRateWithoutTimeBetween(t *testing.T) {
 	for _, gap := range []time.Duration{0, -10 * time.Second} {
 		c := New(issue)
-		c.Observe(steady(time.Minute))
-		if d := c.Observe(sweepAt(time.Minute+gap, ok(inlet, 0), ok(outlet, 60))); d.Trigger != nil {
+		obs(c, steady(time.Minute))
+		if d := obs(c, sweepAt(time.Minute+gap, ok(inlet, 0), ok(outlet, 60))); d.Trigger != nil {
 			t.Errorf("gap %v: triggered %+v", gap, d.Trigger)
 		}
 	}
@@ -305,18 +309,18 @@ func TestNoRateWithoutTimeBetween(t *testing.T) {
 func drive(t *testing.T, s Settings, until time.Duration) ([]time.Duration, []Decision) {
 	t.Helper()
 	c := New(s)
-	c.Observe(steady(-30 * time.Second))
+	obs(c, steady(-30*time.Second))
 	var at time.Duration
 	var times []time.Duration
 	var ds []Decision
-	d := c.Observe(sweepAt(0, ok(inlet, 2), ok(outlet, 60))) // a 10 °C fall: 20 °C/min
+	d := obs(c, sweepAt(0, ok(inlet, 2), ok(outlet, 60))) // a 10 °C fall: 20 °C/min
 	if d.Trigger == nil {
 		t.Fatal("the opening draw didn't trigger")
 	}
 	for at < until {
 		times, ds = append(times, at), append(ds, d)
 		at += d.Interval
-		d = c.Observe(sweepAt(at, ok(inlet, 2), ok(outlet, 60)))
+		d = obs(c, sweepAt(at, ok(inlet, 2), ok(outlet, 60)))
 	}
 	return times, ds
 }
@@ -359,20 +363,20 @@ func TestTheIssuesWorkedExample(t *testing.T) {
 // and restarts the hold.
 func TestATriggerInTheDecaySnapsBackToFast(t *testing.T) {
 	c := New(issue)
-	c.Observe(steady(-30 * time.Second))
-	c.Observe(sweepAt(0, ok(inlet, 2), ok(outlet, 60))) // trigger at 0
-	c.Observe(sweepAt(4*time.Minute, ok(inlet, 2), ok(outlet, 60)))
-	d := c.Observe(sweepAt(4*time.Minute+20*time.Second, ok(inlet, 2), ok(outlet, 60)))
+	obs(c, steady(-30*time.Second))
+	obs(c, sweepAt(0, ok(inlet, 2), ok(outlet, 60))) // trigger at 0
+	obs(c, sweepAt(4*time.Minute, ok(inlet, 2), ok(outlet, 60)))
+	d := obs(c, sweepAt(4*time.Minute+20*time.Second, ok(inlet, 2), ok(outlet, 60)))
 	if d.Mode != Decay || d.Interval <= issue.Fast {
 		t.Fatalf("4m20s after the trigger: %s %v, want decaying above 10s", d.Mode, d.Interval)
 	}
 	// The second draw.
-	d = c.Observe(sweepAt(4*time.Minute+40*time.Second, ok(inlet, 0), ok(outlet, 60)))
+	d = obs(c, sweepAt(4*time.Minute+40*time.Second, ok(inlet, 0), ok(outlet, 60)))
 	if d.Mode != Hold || d.Interval != issue.Fast || d.Trigger == nil {
 		t.Fatalf("a trigger mid-decay: %s %v %+v, want hold at 10s", d.Mode, d.Interval, d.Trigger)
 	}
 	// The hold runs from the new trigger, not the old one.
-	d = c.Observe(sweepAt(6*time.Minute+30*time.Second, ok(inlet, 0), ok(outlet, 60)))
+	d = obs(c, sweepAt(6*time.Minute+30*time.Second, ok(inlet, 0), ok(outlet, 60)))
 	if d.Mode != Hold {
 		t.Errorf("1m50s after the second trigger: %s, want still hold", d.Mode)
 	}
@@ -396,30 +400,89 @@ func TestZeroHold(t *testing.T) {
 	c := New(s)
 	at := time.Duration(0)
 	for _, v := range []float64{12, 10, 8, 6} { // three triggers in a row
-		at += c.Observe(sweepAt(at, ok(inlet, v), ok(outlet, 60))).Interval
+		at += obs(c, sweepAt(at, ok(inlet, v), ok(outlet, 60))).Interval
 	}
 	if st := c.Status(); st.FastEntries != 1 {
 		t.Errorf("hold 0, three triggers in a row: FastEntries = %d, want 1", st.FastEntries)
 	}
 }
 
-// A clock that steps back past the last trigger (an NTP correction) must
-// not leave the cadence fast until the clock catches up. The trigger is
-// re-anchored at the sweep, so the fast spell is at most hold + decay.
-func TestAClockStepBackIsBounded(t *testing.T) {
+// The cadence runs on the monotonic clock (lifecycle's start time for each
+// sweep), not on Sweep.At, so a wall-clock step (NTP at boot, on a Pi with
+// no real-time clock) changes neither a rate nor the curve. Here the wall
+// clock jumps back an hour and then forward two, while the sweeps stay 30
+// s apart.
+func TestAWallClockStepChangesNothing(t *testing.T) {
 	c := New(issue)
-	c.Observe(steady(-30 * time.Second))
-	c.Observe(sweepAt(0, ok(inlet, 2), ok(outlet, 60))) // trigger at t0
-	d := c.Observe(sweepAt(-time.Hour, ok(inlet, 2), ok(outlet, 60)))
-	if d.Mode != Hold {
-		t.Fatalf("an hour before the trigger: %s, want hold (re-anchored)", d.Mode)
+	mono := t0
+	wall := map[int]time.Duration{0: 0, 1: -time.Hour, 2: time.Hour, 3: time.Hour}
+	at := func(i int, ps ...probe) sweep.Sweep {
+		sw := sweepAt(time.Duration(i)*30*time.Second+wall[i], ps...)
+		return sw
 	}
-	d = c.Observe(sweepAt(-time.Hour+8*time.Minute, ok(inlet, 2), ok(outlet, 60)))
-	if d.Mode != Slow {
-		t.Errorf("8 minutes after the step back: %s %v, want slow", d.Mode, d.Interval)
+	c.Observe(at(0, ok(inlet, 12), ok(outlet, 60)), mono)
+	d := c.Observe(at(1, ok(inlet, 10), ok(outlet, 60)), mono.Add(30*time.Second))
+	if d.Trigger == nil || d.Trigger.CPerMin != -4 || d.Mode != Hold {
+		t.Fatalf("a 2 °C fall over 30 s (monotonic), wall clock stepped back an hour: %+v", d)
 	}
-	if st := c.Status(); st.LastTrigger == nil || !st.LastTrigger.At.Equal(t0.Add(-time.Hour)) {
-		t.Errorf("last trigger after the step back: %+v, want re-anchored to the sweep", st.LastTrigger)
+	// The trigger reports the sweep's own timestamp, as published.
+	if !d.Trigger.At.Equal(t0.Add(30*time.Second - time.Hour)) {
+		t.Errorf("trigger at %v, want the sweep's wall timestamp", d.Trigger.At)
+	}
+	// Two hours forward on the wall: still 30 s after the trigger, so hold.
+	if d = c.Observe(at(2, ok(inlet, 10), ok(outlet, 60)), mono.Add(60*time.Second)); d.Mode != Hold {
+		t.Errorf("30 s after the trigger, wall +2h: %s, want hold", d.Mode)
+	}
+	// And a fall measured across the forward step is still -4 °C/min.
+	d = c.Observe(at(3, ok(inlet, 8), ok(outlet, 60)), mono.Add(90*time.Second))
+	if d.Trigger == nil || d.Trigger.CPerMin != -4 {
+		t.Errorf("a 2 °C fall over 30 s, across a wall step: %+v", d.Trigger)
+	}
+}
+
+// The curve's anchor and the reported trigger are separate: a later sweep
+// never rewrites what /api/status says triggered, or when.
+func TestTheReportedTriggerIsAsObserved(t *testing.T) {
+	c := New(issue)
+	obs(c, steady(0))
+	d := obs(c, sweepAt(30*time.Second, ok(inlet, 10), ok(outlet, 60)))
+	want := *d.Trigger
+	for i := 2; i < 30; i++ {
+		obs(c, sweepAt(time.Duration(i)*30*time.Second, ok(inlet, 10), ok(outlet, 60)))
+	}
+	if got := c.Status().LastTrigger; got == nil || *got != want {
+		t.Errorf("LastTrigger = %+v, want %+v as observed", got, want)
+	}
+}
+
+// Whether a trigger is a new fast entry is an explicit rule (AtFast: the
+// time since the last trigger is at most hold), not a comparison with a
+// rounded interval. Just past the hold, the decay's interval rounds to
+// exactly fast.interval (10 s × 3^(1ms/5m) = 10.0000366 s), but the
+// cadence has left fast, so a trigger there is a new entry.
+func TestAtFastIsExplicit(t *testing.T) {
+	for _, tt := range []struct {
+		since  time.Duration
+		atFast bool
+	}{
+		{0, true}, {time.Minute, true}, {2 * time.Minute, true},
+		{2*time.Minute + time.Millisecond, false}, {7 * time.Minute, false},
+	} {
+		if _, _, got := issue.at(tt.since); got != tt.atFast {
+			t.Errorf("at(%v): atFast %v, want %v", tt.since, got, tt.atFast)
+		}
+	}
+
+	c := New(issue)
+	obs(c, steady(-30*time.Second))
+	obs(c, sweepAt(0, ok(inlet, 2), ok(outlet, 60))) // entry 1, at t0
+	d := obs(c, sweepAt(2*time.Minute+time.Millisecond, ok(inlet, 2), ok(outlet, 60)))
+	if d.Mode != Decay || d.Interval != issue.Fast || d.AtFast {
+		t.Fatalf("1 ms past the hold: %s %v atFast=%v, want decay, at exactly fast, not at fast", d.Mode, d.Interval, d.AtFast)
+	}
+	obs(c, sweepAt(2*time.Minute+10*time.Second, ok(inlet, 0), ok(outlet, 60))) // a trigger there
+	if got := c.Status().FastEntries; got != 2 {
+		t.Errorf("FastEntries = %d, want 2: the second trigger came after the cadence left fast", got)
 	}
 }
 
@@ -427,12 +490,12 @@ func TestAClockStepBackIsBounded(t *testing.T) {
 
 func TestWithoutFastItIsAlwaysSlow(t *testing.T) {
 	c := New(FromConfig(config.Sweep{Interval: 45 * time.Second}))
-	c.Observe(steady(0))
+	obs(c, steady(0))
 	for i, sw := range []sweep.Sweep{
 		sweepAt(45*time.Second, ok(inlet, 0), ok(outlet, 80)), // a huge change
 		steady(90 * time.Second),
 	} {
-		d := c.Observe(sw)
+		d := obs(c, sw)
 		if d.Mode != Slow || d.Interval != 45*time.Second || d.Trigger != nil {
 			t.Errorf("sweep %d: %+v, want slow at 45s", i, d)
 		}
@@ -468,7 +531,7 @@ func TestFastEntriesCountEntriesNotTriggers(t *testing.T) {
 	temps := []float64{12, 10, 8, 6, 6, 6} // a draw over four sweeps, then quiet
 	at := time.Duration(0)
 	for _, v := range temps {
-		d := c.Observe(sweepAt(at, ok(inlet, v), ok(outlet, 60)))
+		d := obs(c, sweepAt(at, ok(inlet, v), ok(outlet, 60)))
 		at += d.Interval
 	}
 	if st := c.Status(); st.FastEntries != 1 {
@@ -476,8 +539,8 @@ func TestFastEntriesCountEntriesNotTriggers(t *testing.T) {
 	}
 	// A second draw after it's slow again is a second entry.
 	at += 10 * time.Minute
-	c.Observe(sweepAt(at, ok(inlet, 6), ok(outlet, 60)))
-	d := c.Observe(sweepAt(at+30*time.Second, ok(inlet, 3), ok(outlet, 60)))
+	obs(c, sweepAt(at, ok(inlet, 6), ok(outlet, 60)))
+	d := obs(c, sweepAt(at+30*time.Second, ok(inlet, 3), ok(outlet, 60)))
 	st := c.Status()
 	if st.FastEntries != 2 || st.Mode != Hold || st.Interval != issue.Fast {
 		t.Errorf("second draw: %+v", st)
@@ -502,13 +565,13 @@ func TestLogLines(t *testing.T) {
 			lines = append(lines, l)
 		}
 	}
-	log(c.Observe(steady(0)))                                                // slow, as it was: nothing
-	log(c.Observe(sweepAt(30*time.Second, ok(inlet, 10), ok(outlet, 60))))   // trigger
-	log(c.Observe(sweepAt(40*time.Second, ok(inlet, 9.5), ok(outlet, 60))))  // trigger again, in hold
-	log(c.Observe(sweepAt(50*time.Second, ok(inlet, 9.5), ok(outlet, 60))))  // hold, quiet: nothing
-	log(c.Observe(sweepAt(170*time.Second, ok(inlet, 9.5), ok(outlet, 60)))) // decaying: 10 s after the hold
-	log(c.Observe(sweepAt(200*time.Second, ok(inlet, 9.5), ok(outlet, 60)))) // still decaying: nothing
-	log(c.Observe(sweepAt(10*time.Minute, ok(inlet, 9.5), ok(outlet, 60))))  // slow again
+	log(obs(c, steady(0)))                                                // slow, as it was: nothing
+	log(obs(c, sweepAt(30*time.Second, ok(inlet, 10), ok(outlet, 60))))   // trigger
+	log(obs(c, sweepAt(40*time.Second, ok(inlet, 9.5), ok(outlet, 60))))  // trigger again, in hold
+	log(obs(c, sweepAt(50*time.Second, ok(inlet, 9.5), ok(outlet, 60))))  // hold, quiet: nothing
+	log(obs(c, sweepAt(170*time.Second, ok(inlet, 9.5), ok(outlet, 60)))) // decaying: 10 s after the hold
+	log(obs(c, sweepAt(200*time.Second, ok(inlet, 9.5), ok(outlet, 60)))) // still decaying: nothing
+	log(obs(c, sweepAt(10*time.Minute, ok(inlet, 9.5), ok(outlet, 60))))  // slow again
 	want := []string{
 		"cadence: fast 10s (cyl/bottom -4.0 °C/min)",
 		"cadence: fast 10s (cyl/bottom -3.0 °C/min)",
@@ -520,8 +583,8 @@ func TestLogLines(t *testing.T) {
 	}
 	// With fast off, nothing is ever logged.
 	off := New(Settings{Slow: 30 * time.Second})
-	off.Observe(steady(0))
-	if l := off.Observe(sweepAt(30*time.Second, ok(inlet, 0), ok(outlet, 60))).Line(); l != "" {
+	obs(off, steady(0))
+	if l := obs(off, sweepAt(30*time.Second, ok(inlet, 0), ok(outlet, 60))).Line(); l != "" {
 		t.Errorf("fast off logged %q", l)
 	}
 }
