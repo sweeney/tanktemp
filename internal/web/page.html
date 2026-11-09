@@ -127,6 +127,7 @@ function render(s) {
     : "waiting for the first sweep";
   cadence = s.sweep;
   showCadence();
+  if (cadence && cadence.next_due) pollAfter(new Date(cadence.next_due));
 }
 
 // The adaptive cadence (issue #1): its mode, and a countdown to next_due.
@@ -140,12 +141,23 @@ function showCadence() {
     ? "sweeping " + (cadence.mode === "slow" ? "slow" : "fast (" + cadence.mode + ")") + ", every " + cadence.interval_s.toFixed(1) + " s"
     : "every " + cadence.interval_s.toFixed(0) + " s";
   if (cadence.next_due) {
-    const left = Math.max(0, Math.round((new Date(cadence.next_due) - Date.now()) / 1000));
-    text += " · next in " + left + " s";
+    const left = Math.round((new Date(cadence.next_due) - Date.now()) / 1000);
+    text += left > 0 ? " · next in " + left + " s" : " · due now";
   }
   e.textContent = text;
 }
 setInterval(showCadence, 1000);
+
+// pollAfter fetches again just after the next sweep is due (it's to the
+// second, and a sweep takes a few seconds), so the page follows a fast
+// cadence instead of waiting for its regular poll, and the countdown
+// doesn't sit at "due now" for up to an interval. Only one is ever
+// pending; the regular poll below stays as the fallback.
+let pending = null;
+function pollAfter(due) {
+  clearTimeout(pending);
+  pending = setTimeout(poll, Math.max(1000, due - Date.now() + 2000));
+}
 
 async function poll() {
   try {

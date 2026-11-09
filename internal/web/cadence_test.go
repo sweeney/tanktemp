@@ -66,7 +66,10 @@ func TestHealthzHasNoSweepBlock(t *testing.T) {
 // The page counts down to next_due and shows the mode.
 func TestPageShowsTheCadence(t *testing.T) {
 	rec, _ := get(t, server(true, sweepAt(reading.OK)), "/")
-	for _, want := range []string{"cadence = s.sweep", "cadence.next_due", "cadence.mode", `id="cadence"`} {
+	// It polls again just after next_due, so the countdown never sits at
+	// zero until the next scheduled poll (up to an interval later), and
+	// says "due now" in the meantime.
+	for _, want := range []string{"cadence = s.sweep", "cadence.next_due", "cadence.mode", `id="cadence"`, "pollAfter(", "due now"} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Errorf("page lacks %q", want)
 		}
