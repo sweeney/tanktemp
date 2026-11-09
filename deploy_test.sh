@@ -62,7 +62,7 @@ if [ "${FAKE_REJECT_VERSION:-}" = "$ver" ] || grep -q '^INVALID' "$cfg"; then
 fi
 broker=$(sed -n 's/^ *broker: *//p' "$cfg" | head -1)
 prefix=$(sed -n 's/^ *topic_prefix: *//p' "$cfg" | head -1)
-echo "$cfg: ok: 2 tanks, 10 sensors, verbose log off, publishing to ${prefix:-energy/hot_water} on $broker" >&2
+echo "$cfg: ok: 2 tanks, 10 sensors, sweep every 30s, verbose log off, publishing to ${prefix:-energy/hot_water} on $broker" >&2
 exit 0
 BIN
     [ "$pad" -eq 0 ] || head -c "$pad" /dev/zero | tr '\0' '#'

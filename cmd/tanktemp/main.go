@@ -27,6 +27,7 @@ import (
 	"github.com/sweeney/common/lifecycle"
 	"github.com/sweeney/common/mqttpub"
 	"github.com/sweeney/common/mqttpub/retry"
+	"github.com/sweeney/tanktemp/internal/cadence"
 	"github.com/sweeney/tanktemp/internal/config"
 	"github.com/sweeney/tanktemp/internal/onewire"
 	"github.com/sweeney/tanktemp/internal/payload"
@@ -85,8 +86,8 @@ func realMain(args []string, out io.Writer) int {
 		if cfg.Log.Verbose {
 			verbose = "ON"
 		}
-		fmt.Fprintf(out, "%s: ok: %d tank%s, %d sensor%s, verbose log %s, publishing to %s on %s\n",
-			*path, len(cfg.Tanks), plural(len(cfg.Tanks)), n, plural(n), verbose, cfg.MQTT.TopicPrefix, cfg.MQTT.Broker)
+		fmt.Fprintf(out, "%s: ok: %d tank%s, %d sensor%s, %s, verbose log %s, publishing to %s on %s\n",
+			*path, len(cfg.Tanks), plural(len(cfg.Tanks)), n, plural(n), cadenceSummary(cfg.Sweep), verbose, cfg.MQTT.TopicPrefix, cfg.MQTT.Broker)
 		return 0
 	}
 	if err := serve(cfg); err != nil {
@@ -94,6 +95,33 @@ func realMain(args []string, out io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// cadenceSummary is -check-config's account of the cadence (issue #1), so a
+// deploy's --check shows whether sweep.fast is on and with what:
+//
+//	sweep every 30s
+//	sweep every 30s, 10s while a probe changes 1.5 °C/min (hold 2m, decay 5m)
+func cadenceSummary(s config.Sweep) string {
+	out := "sweep every " + shortDuration(s.Interval)
+	if f := s.Fast; f != nil {
+		out += fmt.Sprintf(", %s while a probe changes %v °C/min (hold %s, decay %s)",
+			shortDuration(f.Interval), f.TriggerCPerMin, shortDuration(f.Hold), shortDuration(f.Decay))
+	}
+	return out
+}
+
+// shortDuration is d as a config file would say it: "2m", not "2m0s", and
+// "1h", not "1h0m0s".
+func shortDuration(d time.Duration) string {
+	str := d.String()
+	if strings.HasSuffix(str, "m0s") {
+		str = strings.TrimSuffix(str, "0s")
+	}
+	if strings.HasSuffix(str, "h0m") {
+		str = strings.TrimSuffix(str, "0m")
+	}
+	return str
 }
 
 func plural(n int) string {
@@ -149,9 +177,8 @@ func serve(cfg config.Config) error {
 		logger.Printf("MQTT not connected after %v; sweeping anyway", ConnectWait)
 	}
 
-	// log.verbose is turned into a logger here, once. run's sweep lines and
-	// the 1-Wire source's retry lines both go to it, as will adaptive
-	// cadence's (#1).
+	// log.verbose is turned into a logger here, once. run's sweep and
+	// cadence lines and the 1-Wire source's retry lines all go to it.
 	vlog := verboseLogger(logger, cfg.Log.Verbose)
 	src := onewire.NewSource(cfg.W1Root, cfg.Sweep.Attempts)
 	src.Logf = retryLogger(vlog, cfg.Tanks)
@@ -185,7 +212,11 @@ type deps struct {
 	Synced      func() bool
 	Now         func() time.Time
 
-	Tick          <-chan time.Time // nil: every cfg.Sweep.Interval
+	After func(time.Duration) <-chan time.Time // the scheduler's timer; nil: time.After
+	// Tick is a test hook: a fixed source of ticks, bypassing the adaptive
+	// cadence's scheduler. nil (production): the scheduler, waiting
+	// whatever internal/cadence decides after each sweep, using After.
+	Tick          <-chan time.Time
 	HeartbeatTick <-chan time.Time // nil: every cfg.Heartbeat
 	Signals       <-chan os.Signal // nil: SIGINT and SIGTERM
 
@@ -203,8 +234,8 @@ type deps struct {
 // serve calls it once and hands the result to everything that logs verbose
 // detail (deps.Verbose, the 1-Wire source), so the switch lives in one
 // place. That code just prints to it and never checks the switch itself,
-// so turning it on adds lines and changes nothing else. Adaptive cadence
-// (#1) will take the same logger for its mode changes.
+// so turning it on adds lines and changes nothing else. The adaptive
+// cadence's lines (#1) go to the same logger.
 func verboseLogger(l *log.Logger, verbose bool) *log.Logger {
 	if verbose && l != nil {
 		return l
@@ -253,10 +284,15 @@ func run(ctx context.Context, cfg config.Config, d deps) error {
 	for _, t := range cfg.Tanks {
 		ids = append(ids, t.DeviceID)
 	}
+	// The adaptive cadence (issue #1). With no sweep.fast it decides the
+	// slow interval every time, so there's one code path either way.
+	cad := cadence.New(cadence.FromConfig(cfg.Sweep))
 	tracker := status.New(status.Options{
 		Start: start, Version: d.Version, Tanks: ids,
+		// Interval stays the slow one: staleness is measured in slow
+		// intervals whatever the cadence does (WIRE.md, Cadence).
 		Interval: cfg.Sweep.Interval, Connected: d.Pub.Connected,
-		Verbose: cfg.Log.Verbose,
+		Verbose: cfg.Log.Verbose, Cadence: cad.Status(),
 	})
 	prefix := cfg.MQTT.TopicPrefix
 
@@ -321,16 +357,50 @@ func run(ctx context.Context, cfg config.Config, d deps) error {
 	}
 
 	sweeper := &sweep.Sweeper{Tanks: cfg.Tanks, Source: d.Source, Now: d.Now, Synced: d.Synced}
+
+	// The ticks. In production the scheduler makes them, one per sweep,
+	// each as far after the last as the cadence decided; every Work reports
+	// to it (below), and lifecycle's OnSkip tells it of a tick lifecycle
+	// dropped. A test's deps.Tick replaces it with ticks of its own.
+	tick := d.Tick
+	reportSweep := func(time.Duration) {} // the scheduler's Report, when there is one
+	onSkip := tracker.SkippedTick
+	if tick == nil {
+		after := d.After
+		if after == nil {
+			after = time.After
+		}
+		sctx, stop := context.WithCancel(ctx)
+		defer stop() // after lifecycle.Run returns: the last sweep has reported by then
+		sched := newScheduler(sctx, d.Now, after, tracker.SetNextDue, tracker.SkippedTick)
+		// The immediate sweep starts about now, without a tick: it's the
+		// first anchor. (Not run's start: the clock sync wait and startup
+		// checks have run since.) d.Now() is evaluated here, not in the
+		// goroutine.
+		go sched.run(d.Now())
+		tick, reportSweep = sched.Tick(), sched.Report
+		onSkip = func() { tracker.SkippedTick(); sched.Skipped() }
+	}
+
 	return lifecycle.Run(ctx, lifecycle.Config{
 		Immediate: true,
-		Interval:  cfg.Sweep.Interval,
+		Interval:  cfg.Sweep.Interval, // unused while Tick is set, which it always is
 		Heartbeat: cfg.Heartbeat,
 		Work: func(ctx context.Context, _ time.Time) error {
+			// Every Work reports, even one that fails (a cancelled sweep at
+			// shutdown), or the scheduler would wait for it for ever. A
+			// sweep that didn't complete leaves the cadence as it was.
+			next := cad.Status().Interval
+			defer func() { reportSweep(next) }()
+
 			sw, err := sweeper.Sweep(ctx)
 			if err != nil {
 				return err
 			}
+			decision := cad.Observe(sw)
+			next = decision.Interval
 			tracker.RecordSweep(sw)
+			tracker.RecordCadence(cad.Status())
 			// Verbose: every sweep, one line, from the sweep already in hand.
 			// It goes before the fault line, so with verbose on a faulty
 			// sweep reads as its values, then what was wrong with them.
@@ -347,13 +417,18 @@ func run(ctx context.Context, cfg config.Config, d deps) error {
 				ok, failed := sw.Counts()
 				d.Logger.Printf("sweep: %d ok, %d failed, %s: %s", ok, failed, sw.Took(), faults)
 			}
+			// Verbose: a trigger or a change of mode, after the sweep's own
+			// lines, since it's what the sweep decided about the next one.
+			if line := decision.Line(); line != "" {
+				vlog.Print(line)
+			}
 			return errors.Join(errs...)
 		},
 		Ready:         func() bool { return tracker.Snapshot().Ready },
 		Emit:          func(e lifecycle.Event) error { return publishStatus(eventName(e.Kind), e.At, e.Reason) },
-		OnSkip:        tracker.SkippedTick,
+		OnSkip:        onSkip,
 		Now:           d.Now,
-		Tick:          d.Tick,
+		Tick:          tick,
 		HeartbeatTick: d.HeartbeatTick,
 		Signals:       d.Signals,
 		Logger:        d.Logger,
