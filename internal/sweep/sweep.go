@@ -76,8 +76,9 @@ func (s Sweep) Counts() (ok, failed int) {
 }
 
 // Faults names every probe that failed or read a suspect value, grouped by
-// code in the order first seen, as "code: tank/position, …; code: …". It is
-// empty for a clean sweep.
+// code in the order first seen, as "code: tank/position, …; code: …". A
+// failed discovery comes first, as "discovery failed: <error>", because it
+// is the cause of the not_presents after it. It is empty for a clean sweep.
 func (s Sweep) Faults() string {
 	var order []string
 	byCode := map[string][]string{}
@@ -98,7 +99,10 @@ func (s Sweep) Faults() string {
 			}
 		}
 	}
-	parts := make([]string, 0, len(order))
+	parts := make([]string, 0, len(order)+1)
+	if s.DiscoverError != "" {
+		parts = append(parts, "discovery failed: "+s.DiscoverError)
+	}
 	for _, code := range order {
 		parts = append(parts, code+": "+strings.Join(byCode[code], ", "))
 	}
@@ -114,6 +118,8 @@ func (s Sweep) Faults() string {
 // separated by " | ". A probe without a value is "null" in its place, never
 // 0 and never left out, so the columns line up sweep after sweep. Suspect
 // values are shown (they are published); Faults says what went wrong.
+// Thermometers on a bus but not in the config end the line, as
+// "| unexpected 28-… 28-…", since they're what you look for while wiring.
 //
 // It is one line for the whole sweep, starting "sweep " (the fault line
 // starts "sweep:"), so `journalctl -u tanktemp | grep '^sweep '` gives the
@@ -135,6 +141,9 @@ func (s Sweep) Line() string {
 				b.WriteString(" null")
 			}
 		}
+	}
+	if len(s.Unexpected) > 0 {
+		b.WriteString(" | unexpected " + strings.Join(s.Unexpected, " "))
 	}
 	return b.String()
 }

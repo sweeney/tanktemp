@@ -321,7 +321,8 @@ func TestLineFromASweep(t *testing.T) {
 		t.Fatal(err)
 	}
 	// top 61.375-0.19, middle failed, bottom 12.0625+0.05; in config order.
-	want := "sweep 0s 3/4 cylinder 61.2 null 12.1 | second 40.0"
+	// The stray thermometer on bus 1 ends the line.
+	want := "sweep 0s 3/4 cylinder 61.2 null 12.1 | second 40.0 | unexpected " + stray
 	if got := sw.Line(); got != want {
 		t.Errorf("Line() = %q\nwant     %q", got, want)
 	}
@@ -339,5 +340,35 @@ func TestTook(t *testing.T) {
 		if got := (Sweep{Duration: d}).Took(); got != want {
 			t.Errorf("Took(%v) = %q, want %q", d, got, want)
 		}
+	}
+}
+
+// A failed discovery is the cause of every not_present after it, so the
+// fault line names it first (review on #3). Until now it reached only
+// /api/status, and the journal showed ten not_presents and no reason.
+func TestFaultsLeadWithADiscoveryFailure(t *testing.T) {
+	sw := Sweep{DiscoverError: "no 1-Wire bus masters", Tanks: []Tank{{DeviceID: "cyl", Sensors: []Sensor{
+		{Position: "top", Code: reading.NotPresent}, {Position: "bottom", Code: reading.NotPresent},
+	}}}}
+	want := "discovery failed: no 1-Wire bus masters; not_present: cyl/top, cyl/bottom"
+	if got := sw.Faults(); got != want {
+		t.Errorf("Faults() = %q\nwant      %q", got, want)
+	}
+}
+
+// Thermometers on a bus but not in the config are the first thing you want
+// to see while wiring a new probe, so the verbose line ends with them
+// (review on #3). They aren't faults: the fault line leaves them out.
+func TestLineEndsWithUnexpectedProbes(t *testing.T) {
+	c := func(v float64) *float64 { return &v }
+	sw := Sweep{Unexpected: []string{"28-0000000000ee", "28-0000000000ef"}, Tanks: []Tank{{DeviceID: "cyl", Sensors: []Sensor{
+		{Code: reading.OK, TempC: c(50)},
+	}}}}
+	want := "sweep 0s 1/1 cyl 50.0 | unexpected 28-0000000000ee 28-0000000000ef"
+	if got := sw.Line(); got != want {
+		t.Errorf("Line() = %q\nwant     %q", got, want)
+	}
+	if got := sw.Faults(); got != "" {
+		t.Errorf("Faults() = %q: an unexpected probe isn't a fault", got)
 	}
 }
