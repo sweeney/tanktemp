@@ -247,3 +247,77 @@ func TestFaults(t *testing.T) {
 		t.Errorf("a clean sweep = %q, want empty", got)
 	}
 }
+
+// Line is the verbose log's one line per sweep (issue #2). It is built only
+// from the sweep in hand, so logging it can't change what was read or when.
+func TestLine(t *testing.T) {
+	c := func(v float64) *float64 { return &v }
+	sw := Sweep{Duration: 4*time.Second + 40*time.Millisecond, Tanks: []Tank{
+		{DeviceID: "left", Sensors: []Sensor{ // bottom (order 1) first
+			{Position: "b", Order: 1, Code: reading.OK, TempC: c(36.1875)},
+			{Position: "m", Order: 2, Code: reading.CRC}, // failed: null, in its place
+			{Position: "t", Order: 3, Code: reading.OK, TempC: c(66.5)},
+		}},
+		{DeviceID: "right", Sensors: []Sensor{
+			{Position: "b", Order: 1, Code: reading.OK, TempC: c(39.875)},
+			{Position: "t", Order: 2, Code: reading.OK, TempC: c(57.2)},
+		}},
+	}}
+	want := "sweep 4.0s 4/5 left 36.2 null 66.5 | right 39.9 57.2"
+	if got := sw.Line(); got != want {
+		t.Errorf("Line() = %q\nwant     %q", got, want)
+	}
+}
+
+func TestLineEdges(t *testing.T) {
+	c := func(v float64) *float64 { return &v }
+	tests := []struct {
+		name string
+		sw   Sweep
+		want string
+	}{
+		// Every probe failing still names every probe: unknown is null, and
+		// a failing probe is never left out.
+		{"all failed", Sweep{Duration: 800 * time.Millisecond, Tanks: []Tank{{DeviceID: "cyl", Sensors: []Sensor{
+			{Code: reading.NotPresent}, {Code: reading.NotPresent},
+		}}}}, "sweep 0.8s 0/2 cyl null null"},
+		// Below zero and exactly zero are real values, not unknowns.
+		{"zero and negative", Sweep{Tanks: []Tank{{DeviceID: "cyl", Sensors: []Sensor{
+			{Code: reading.OK, TempC: c(0)}, {Code: reading.OK, TempC: c(-0.0625)}, {Code: reading.OK, TempC: c(-10.125)},
+		}}}}, "sweep 0.0s 3/3 cyl 0.0 -0.1 -10.1"},
+		// A suspect 85 is published, so it's shown; the fault line flags it.
+		{"suspect is shown", Sweep{Tanks: []Tank{{DeviceID: "cyl", Sensors: []Sensor{
+			{Code: reading.OK, TempC: c(85), Suspect: reading.Suspect85},
+		}}}}, "sweep 0.0s 1/1 cyl 85.0"},
+		// An OK code without a value can't happen (sensorFrom never builds
+		// one), but if it did the line must still say null, not 0.
+		{"ok without a value", Sweep{Tanks: []Tank{{DeviceID: "cyl", Sensors: []Sensor{
+			{Code: reading.OK},
+		}}}}, "sweep 0.0s 1/1 cyl null"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.sw.Line(); got != tt.want {
+				t.Errorf("Line() = %q\nwant     %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// The real path: a Sweeper's output, bottom to top as config.Load sorts it.
+func TestLineFromASweep(t *testing.T) {
+	src := rt.NewFake(buses()).
+		Script(top, rt.OK(61375)).
+		Script(mid, rt.Fail(reading.CRC)).
+		Script(bottom, rt.OK(12062)).
+		Script(other, rt.OK(40000))
+	sw, err := (&Sweeper{Tanks: tanks(), Source: src, Now: func() time.Time { return t0 }, Synced: func() bool { return true }}).Sweep(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// top 61.375-0.19, middle failed, bottom 12.0625+0.05; in config order.
+	want := "sweep 0.0s 3/4 cylinder 61.2 null 12.1 | second 40.0"
+	if got := sw.Line(); got != want {
+		t.Errorf("Line() = %q\nwant     %q", got, want)
+	}
+}

@@ -7,6 +7,7 @@ package sweep
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"sort"
 	"strings"
@@ -102,6 +103,40 @@ func (s Sweep) Faults() string {
 		parts = append(parts, code+": "+strings.Join(byCode[code], ", "))
 	}
 	return strings.Join(parts, "; ")
+}
+
+// Line is the verbose log's one line for this sweep (issue #2, log.verbose):
+//
+//	sweep 4.0s 9/10 left 36.2 58.4 null 66.1 65.2 | right 39.9 53.3 54.1 49.6 57.2
+//
+// That is the duration, OK/total probes, then each tank's device_id and its
+// calibrated temperatures to 0.1 °C, bottom (order 1) to top, tanks
+// separated by " | ". A probe without a value is "null" in its place, never
+// 0 and never left out, so the columns line up sweep after sweep. Suspect
+// values are shown (they are published); Faults says what went wrong.
+//
+// It is one line for the whole sweep, starting "sweep " (the fault line
+// starts "sweep:"), so `journalctl -u tanktemp | grep '^sweep '` gives the
+// readings over time. It is built only from s: logging it re-reads nothing
+// and can't change what was read or when.
+func (s Sweep) Line() string {
+	ok, failed := s.Counts()
+	var b strings.Builder
+	fmt.Fprintf(&b, "sweep %.1fs %d/%d", s.Duration.Seconds(), ok, ok+failed)
+	for i, t := range s.Tanks {
+		if i > 0 {
+			b.WriteString(" |")
+		}
+		b.WriteString(" " + t.DeviceID)
+		for _, x := range t.Sensors {
+			if x.Code == reading.OK && x.TempC != nil {
+				fmt.Fprintf(&b, " %.1f", *x.TempC)
+			} else {
+				b.WriteString(" null")
+			}
+		}
+	}
+	return b.String()
 }
 
 // Sweep reads every configured sensor once (with the Source's retries).
