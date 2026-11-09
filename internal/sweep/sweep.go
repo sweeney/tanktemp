@@ -107,9 +107,9 @@ func (s Sweep) Faults() string {
 
 // Line is the verbose log's one line for this sweep (issue #2, log.verbose):
 //
-//	sweep 4.0s 9/10 left 36.2 58.4 null 66.1 65.2 | right 39.9 53.3 54.1 49.6 57.2
+//	sweep 4.03s 9/10 left 36.2 58.4 null 66.1 65.2 | right 39.9 53.3 54.1 49.6 57.2
 //
-// That is the duration, OK/total probes, then each tank's device_id and its
+// That is the duration (Took, as the fault line shows it), OK/total probes, then each tank's device_id and its
 // calibrated temperatures to 0.1 °C, bottom (order 1) to top, tanks
 // separated by " | ". A probe without a value is "null" in its place, never
 // 0 and never left out, so the columns line up sweep after sweep. Suspect
@@ -122,7 +122,7 @@ func (s Sweep) Faults() string {
 func (s Sweep) Line() string {
 	ok, failed := s.Counts()
 	var b strings.Builder
-	fmt.Fprintf(&b, "sweep %.1fs %d/%d", s.Duration.Seconds(), ok, ok+failed)
+	fmt.Fprintf(&b, "sweep %s %d/%d", s.Took(), ok, ok+failed)
 	for i, t := range s.Tanks {
 		if i > 0 {
 			b.WriteString(" |")
@@ -130,13 +130,28 @@ func (s Sweep) Line() string {
 		b.WriteString(" " + t.DeviceID)
 		for _, x := range t.Sensors {
 			if x.Code == reading.OK && x.TempC != nil {
-				fmt.Fprintf(&b, " %.1f", *x.TempC)
+				b.WriteString(" " + tenths(*x.TempC))
 			} else {
 				b.WriteString(" null")
 			}
 		}
 	}
 	return b.String()
+}
+
+// Took is the sweep's duration truncated to the millisecond ("4.03s",
+// "800ms", "0s"). The verbose line and the fault line both use it, so a
+// faulty sweep's two lines never show two different durations.
+func (s Sweep) Took() string { return s.Duration.Truncate(time.Millisecond).String() }
+
+// tenths formats a temperature to 0.1 °C. Values that round to zero from
+// below print "0.0", not "-0.0" (a raw 0.000 with a small negative offset).
+func tenths(c float64) string {
+	v := fmt.Sprintf("%.1f", c)
+	if v == "-0.0" {
+		return "0.0"
+	}
+	return v
 }
 
 // Sweep reads every configured sensor once (with the Source's retries).

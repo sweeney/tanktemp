@@ -263,7 +263,7 @@ func TestLine(t *testing.T) {
 			{Position: "t", Order: 2, Code: reading.OK, TempC: c(57.2)},
 		}},
 	}}
-	want := "sweep 4.0s 4/5 left 36.2 null 66.5 | right 39.9 57.2"
+	want := "sweep 4.04s 4/5 left 36.2 null 66.5 | right 39.9 57.2"
 	if got := sw.Line(); got != want {
 		t.Errorf("Line() = %q\nwant     %q", got, want)
 	}
@@ -280,20 +280,25 @@ func TestLineEdges(t *testing.T) {
 		// a failing probe is never left out.
 		{"all failed", Sweep{Duration: 800 * time.Millisecond, Tanks: []Tank{{DeviceID: "cyl", Sensors: []Sensor{
 			{Code: reading.NotPresent}, {Code: reading.NotPresent},
-		}}}}, "sweep 0.8s 0/2 cyl null null"},
+		}}}}, "sweep 800ms 0/2 cyl null null"},
 		// Below zero and exactly zero are real values, not unknowns.
 		{"zero and negative", Sweep{Tanks: []Tank{{DeviceID: "cyl", Sensors: []Sensor{
 			{Code: reading.OK, TempC: c(0)}, {Code: reading.OK, TempC: c(-0.0625)}, {Code: reading.OK, TempC: c(-10.125)},
-		}}}}, "sweep 0.0s 3/3 cyl 0.0 -0.1 -10.1"},
+		}}}}, "sweep 0s 3/3 cyl 0.0 -0.1 -10.1"},
 		// A suspect 85 is published, so it's shown; the fault line flags it.
 		{"suspect is shown", Sweep{Tanks: []Tank{{DeviceID: "cyl", Sensors: []Sensor{
 			{Code: reading.OK, TempC: c(85), Suspect: reading.Suspect85},
-		}}}}, "sweep 0.0s 1/1 cyl 85.0"},
+		}}}}, "sweep 0s 1/1 cyl 85.0"},
 		// An OK code without a value can't happen (sensorFrom never builds
 		// one), but if it did the line must still say null, not 0.
 		{"ok without a value", Sweep{Tanks: []Tank{{DeviceID: "cyl", Sensors: []Sensor{
 			{Code: reading.OK},
-		}}}}, "sweep 0.0s 1/1 cyl null"},
+		}}}}, "sweep 0s 1/1 cyl null"},
+		// Just below zero rounds to 0.0, not "-0.0" (review on #3): a raw
+		// 0.000 with a small negative offset lands here.
+		{"just below zero is 0.0", Sweep{Tanks: []Tank{{DeviceID: "cyl", Sensors: []Sensor{
+			{Code: reading.OK, TempC: c(-0.03)}, {Code: reading.OK, TempC: c(-0.04)}, {Code: reading.OK, TempC: c(-0.05)},
+		}}}}, "sweep 0s 3/3 cyl 0.0 0.0 -0.1"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -316,8 +321,23 @@ func TestLineFromASweep(t *testing.T) {
 		t.Fatal(err)
 	}
 	// top 61.375-0.19, middle failed, bottom 12.0625+0.05; in config order.
-	want := "sweep 0.0s 3/4 cylinder 61.2 null 12.1 | second 40.0"
+	want := "sweep 0s 3/4 cylinder 61.2 null 12.1 | second 40.0"
 	if got := sw.Line(); got != want {
 		t.Errorf("Line() = %q\nwant     %q", got, want)
+	}
+}
+
+// Took is the sweep's duration as both log lines show it, truncated to the
+// millisecond, so a faulty sweep's two lines never disagree (review on #3).
+func TestTook(t *testing.T) {
+	for d, want := range map[time.Duration]string{
+		0:                       "0s",
+		800 * time.Millisecond:  "800ms",
+		4031 * time.Microsecond: "4ms",
+		4960*time.Millisecond + 999*time.Microsecond: "4.96s", // truncated, not rounded up to 5.0s
+	} {
+		if got := (Sweep{Duration: d}).Took(); got != want {
+			t.Errorf("Took(%v) = %q, want %q", d, got, want)
+		}
 	}
 }

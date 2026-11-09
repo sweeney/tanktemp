@@ -345,7 +345,7 @@ func run(ctx context.Context, cfg config.Config, d deps) error {
 			}
 			if faults := sw.Faults(); faults != "" {
 				ok, failed := sw.Counts()
-				d.Logger.Printf("sweep: %d ok, %d failed, %v: %s", ok, failed, sw.Duration.Truncate(time.Millisecond), faults)
+				d.Logger.Printf("sweep: %d ok, %d failed, %s: %s", ok, failed, sw.Took(), faults)
 			}
 			return errors.Join(errs...)
 		},

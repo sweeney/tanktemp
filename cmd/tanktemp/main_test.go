@@ -341,9 +341,9 @@ func TestVerboseOnLogsEverySweep(t *testing.T) {
 	if err := <-r.done; err != nil {
 		t.Fatal(err)
 	}
-	// The fake clock doesn't move, so every sweep takes 0.0s. bottom is
+	// The fake clock doesn't move, so every sweep takes 0s. bottom is
 	// 12.0625, top is 61.375 - 0.19.
-	want := "sweep 0.0s 2/2 hot-water-cylinder 12.1 61.2"
+	want := "sweep 0s 2/2 hot-water-cylinder 12.1 61.2"
 	got := sweepLines(r.logs.String())
 	if len(got) != 2 || got[0] != want || got[1] != want {
 		t.Errorf("verbose on: sweep lines = %q, want two of %q", got, want)
@@ -361,7 +361,7 @@ func TestVerboseOnFaultySweepShowsNullAndTheFault(t *testing.T) {
 	r.sig <- syscall.SIGTERM
 	<-r.done
 	want := []string{
-		"sweep 0.0s 1/2 hot-water-cylinder null 61.2",
+		"sweep 0s 1/2 hot-water-cylinder null 61.2",
 		"sweep: 1 ok, 1 failed, 0s: not_present: hot-water-cylinder/bottom",
 	}
 	if got := sweepLines(r.logs.String()); strings.Join(got, "\n") != strings.Join(want, "\n") {
