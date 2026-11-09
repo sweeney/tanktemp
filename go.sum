@@ -4,8 +4,8 @@ github.com/gorilla/websocket v1.5.0 h1:PPwGk2jz7EePpoHN/+ClbZu8SPxiqlu12wZP/3sWm
 github.com/gorilla/websocket v1.5.0/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
 github.com/sweeney/common/health v0.1.0 h1:49fMS3S3Ehb9FlKpCswR2IhE64NXlpbiAhXF20tb28Y=
 github.com/sweeney/common/health v0.1.0/go.mod h1:5XRzdXD2SjAadxV01VlniawGN6tubtfSercPBEBBxFE=
-github.com/sweeney/common/lifecycle v0.1.0 h1:/+qYcvxxkVCQunbowTIeg9U9TEfVmYAeBo3+LpEbneE=
-github.com/sweeney/common/lifecycle v0.1.0/go.mod h1:2/anRm1xemwmmu1pj6zQqaLNWF9jrNPD17bUlO4h1hk=
+github.com/sweeney/common/lifecycle v0.2.0 h1:HgM+tO5COStIas3EkwNBlkT/Nr59XysJOyCJW57hB3Y=
+github.com/sweeney/common/lifecycle v0.2.0/go.mod h1:2/anRm1xemwmmu1pj6zQqaLNWF9jrNPD17bUlO4h1hk=
 github.com/sweeney/common/mqttpub v0.1.0 h1:s76Tki2naQBLzOKCKje1p3C4LwKR73NlTbiOLXuhNl4=
 github.com/sweeney/common/mqttpub v0.1.0/go.mod h1:0aURnyRQtAdf8kkq6/OsxPGZQqwBlSjUP+fcxC6HMGo=
 golang.org/x/net v0.8.0 h1:Zrh2ngAOFYneWTAIAPethzeaQLuHwhuBkuV6ZiRnUaQ=
