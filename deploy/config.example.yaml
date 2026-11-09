@@ -12,6 +12,10 @@
 # heartbeat: 15m
 # http:
 #   listen: ":80"
+# log:
+#   verbose: false     # true: log every sweep and every retried read. For the
+#                      # bench only: turn it off again after testing (a 10 s
+#                      # interval is ~8,640 lines a day). /api/status shows it.
 
 mqtt:
   broker: tcp://broker.example:1883

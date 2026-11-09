@@ -173,6 +173,8 @@ clock_sync_wait: 2m                 # then sweep anyway, flagged clock_synced:fa
 heartbeat: 15m
 http:
   listen: ":80"
+log:
+  verbose: false                    # true: every sweep and retry in the journal (issue #2)
 mqtt:
   broker: tcp://broker.lan:1883
   client_id: tanktemp-<host>
@@ -192,6 +194,16 @@ tanks:
 the topic segment, and the prefix of each probe's `primary`. There's no
 separate local tank name that could drift from it. Display name, room and
 dimensions are in `devices_<site>`, not here.
+
+`log.verbose` (2026-11-09, issue #2) is a boolean, not levels, because
+tanktemp has two audiences: normal running and someone at the bench. Off,
+the journal gets startup problems, sweeps with faults, MQTT reconnects and
+the lifecycle. On, it also gets one line per sweep (`sweep 4.0s 10/10 left
+36.2 … | right 39.9 …`, bottom to top, `null` for a failed probe) and one per
+retried read. It's applied at start: changing it is a config install and
+restart, with no SIGHUP or HTTP toggle. `/api/status` and `-check-config`
+show it. The lines are built from the sweep in hand, so it changes nothing
+that is read, published or timed.
 
 `Validate` refuses to start the service on any of these, and names the line
 where it can:

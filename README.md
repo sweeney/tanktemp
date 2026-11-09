@@ -120,6 +120,52 @@ a websockets listener (mosquitto: `listener 9001` with `protocol websockets`).
 ./tools/live_test.sh      # the script's tests
 ```
 
+## Verbose logging (at the bench)
+
+tanktemp normally logs very little: startup problems, sweeps with faults,
+MQTT reconnects, and start and stop. While wiring, testing or tuning, turn on
+`log.verbose` in `deploy/config.local.yaml`:
+
+```yaml
+log:
+  verbose: true
+```
+
+then `./setup-pi.sh --check` and `./setup-pi.sh` to install it and restart
+(it's read only at start; a restart costs one sweep). The journal then also
+gets:
+
+- **every sweep, one line:** duration, probes OK/total, then each tank's
+  calibrated readings to 0.1 °C from the bottom (order 1) up, tanks
+  separated by `|`. A failed probe is `null` in its place, and the usual
+  fault line follows:
+
+  ```
+  sweep 4.0s 9/10 left 36.2 58.4 null 66.1 65.2 | right 39.9 53.3 54.1 49.6 57.2
+  sweep: 9 ok, 1 failed, 4.03s: crc: left/middle
+  ```
+
+- **every retried read:** which attempt failed and why, and the extra read a
+  85.000 °C value gets (GUESSES G2):
+
+  ```
+  read 28-… attempt 1/3: crc (28-…: scratchpad CRC mismatch)
+  read 28-… attempt 1/3: 85.000 °C, reading once more to check
+  read 28-… extra read: 60.000 °C, keeping it
+  ```
+
+`journalctl -u tanktemp -o cat | grep '^sweep '` gives the readings over
+time. Verbose output never changes what is read, published or when: the lines
+are built from the sweep already in hand.
+
+`/api/status` reports `"verbose": true` and `-check-config` says
+`verbose log ON` while it's on, so it's hard to leave on by accident. **Turn
+it off after testing:** at a 10 s interval it's about 8,640 sweep lines a
+day. journald copes, but they bury the lines that matter.
+
+When adaptive cadence (#1) lands, its mode changes and triggers go to the
+same verbose logger.
+
 ## Reviewing the guesses
 
 `go run ./tools/guessreview -open` serves a local page (loopback only, port
@@ -170,6 +216,8 @@ its staged copy in the deploy user's home. Nothing else, and no blanket
 - A config change needs none either: edit `deploy/config.local.yaml`, then
   `./setup-pi.sh --check` (shows the diff), then `./setup-pi.sh` (installs
   it, restarts tanktemp and checks `/healthz`).
+  That's also how `log.verbose` goes on for testing and off again after
+  ([Verbose logging](#verbose-logging-at-the-bench)).
 
 Both scripts check before changing anything: full sudo, or else every one of
 those rules. If neither, they refuse and name the command that wants a
