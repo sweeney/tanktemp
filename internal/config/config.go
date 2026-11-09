@@ -38,8 +38,81 @@ type Config struct {
 
 // Sweep is how often and how hard the sensors are read.
 type Sweep struct {
+	// Interval is the slow interval: the longest gap between two sweeps'
+	// starts. With Fast nil it is the only interval, as before issue #1.
 	Interval time.Duration `yaml:"interval"`
 	Attempts int           `yaml:"attempts"`
+	// Fast is the adaptive cadence (issue #1); nil (the default) means a
+	// fixed Interval. See Fast and internal/cadence.
+	Fast *Fast `yaml:"fast"`
+}
+
+// Fast is sweep.fast: sweep faster while any probe is changing quickly
+// (issue #1). internal/cadence implements it; this is only what the file
+// says.
+//
+//	sweep:
+//	  interval: 30s              # slow
+//	  fast:
+//	    interval: 10s            # jump straight to this when a probe moves...
+//	    trigger_c_per_min: 1.5   # ...at least this fast, either direction
+//	    hold: 2m                 # stay at fast.interval this long after the last trigger
+//	    decay: 5m                # then ease back to interval over this long
+//
+// Any key left out of the block takes its DefaultFast value, so "fast: {}"
+// turns it on with the defaults. An explicit value is always kept, even a
+// zero: "hold: 0s" is a real choice (ease back at once), not a missing key.
+type Fast struct {
+	Interval       time.Duration `yaml:"interval"`
+	TriggerCPerMin float64       `yaml:"trigger_c_per_min"`
+	Hold           time.Duration `yaml:"hold"`
+	Decay          time.Duration `yaml:"decay"`
+}
+
+// DefaultFast is what a sweep.fast block's missing keys default to. The
+// trigger and hold are guesses from two days of recordings (GUESSES G38,
+// G39).
+var DefaultFast = Fast{
+	Interval:       10 * time.Second,
+	TriggerCPerMin: 1.5,
+	Hold:           2 * time.Minute,
+	Decay:          5 * time.Minute,
+}
+
+// fastKeys are the keys a sweep.fast block may hold. They must match Fast's
+// yaml tags; TestFastKeysMatchTheStruct keeps them in step.
+var fastKeys = []string{"interval", "trigger_c_per_min", "hold", "decay"}
+
+// UnmarshalYAML starts from DefaultFast, so a key left out of the block
+// keeps its default and an explicit one (zero included) replaces it. A null
+// block never gets here: yaml leaves the *Fast nil, which means "off".
+//
+// It checks the keys itself because yaml.v3's Node.Decode doesn't inherit
+// the file decoder's KnownFields, so without this a typo inside the block
+// ("intervl") would be ignored and its default used: exactly the silent
+// failure KnownFields is there to stop. A YAML merge key ("<<") is refused
+// the same way, rather than half-supported.
+func (f *Fast) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind != yaml.MappingNode {
+		return fmt.Errorf("line %d: sweep.fast must be a mapping of %s", n.Line, strings.Join(fastKeys, ", "))
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		k := n.Content[i]
+		known := false
+		for _, want := range fastKeys {
+			known = known || k.Value == want
+		}
+		if !known {
+			return fmt.Errorf("line %d: sweep.fast: unknown key %q (known: %s)", k.Line, k.Value, strings.Join(fastKeys, ", "))
+		}
+	}
+	type plain Fast // the same fields without this method, so Decode doesn't recurse
+	p := plain(DefaultFast)
+	if err := n.Decode(&p); err != nil {
+		return err
+	}
+	*f = Fast(p)
+	return nil
 }
 
 // HTTP is the status server.
@@ -119,6 +192,14 @@ const (
 	MaxOffsetC = 2.0
 	// ReadTime is one DS18B20 conversion at 12-bit, with margin.
 	ReadTime = 800 * time.Millisecond
+	// MinFastInterval is the shortest sweep.fast.interval (issue #1, GUESSES
+	// G41). A state message's timestamp is to the second, and consumers
+	// treat a repeated timestamp as a replay (WIRE.md, Cadence), so two
+	// sweeps must never start in the same second. Sweeps are spaced from
+	// their ticks, and a sweep can start a few ms after its tick, so 1 s
+	// isn't quite enough; 2 s leaves a whole second of margin. With the
+	// G6 rule, any rig of 3 or more probes is held to more than this anyway.
+	MinFastInterval = 2 * time.Second
 )
 
 var (
@@ -238,6 +319,46 @@ func (v *validator) check(c *Config) {
 	}
 	if need := time.Duration(total) * ReadTime; total > 0 && c.Sweep.Interval < need {
 		v.add(0, "sweep.interval", "%v is shorter than one clean read of all %d sensors (%v)", c.Sweep.Interval, total, need)
+	}
+	v.checkFast(c.Sweep, total)
+}
+
+// checkFast checks sweep.fast (issue #1), if there is one. Each rule is
+// what keeps internal/cadence's arithmetic meaningful:
+//
+//   - fast.interval at least the G6 minimum (one clean read of every
+//     sensor), as sweep.interval is, and at least MinFastInterval, so
+//     timestamps never repeat;
+//   - fast.interval shorter than interval: the decay eases from fast up to
+//     slow, and a "fast" that isn't faster has nothing to ease between;
+//   - trigger_c_per_min a finite number above 0: 0 would trigger on any
+//     change at all, and NaN would never compare true;
+//   - hold at least 0 (0 means start easing back at once);
+//   - decay above 0: it divides the exponent, and a zero decay would be a
+//     cliff from fast to slow, which is what hold already is.
+func (v *validator) checkFast(s Sweep, total int) {
+	f := s.Fast
+	if f == nil {
+		return
+	}
+	need := time.Duration(total) * ReadTime
+	switch {
+	case f.Interval < MinFastInterval:
+		v.add(0, "sweep.fast.interval", "%v is under %v: two sweeps' timestamps (to the second) could repeat", f.Interval, MinFastInterval)
+	case total > 0 && f.Interval < need:
+		v.add(0, "sweep.fast.interval", "%v is shorter than one clean read of all %d sensors (%v)", f.Interval, total, need)
+	}
+	if f.Interval >= s.Interval {
+		v.add(0, "sweep.fast.interval", "%v must be shorter than sweep.interval (%v)", f.Interval, s.Interval)
+	}
+	if !(f.TriggerCPerMin > 0) || math.IsInf(f.TriggerCPerMin, 1) {
+		v.add(0, "sweep.fast.trigger_c_per_min", "%v must be greater than 0 (and finite)", f.TriggerCPerMin)
+	}
+	if f.Hold < 0 {
+		v.add(0, "sweep.fast.hold", "%v is negative", f.Hold)
+	}
+	if f.Decay <= 0 {
+		v.add(0, "sweep.fast.decay", "%v must be positive", f.Decay)
 	}
 }
 
