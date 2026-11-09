@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sweeney/tanktemp/internal/cadence"
 	"github.com/sweeney/tanktemp/internal/reading"
 	"github.com/sweeney/tanktemp/internal/startup"
 	"github.com/sweeney/tanktemp/internal/sweep"
@@ -35,6 +36,10 @@ type Options struct {
 	// Verbose is config log.verbose (issue #2). It's fixed at start, and
 	// carried here only so /api/status can show when it's been left on.
 	Verbose bool
+	// Cadence is the adaptive cadence's state before the first sweep
+	// (issue #1): cadence.New(...).Status(), so /api/status says slow, at
+	// the slow interval, and whether fast is configured at all.
+	Cadence cadence.Status
 }
 
 // Tracker is safe for concurrent use.
@@ -46,6 +51,8 @@ type Tracker struct {
 	last     *sweep.Sweep
 	sweeps   int
 	skipped  int
+	cadence  cadence.Status
+	nextDue  time.Time
 }
 
 // New returns a Tracker.
@@ -53,7 +60,7 @@ func New(o Options) *Tracker {
 	if o.Connected == nil {
 		o.Connected = func() bool { return false }
 	}
-	return &Tracker{opts: o}
+	return &Tracker{opts: o, cadence: copyCadence(o.Cadence)}
 }
 
 // SetStartup records the startup checks.
@@ -69,6 +76,34 @@ func (t *Tracker) RecordSweep(s sweep.Sweep) {
 	defer t.mu.Unlock()
 	t.last = &s
 	t.sweeps++
+}
+
+// RecordCadence records the cadence's state after a sweep (issue #1). It
+// only feeds /api/status: health and staleness stay in slow intervals
+// (WIRE.md, Cadence), so a fast cadence can never make health stricter.
+func (t *Tracker) RecordCadence(c cadence.Status) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.cadence = copyCadence(c)
+}
+
+// SetNextDue records when the scheduler will next start a sweep, so
+// /api/status can say so as an absolute time (which stays true for as long
+// as it's displayed, unlike "in N s").
+func (t *Tracker) SetNextDue(due time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.nextDue = due
+}
+
+// copyCadence copies c's trigger, so neither the caller nor a Snapshot
+// shares it with the tracker.
+func copyCadence(c cadence.Status) cadence.Status {
+	if c.LastTrigger != nil {
+		tr := *c.LastTrigger
+		c.LastTrigger = &tr
+	}
+	return c
 }
 
 // SkippedTick counts a tick that arrived while a sweep was still running.
@@ -90,7 +125,9 @@ type Snapshot struct {
 	Last          *sweep.Sweep // nil before the first sweep
 	Sweeps        int
 	SkippedTicks  int
-	Verbose       bool // log.verbose, as set at start
+	Verbose       bool           // log.verbose, as set at start
+	Cadence       cadence.Status // the adaptive cadence (issue #1), for /api/status only
+	NextDue       time.Time      // when the next sweep is due; zero until the scheduler says
 }
 
 // Snapshot returns a copy.
@@ -109,6 +146,8 @@ func (t *Tracker) Snapshot() Snapshot {
 		Sweeps:        t.sweeps,
 		SkippedTicks:  t.skipped,
 		Verbose:       t.opts.Verbose,
+		Cadence:       copyCadence(t.cadence),
+		NextDue:       t.nextDue,
 	}
 	if t.last != nil {
 		l := *t.last // sweeps are never mutated after recording
