@@ -9,12 +9,14 @@ import (
 	"encoding/json"
 	"html/template"
 	"io/fs"
+	"math"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/sweeney/common/health"
 	"github.com/sweeney/common/health/sysinfo"
+	"github.com/sweeney/tanktemp/internal/cadence"
 	"github.com/sweeney/tanktemp/internal/payload"
 	"github.com/sweeney/tanktemp/internal/reading"
 	"github.com/sweeney/tanktemp/internal/status"
@@ -138,6 +140,55 @@ type apiStatus struct {
 	Unexpected      []string          `json:"unexpected"`
 	DiscoverError   *string           `json:"discover_error"`
 	StartupProblems []problem         `json:"startup_problems"`
+	Sweep           sweepCadence      `json:"sweep"`
+}
+
+// sweepCadence is /api/status's sweep block (issue #1): the adaptive
+// cadence, for tuning it. It's computed per request from the tracker and is
+// never on the wire: state messages are retained, and a volatile "next
+// sweep" would be wrong for anyone reading the retained copy later
+// (docs/WIRE.md, Cadence).
+//
+//	"sweep": {"adaptive": true, "mode": "decay", "interval_s": 14.207,
+//	          "next_due": "2026-11-09T08:15:42Z",
+//	          "last_trigger": {"at": "…", "probe": "cyl.bottom", "rom": "28-…", "c_per_min": -3.2},
+//	          "fast_entries": 17}
+//
+// Times are absolute, so each stays true for as long as it's displayed,
+// and the page counts down from next_due itself. It reports the interval
+// itself, not a "decay %", because an interval means the same whatever the
+// curve's shape.
+type sweepCadence struct {
+	Adaptive    bool         `json:"adaptive"`     // sweep.fast is configured
+	Mode        string       `json:"mode"`         // slow | hold | decay
+	IntervalS   float64      `json:"interval_s"`   // the gap from the last sweep to the next
+	NextDue     *string      `json:"next_due"`     // null until the scheduler has said
+	LastTrigger *lastTrigger `json:"last_trigger"` // null until the first trigger
+	FastEntries int          `json:"fast_entries"` // times it went fast since start
+}
+
+type lastTrigger struct {
+	At      string  `json:"at"`
+	Probe   string  `json:"probe"` // "<device_id>.<position>", the statehouse primary
+	ROM     string  `json:"rom"`
+	CPerMin float64 `json:"c_per_min"` // signed, to 0.01: negative is falling
+}
+
+func cadenceBlock(c cadence.Status, nextDue time.Time) sweepCadence {
+	out := sweepCadence{
+		Adaptive: c.Enabled, Mode: string(c.Mode), IntervalS: c.Interval.Seconds(), FastEntries: c.FastEntries,
+	}
+	if !nextDue.IsZero() {
+		d := nextDue.UTC().Format(time.RFC3339)
+		out.NextDue = &d
+	}
+	if t := c.LastTrigger; t != nil {
+		out.LastTrigger = &lastTrigger{
+			At: t.At.UTC().Format(time.RFC3339), Probe: t.Probe(), ROM: t.ROM,
+			CPerMin: math.Round(t.CPerMin*100) / 100,
+		}
+	}
+	return out
 }
 
 func (s *Server) apiStatus(w http.ResponseWriter, _ *http.Request) {
@@ -154,6 +205,7 @@ func (s *Server) apiStatus(w http.ResponseWriter, _ *http.Request) {
 	out.Verbose = snap.Verbose
 	out.Tanks = []json.RawMessage{}
 	out.StartupProblems = problems(snap)
+	out.Sweep = cadenceBlock(snap.Cadence, snap.NextDue)
 	if snap.Last != nil {
 		for _, t := range snap.Last.Tanks {
 			out.Tanks = append(out.Tanks, payload.StateDiagnostic(*snap.Last, t))

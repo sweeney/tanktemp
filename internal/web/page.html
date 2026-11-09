@@ -49,6 +49,7 @@ code { font-size: 12px; }
     <h1>tanktemp</h1>
     <span id="status" class="pill starting">loading</span>
     <span class="meta" id="when"></span>
+    <span class="meta" id="cadence"></span>
   </header>
   <ul class="notes" id="notes"></ul>
   <section class="tanks" id="tanks"></section>
@@ -124,7 +125,27 @@ function render(s) {
   document.getElementById("when").textContent = newest
     ? "last sweep " + new Date(newest).toLocaleTimeString()
     : "waiting for the first sweep";
+  cadence = s.sweep;
+  showCadence();
 }
+
+// The adaptive cadence (issue #1): its mode, and a countdown to next_due.
+// next_due is an absolute time, so the countdown is worked out here, every
+// second, and stays right between polls.
+let cadence = null;
+function showCadence() {
+  const e = document.getElementById("cadence");
+  if (!cadence) { e.textContent = ""; return; }
+  let text = cadence.adaptive
+    ? "sweeping " + (cadence.mode === "slow" ? "slow" : "fast (" + cadence.mode + ")") + ", every " + cadence.interval_s.toFixed(1) + " s"
+    : "every " + cadence.interval_s.toFixed(0) + " s";
+  if (cadence.next_due) {
+    const left = Math.max(0, Math.round((new Date(cadence.next_due) - Date.now()) / 1000));
+    text += " · next in " + left + " s";
+  }
+  e.textContent = text;
+}
+setInterval(showCadence, 1000);
 
 async function poll() {
   try {
