@@ -398,3 +398,94 @@ func TestNewSource(t *testing.T) {
 		t.Errorf("NewSource = %+v", s)
 	}
 }
+
+// logLines collects what a Source logs through Logf. Buses are read in
+// parallel, so it takes a lock.
+type logLines struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (l *logLines) logf(format string, args ...any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.lines = append(l.lines, fmt.Sprintf(format, args...))
+}
+
+func readLogged(t *testing.T, f fs.FS, attempts int) (reading.Reading, []string) {
+	t.Helper()
+	var l logLines
+	src := &Source{FS: f, Attempts: attempts, Logf: l.logf}
+	top, err := src.Discover(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := src.Read(context.Background(), top, []string{rom1})[rom1]
+	return r, l.lines
+}
+
+// Issue #2: with verbose on, a retried read says which attempt failed and
+// why. Today that detail is lost: only the final outcome reaches the fault
+// line, and a read that recovers on its second attempt leaves no trace.
+func TestRetriesAreLogged(t *testing.T) {
+	tests := []struct {
+		name   string
+		bodies []string
+		want   []string // substrings, one per line, in order
+	}{
+		{"good first time: nothing", []string{t18812}, nil},
+		{"crc, then good: the failed attempt", []string{crcNo, t18812},
+			[]string{"read " + rom1 + " attempt 1/3: crc"}},
+		{"bus low every time: each attempt", []string{busLowB},
+			[]string{"attempt 1/3: bus_low", "attempt 2/3: bus_low", "attempt 3/3: bus_low"}},
+		{"power-on reset, then good", []string{por, t18812},
+			[]string{"attempt 1/3: power_on_reset"}},
+		// The extra read for 85 °C is a retry too (GUESSES G2), so it's
+		// logged with its outcome.
+		{"85 then a different value", []string{real85, t60000},
+			[]string{"attempt 1/3: 85.000 °C, reading once more to check", "extra read: 60.000 °C, keeping it"}},
+		{"85 twice", []string{real85, real85},
+			[]string{"attempt 1/3: 85.000 °C, reading once more to check", "extra read: 85.000 °C again, flagged 85c_unverified"}},
+		{"85 then a failure", []string{real85, crcNo},
+			[]string{"attempt 1/3: 85.000 °C, reading once more to check", "extra read failed (crc: " + rom1 + ": scratchpad CRC mismatch), keeping 85.000 °C flagged 85c_unverified"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, got := readLogged(t, &seqFS{base: oneSensor(), bodies: tt.bodies}, 3)
+			if len(got) != len(tt.want) {
+				t.Fatalf("logged %d lines, want %d:\n%s", len(got), len(tt.want), strings.Join(got, "\n"))
+			}
+			for i, w := range tt.want {
+				if !strings.Contains(got[i], w) {
+					t.Errorf("line %d = %q, want it to contain %q", i, got[i], w)
+				}
+			}
+		})
+	}
+}
+
+// A missing sensor isn't retried, so there's no retry to log; the fault
+// line already names it.
+func TestNotPresentIsNotLoggedAsARetry(t *testing.T) {
+	missing := fstest.MapFS{"w1_bus_master1/w1_master_slaves": {Data: []byte("\n")}}
+	r, got := readLogged(t, missing, 3)
+	if r.Code != reading.NotPresent || len(got) != 0 {
+		t.Errorf("got %s, logged %q; want not_present and nothing logged", r.Code, got)
+	}
+}
+
+// Logging must not change what is read: the same reads, the same outcomes.
+func TestLoggingDoesNotChangeReadings(t *testing.T) {
+	for _, bodies := range [][]string{{t18812}, {crcNo, t18812}, {busLowB}, {real85, real85}, {real85, t60000}} {
+		quiet := readOne(t, &seqFS{base: oneSensor(), bodies: bodies}, 3)
+		f := &seqFS{base: oneSensor(), bodies: bodies}
+		logged, _ := readLogged(t, f, 3)
+		if quiet.Code != logged.Code || quiet.Attempts != logged.Attempts || quiet.Suspect != logged.Suspect ||
+			(quiet.MilliC == nil) != (logged.MilliC == nil) || (quiet.MilliC != nil && *quiet.MilliC != *logged.MilliC) {
+			t.Errorf("%d bodies: quiet %+v, logged %+v", len(bodies), quiet, logged)
+		}
+		if f.n != logged.Attempts {
+			t.Errorf("%d bodies: %d sysfs reads for %d attempts: logging must not re-read", len(bodies), f.n, logged.Attempts)
+		}
+	}
+}

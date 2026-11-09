@@ -149,8 +149,14 @@ func serve(cfg config.Config) error {
 		logger.Printf("MQTT not connected after %v; sweeping anyway", ConnectWait)
 	}
 
+	// With log.verbose on, the 1-Wire source reports each retried read too.
+	// Off, its lines go to a discard writer, like the rest of the verbose
+	// detail (see verboseLogger).
+	src := onewire.NewSource(cfg.W1Root, cfg.Sweep.Attempts)
+	src.Logf = verboseLogger(logger, cfg.Log.Verbose).Printf
+
 	return run(ctx, cfg, deps{
-		Source:      onewire.NewSource(cfg.W1Root, cfg.Sweep.Attempts),
+		Source:      src,
 		Pub:         pub,
 		Reconnected: pub.Reconnected(),
 		Synced:      func() bool { _, err := os.Stat(SyncedFlag); return err == nil },

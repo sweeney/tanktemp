@@ -28,7 +28,27 @@ const raw85 = 85000
 type Source struct {
 	FS       fs.FS // laid out like /sys/bus/w1/devices
 	Attempts int   // reads per sensor before giving up; below 1 means 1
+
+	// Logf, if set, is told about every read that will be (or was) retried:
+	// a failed attempt, with its number and the error, and the 85 °C extra
+	// read and what came of it. It's the bench detail behind log.verbose
+	// (issue #2): without it, a read that recovered on its second attempt
+	// leaves no trace, and one that never did shows only its final code.
+	// nil (the default) logs nothing. It's called from one goroutine per
+	// bus, so it must be safe for concurrent use (log.Logger.Printf is). It
+	// only reports what was read; it never changes or repeats a read.
+	Logf func(format string, args ...any)
 }
+
+// logf calls Logf if it is set.
+func (s *Source) logf(format string, args ...any) {
+	if s.Logf != nil {
+		s.Logf(format, args...)
+	}
+}
+
+// degrees formats raw millidegrees for a log line, as the kernel's t= does.
+func degrees(milliC int) string { return fmt.Sprintf("%.3f °C", float64(milliC)/1000) }
 
 // NewSource reads from dir, normally DevicesDir.
 func NewSource(dir string, attempts int) *Source {
@@ -124,14 +144,17 @@ func (s *Source) readChecked(ctx context.Context, rom string) reading.Reading {
 		if err == nil {
 			r.Code, r.MilliC = reading.OK, &mc
 			if mc == raw85 {
+				s.logf("read %s attempt %d/%d: %s, reading once more to check", rom, r.Attempts, attempts, degrees(mc))
 				s.recheck85(ctx, &r)
 			}
 			return finish()
 		}
 		r.Code = codeFor(err)
 		if r.Code == reading.NotPresent {
+			// Not retried, so not logged: the sweep's fault line names it.
 			break
 		}
+		s.logf("read %s attempt %d/%d: %s (%v)", rom, r.Attempts, attempts, r.Code, err)
 	}
 	return finish()
 }
@@ -139,9 +162,16 @@ func (s *Source) readChecked(ctx context.Context, rom string) reading.Reading {
 func (s *Source) recheck85(ctx context.Context, r *reading.Reading) {
 	if ctx.Err() == nil {
 		r.Attempts++
-		if mc, err := s.readOnce(r.ROM); err == nil && mc != raw85 {
+		mc, err := s.readOnce(r.ROM)
+		switch {
+		case err == nil && mc != raw85:
+			s.logf("read %s extra read: %s, keeping it", r.ROM, degrees(mc))
 			r.MilliC = &mc
 			return
+		case err == nil:
+			s.logf("read %s extra read: %s again, flagged %s", r.ROM, degrees(mc), reading.Suspect85)
+		default:
+			s.logf("read %s extra read failed (%s: %v), keeping %s flagged %s", r.ROM, codeFor(err), err, degrees(raw85), reading.Suspect85)
 		}
 	}
 	r.Suspect = reading.Suspect85
