@@ -149,11 +149,12 @@ func serve(cfg config.Config) error {
 		logger.Printf("MQTT not connected after %v; sweeping anyway", ConnectWait)
 	}
 
-	// With log.verbose on, the 1-Wire source reports each retried read too.
-	// Off, its lines go to a discard writer, like the rest of the verbose
-	// detail (see verboseLogger).
+	// log.verbose is turned into a logger here, once. run's sweep lines and
+	// the 1-Wire source's retry lines both go to it, as will adaptive
+	// cadence's (#1).
+	vlog := verboseLogger(logger, cfg.Log.Verbose)
 	src := onewire.NewSource(cfg.W1Root, cfg.Sweep.Attempts)
-	src.Logf = verboseLogger(logger, cfg.Log.Verbose).Printf
+	src.Logf = retryLogger(vlog, cfg.Tanks)
 
 	return run(ctx, cfg, deps{
 		Source:      src,
@@ -165,6 +166,7 @@ func serve(cfg config.Config) error {
 		SysFS:       os.DirFS("/"),
 		Disk:        sysinfo.StatfsDisk("/"),
 		Logger:      logger,
+		Verbose:     vlog,
 		Version:     version,
 	})
 }
@@ -192,19 +194,41 @@ type deps struct {
 	Disk     func() (sysinfo.Disk, error)
 
 	Logger  *log.Logger
+	Verbose *log.Logger // bench-only lines (log.verbose); nil: discarded
 	Version string
 }
 
 // verboseLogger is where the bench-only lines go (issue #2, log.verbose):
 // the normal logger when verbose is on, a discard writer when it is off.
-// Code that logs verbose detail just prints to it and never checks the
-// switch itself, so turning it on adds lines and changes nothing else.
-// Adaptive cadence (#1) will take the same logger for its mode changes.
+// serve calls it once and hands the result to everything that logs verbose
+// detail (deps.Verbose, the 1-Wire source), so the switch lives in one
+// place. That code just prints to it and never checks the switch itself,
+// so turning it on adds lines and changes nothing else. Adaptive cadence
+// (#1) will take the same logger for its mode changes.
 func verboseLogger(l *log.Logger, verbose bool) *log.Logger {
-	if verbose {
+	if verbose && l != nil {
 		return l
 	}
 	return log.New(io.Discard, "", 0)
+}
+
+// retryLogger is the 1-Wire source's Logf: it names each retried read by
+// tank/position as well as ROM, so the journal reads at the bench without
+// the config open beside it.
+//
+//	read hot-water-cylinder/bottom 28-000011721ce9 attempt 1/3: crc (scratchpad CRC mismatch)
+//
+// onewire never learns the config; this map is the only link. A ROM that
+// isn't in the config (onewire reads only configured ones, so it shouldn't
+// happen) is named by ROM alone.
+func retryLogger(vlog *log.Logger, tanks []config.Tank) func(rom, msg string) {
+	where := map[string]string{}
+	for _, t := range tanks {
+		for _, x := range t.Sensors {
+			where[x.ROM] = t.DeviceID + "/" + x.Position + " "
+		}
+	}
+	return func(rom, msg string) { vlog.Printf("read %s%s %s", where[rom], rom, msg) }
 }
 
 func eventName(k lifecycle.Kind) string {
@@ -221,7 +245,10 @@ func eventName(k lifecycle.Kind) string {
 // each tank's state and the lifecycle, until a signal.
 func run(ctx context.Context, cfg config.Config, d deps) error {
 	start := d.Now()
-	vlog := verboseLogger(d.Logger, cfg.Log.Verbose)
+	vlog := d.Verbose
+	if vlog == nil {
+		vlog = verboseLogger(nil, false)
+	}
 	var ids []string
 	for _, t := range cfg.Tanks {
 		ids = append(ids, t.DeviceID)

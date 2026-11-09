@@ -34,17 +34,28 @@ type Source struct {
 	// read and what came of it. It's the bench detail behind log.verbose
 	// (issue #2): without it, a read that recovered on its second attempt
 	// leaves no trace, and one that never did shows only its final code.
+	//
+	// rom is its own argument, and msg never repeats it, so the caller can
+	// name the probe however it likes: cmd/tanktemp turns it into the
+	// tank/position from the config, which this package doesn't know.
+	//
 	// nil (the default) logs nothing. It's called from one goroutine per
 	// bus, so it must be safe for concurrent use (log.Logger.Printf is). It
 	// only reports what was read; it never changes or repeats a read.
-	Logf func(format string, args ...any)
+	Logf func(rom, msg string)
 }
 
-// logf calls Logf if it is set.
-func (s *Source) logf(format string, args ...any) {
+// logf calls Logf, if it is set, with a formatted message about rom.
+func (s *Source) logf(rom, format string, args ...any) {
 	if s.Logf != nil {
-		s.Logf(format, args...)
+		s.Logf(rom, fmt.Sprintf(format, args...))
 	}
+}
+
+// errText is err's message without the "<rom>: " the handler's errors start
+// with, since Logf already has the ROM.
+func errText(rom string, err error) string {
+	return strings.TrimPrefix(err.Error(), rom+": ")
 }
 
 // degrees formats raw millidegrees for a log line, as the kernel's t= does.
@@ -144,8 +155,7 @@ func (s *Source) readChecked(ctx context.Context, rom string) reading.Reading {
 		if err == nil {
 			r.Code, r.MilliC = reading.OK, &mc
 			if mc == raw85 {
-				s.logf("read %s attempt %d/%d: %s, reading once more to check", rom, r.Attempts, attempts, degrees(mc))
-				s.recheck85(ctx, &r)
+				s.recheck85(ctx, &r, attempts)
 			}
 			return finish()
 		}
@@ -154,25 +164,34 @@ func (s *Source) readChecked(ctx context.Context, rom string) reading.Reading {
 			// Not retried, so not logged: the sweep's fault line names it.
 			break
 		}
-		s.logf("read %s attempt %d/%d: %s (%v)", rom, r.Attempts, attempts, r.Code, err)
+		s.logf(rom, "attempt %d/%d: %s (%s)", r.Attempts, attempts, r.Code, errText(rom, err))
 	}
 	return finish()
 }
 
-func (s *Source) recheck85(ctx context.Context, r *reading.Reading) {
-	if ctx.Err() == nil {
-		r.Attempts++
-		mc, err := s.readOnce(r.ROM)
-		switch {
-		case err == nil && mc != raw85:
-			s.logf("read %s extra read: %s, keeping it", r.ROM, degrees(mc))
-			r.MilliC = &mc
-			return
-		case err == nil:
-			s.logf("read %s extra read: %s again, flagged %s", r.ROM, degrees(mc), reading.Suspect85)
-		default:
-			s.logf("read %s extra read failed (%s: %v), keeping %s flagged %s", r.ROM, codeFor(err), err, degrees(raw85), reading.Suspect85)
-		}
+// recheck85 is the extra read an accepted 85.000 °C gets. r.Attempts is the
+// attempt that read it, out of attempts, for the log.
+//
+// Every log line that promises the extra read is followed by its outcome,
+// and a shutdown that skips it says so on the same line (G32).
+func (s *Source) recheck85(ctx context.Context, r *reading.Reading, attempts int) {
+	if ctx.Err() != nil {
+		s.logf(r.ROM, "attempt %d/%d: %s, extra read skipped (cancelled), flagged %s", r.Attempts, attempts, degrees(raw85), reading.Suspect85)
+		r.Suspect = reading.Suspect85
+		return
+	}
+	s.logf(r.ROM, "attempt %d/%d: %s, reading once more to check", r.Attempts, attempts, degrees(raw85))
+	r.Attempts++
+	mc, err := s.readOnce(r.ROM)
+	switch {
+	case err == nil && mc != raw85:
+		s.logf(r.ROM, "extra read: %s, keeping it", degrees(mc))
+		r.MilliC = &mc
+		return
+	case err == nil:
+		s.logf(r.ROM, "extra read: %s again, flagged %s", degrees(mc), reading.Suspect85)
+	default:
+		s.logf(r.ROM, "extra read failed (%s: %s), keeping %s flagged %s", codeFor(err), errText(r.ROM, err), degrees(raw85), reading.Suspect85)
 	}
 	r.Suspect = reading.Suspect85
 }

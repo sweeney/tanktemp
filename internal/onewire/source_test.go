@@ -399,20 +399,25 @@ func TestNewSource(t *testing.T) {
 	}
 }
 
-// logLines collects what a Source logs through Logf. Buses are read in
-// parallel, so it takes a lock.
+// logLines collects what a Source logs through Logf, as "rom: msg". Buses
+// are read in parallel, so it takes a lock.
 type logLines struct {
 	mu    sync.Mutex
 	lines []string
 }
 
-func (l *logLines) logf(format string, args ...any) {
+func (l *logLines) logf(rom, msg string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.lines = append(l.lines, fmt.Sprintf(format, args...))
+	l.lines = append(l.lines, rom+": "+msg)
 }
 
 func readLogged(t *testing.T, f fs.FS, attempts int) (reading.Reading, []string) {
+	t.Helper()
+	return readLoggedCtx(t, context.Background(), f, attempts)
+}
+
+func readLoggedCtx(t *testing.T, ctx context.Context, f fs.FS, attempts int) (reading.Reading, []string) {
 	t.Helper()
 	var l logLines
 	src := &Source{FS: f, Attempts: attempts, Logf: l.logf}
@@ -420,47 +425,66 @@ func readLogged(t *testing.T, f fs.FS, attempts int) (reading.Reading, []string)
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := src.Read(context.Background(), top, []string{rom1})[rom1]
+	r := src.Read(ctx, top, []string{rom1})[rom1]
 	return r, l.lines
 }
 
 // Issue #2: with verbose on, a retried read says which attempt failed and
 // why. Today that detail is lost: only the final outcome reaches the fault
 // line, and a read that recovers on its second attempt leaves no trace.
+//
+// The ROM is Logf's own argument, so the caller can name the probe by its
+// tank and position (onewire doesn't know the config), and the message
+// doesn't repeat the ROM that the handler's errors start with (review on
+// #3).
 func TestRetriesAreLogged(t *testing.T) {
+	r := rom1 + ": "
 	tests := []struct {
 		name   string
 		bodies []string
-		want   []string // substrings, one per line, in order
+		want   []string // exact lines, "rom: msg", in order
 	}{
 		{"good first time: nothing", []string{t18812}, nil},
 		{"crc, then good: the failed attempt", []string{crcNo, t18812},
-			[]string{"read " + rom1 + " attempt 1/3: crc"}},
+			[]string{r + "attempt 1/3: crc (scratchpad CRC mismatch)"}},
 		{"bus low every time: each attempt", []string{busLowB},
-			[]string{"attempt 1/3: bus_low", "attempt 2/3: bus_low", "attempt 3/3: bus_low"}},
+			[]string{r + "attempt 1/3: bus_low (data line held low (all-zero scratchpad))",
+				r + "attempt 2/3: bus_low (data line held low (all-zero scratchpad))",
+				r + "attempt 3/3: bus_low (data line held low (all-zero scratchpad))"}},
 		{"power-on reset, then good", []string{por, t18812},
-			[]string{"attempt 1/3: power_on_reset"}},
+			[]string{r + "attempt 1/3: power_on_reset (power-on reset value (85 °C), not a measurement)"}},
 		// The extra read for 85 °C is a retry too (GUESSES G2), so it's
 		// logged with its outcome.
 		{"85 then a different value", []string{real85, t60000},
-			[]string{"attempt 1/3: 85.000 °C, reading once more to check", "extra read: 60.000 °C, keeping it"}},
+			[]string{r + "attempt 1/3: 85.000 °C, reading once more to check", r + "extra read: 60.000 °C, keeping it"}},
 		{"85 twice", []string{real85, real85},
-			[]string{"attempt 1/3: 85.000 °C, reading once more to check", "extra read: 85.000 °C again, flagged 85c_unverified"}},
+			[]string{r + "attempt 1/3: 85.000 °C, reading once more to check", r + "extra read: 85.000 °C again, flagged 85c_unverified"}},
 		{"85 then a failure", []string{real85, crcNo},
-			[]string{"attempt 1/3: 85.000 °C, reading once more to check", "extra read failed (crc: " + rom1 + ": scratchpad CRC mismatch), keeping 85.000 °C flagged 85c_unverified"}},
+			[]string{r + "attempt 1/3: 85.000 °C, reading once more to check", r + "extra read failed (crc: scratchpad CRC mismatch), keeping 85.000 °C flagged 85c_unverified"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, got := readLogged(t, &seqFS{base: oneSensor(), bodies: tt.bodies}, 3)
-			if len(got) != len(tt.want) {
-				t.Fatalf("logged %d lines, want %d:\n%s", len(got), len(tt.want), strings.Join(got, "\n"))
-			}
-			for i, w := range tt.want {
-				if !strings.Contains(got[i], w) {
-					t.Errorf("line %d = %q, want it to contain %q", i, got[i], w)
-				}
+			if strings.Join(got, "\n") != strings.Join(tt.want, "\n") {
+				t.Errorf("logged:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(tt.want, "\n"))
 			}
 		})
+	}
+}
+
+// Every "reading once more" has an outcome (G32). A shutdown that lands
+// after the 85 °C read but before its extra read says so, rather than
+// promising a recheck that never comes (review on #3).
+func TestCancelledBefore85RecheckIsLogged(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	f := &seqFS{base: oneSensor(), bodies: []string{real85, t60000}, onRead: func(int) { cancel() }}
+	rd, got := readLoggedCtx(t, ctx, f, 3)
+	want := rom1 + ": attempt 1/3: 85.000 °C, extra read skipped (cancelled), flagged 85c_unverified"
+	if len(got) != 1 || got[0] != want {
+		t.Errorf("logged %q, want [%q]", got, want)
+	}
+	if rd.Suspect != reading.Suspect85 || f.n != 1 {
+		t.Errorf("suspect %q after %d reads; want flagged after 1 (behaviour unchanged)", rd.Suspect, f.n)
 	}
 }
 

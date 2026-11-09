@@ -111,6 +111,10 @@ func startRigHTTP(t *testing.T, src *rt.Fake, cfg config.Config, ln net.Listener
 		Version:       "abc1234",
 		Listener:      ln,
 	}
+	if cfg.Log.Verbose {
+		// As serve does: the verbose logger is the normal one when it's on.
+		d.Verbose = d.Logger
+	}
 	go func() { r.done <- run(context.Background(), cfg, d) }()
 	return r
 }
@@ -433,5 +437,77 @@ func TestAPIStatusReportsTheConfiguredVerbose(t *testing.T) {
 		}
 		r.sig <- syscall.SIGTERM
 		<-r.done
+	}
+}
+
+// run writes verbose lines to deps.Verbose, the one logger serve builds from
+// log.verbose (review on #3), and everything else to deps.Logger.
+func TestVerboseLinesGoToTheVerboseLogger(t *testing.T) {
+	src := rt.NewFake(map[string][]string{"w1_bus_master1": {top}}). // bottom unplugged
+										Script(top, rt.OK(61375))
+	src.Infos = map[string]reading.Info{top: {ExtPower: rt.Bool(true), Resolution: rt.Int(12)}}
+	var normal, verbose syncBuf
+	pub := &mqttpubtest.Fake{}
+	sig := make(chan os.Signal, 1)
+	done := make(chan error, 1)
+	d := deps{
+		Source: src, Pub: pub,
+		Synced: func() bool { return true }, Now: func() time.Time { return t0 },
+		Tick: make(chan time.Time), HeartbeatTick: make(chan time.Time), Signals: sig,
+		Logger: log.New(&normal, "", 0), Verbose: log.New(&verbose, "", 0),
+	}
+	go func() { done <- run(context.Background(), verboseConfig(t), d) }()
+	deadline := time.Now().Add(3 * time.Second)
+	for len(pub.Snapshot()) < 2 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	sig <- syscall.SIGTERM
+	<-done
+	if got := sweepLines(verbose.String()); len(got) != 1 || !strings.Contains(got[0], " 1/2 ") || strings.HasPrefix(got[0], "sweep:") {
+		t.Errorf("verbose logger got %q, want the one sweep line", got)
+	}
+	if got := sweepLines(normal.String()); len(got) != 1 || !strings.HasPrefix(got[0], "sweep: ") {
+		t.Errorf("normal logger got %q, want only the fault line", got)
+	}
+}
+
+// A nil deps.Verbose is quiet, not a crash: deps.Verbose is the switch run
+// obeys, and serve is what builds it from log.verbose.
+func TestNilVerboseLoggerIsQuiet(t *testing.T) {
+	var logs syncBuf
+	pub := &mqttpubtest.Fake{}
+	sig := make(chan os.Signal, 1)
+	done := make(chan error, 1)
+	d := deps{
+		Source: cleanSource(), Pub: pub,
+		Synced: func() bool { return true }, Now: func() time.Time { return t0 },
+		Tick: make(chan time.Time), HeartbeatTick: make(chan time.Time), Signals: sig,
+		Logger: log.New(&logs, "", 0), // Verbose: nil
+	}
+	go func() { done <- run(context.Background(), testConfig(t), d) }()
+	deadline := time.Now().Add(3 * time.Second)
+	for len(pub.Snapshot()) < 2 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	sig <- syscall.SIGTERM
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if got := sweepLines(logs.String()); len(got) != 0 {
+		t.Errorf("logged %q with no verbose logger", got)
+	}
+}
+
+// retryLogger names each retried read by tank/position as well as ROM, so
+// the journal reads without the config beside it (review on #3).
+func TestRetryLoggerNamesTheProbe(t *testing.T) {
+	var b strings.Builder
+	logf := retryLogger(log.New(&b, "", 0), testConfig(t).Tanks)
+	logf(bottom, "attempt 1/3: crc (scratchpad CRC mismatch)")
+	logf("28-00000000dead", "attempt 2/3: read_error (x)") // not in config: ROM only
+	want := "read hot-water-cylinder/bottom " + bottom + " attempt 1/3: crc (scratchpad CRC mismatch)\n" +
+		"read 28-00000000dead attempt 2/3: read_error (x)\n"
+	if b.String() != want {
+		t.Errorf("logged:\n%s\nwant:\n%s", b.String(), want)
 	}
 }
