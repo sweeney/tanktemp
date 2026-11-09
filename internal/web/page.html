@@ -126,37 +126,51 @@ function render(s) {
     ? "last sweep " + new Date(newest).toLocaleTimeString()
     : "waiting for the first sweep";
   cadence = s.sweep;
+  const hasNext = cadence && cadence.next_in_s !== null && cadence.next_in_s !== undefined;
+  dueAt = hasNext ? performance.now() + cadence.next_in_s * 1000 : null;
   showCadence();
-  if (cadence && cadence.next_due) pollAfter(new Date(cadence.next_due));
+  if (hasNext) schedulePoll(cadence.next_in_s);
 }
 
-// The adaptive cadence (issue #1): its mode, and a countdown to next_due.
-// next_due is an absolute time, so the countdown is worked out here, every
-// second, and stays right between polls.
+// The adaptive cadence (issue #1): its mode, and a countdown to the next
+// sweep. next_in_s is the Pi's own "next due in", so the countdown runs from
+// when the response arrived, on the browser's elapsed time only: a browser
+// whose clock is off by seconds still counts down right (review on #4).
 let cadence = null;
+let dueAt = null; // performance.now() when the next sweep is due
 function showCadence() {
   const e = document.getElementById("cadence");
   if (!cadence) { e.textContent = ""; return; }
   let text = cadence.adaptive
     ? "sweeping " + (cadence.mode === "slow" ? "slow" : "fast (" + cadence.mode + ")") + ", every " + cadence.interval_s.toFixed(1) + " s"
     : "every " + cadence.interval_s.toFixed(0) + " s";
-  if (cadence.next_due) {
-    const left = Math.round((new Date(cadence.next_due) - Date.now()) / 1000);
+  if (dueAt !== null) {
+    const left = Math.round((dueAt - performance.now()) / 1000);
     text += left > 0 ? " · next in " + left + " s" : " · due now";
   }
   e.textContent = text;
 }
 setInterval(showCadence, 1000);
 
-// pollAfter fetches again just after the next sweep is due (it's to the
-// second, and a sweep takes a few seconds), so the page follows a fast
-// cadence instead of waiting for its regular poll, and the countdown
-// doesn't sit at "due now" for up to an interval. Only one is ever
-// pending; the regular poll below stays as the fallback.
+// schedulePoll fetches again just after the next sweep is due (2 s after:
+// a sweep takes a few seconds), so the page follows a fast cadence instead
+// of waiting for its regular poll. While the next sweep is overdue (one is
+// running, or hung on a bus), it backs off, 2 s, 4 s, … up to the regular
+// interval, rather than polling every second for as long as it lasts.
+// Only one is ever pending; the regular poll stays as the fallback.
 let pending = null;
-function pollAfter(due) {
+let overdueBackoff = 1000;
+function schedulePoll(nextInS) {
   clearTimeout(pending);
-  pending = setTimeout(poll, Math.max(1000, due - Date.now() + 2000));
+  let delay;
+  if (nextInS > 0) {
+    overdueBackoff = 1000;
+    delay = nextInS * 1000 + 2000;
+  } else {
+    overdueBackoff = Math.min(interval, overdueBackoff * 2);
+    delay = overdueBackoff;
+  }
+  pending = setTimeout(poll, delay);
 }
 
 async function poll() {

@@ -162,7 +162,8 @@ type sweepCadence struct {
 	Adaptive    bool         `json:"adaptive"`     // sweep.fast is configured
 	Mode        string       `json:"mode"`         // slow | hold | decay
 	IntervalS   float64      `json:"interval_s"`   // the gap from the last sweep to the next
-	NextDue     *string      `json:"next_due"`     // null until the scheduler has said
+	NextDue     *string      `json:"next_due"`     // null until the first sweep has finished
+	NextInS     *float64     `json:"next_in_s"`    // next_due − the Pi's now, to 0.1 s; negative while overdue (a sweep running)
 	LastTrigger *lastTrigger `json:"last_trigger"` // null until the first trigger
 	FastEntries int          `json:"fast_entries"` // times it went fast since start
 }
@@ -174,13 +175,18 @@ type lastTrigger struct {
 	CPerMin float64 `json:"c_per_min"` // signed, to 0.01: negative is falling
 }
 
-func cadenceBlock(c cadence.Status, nextDue time.Time) sweepCadence {
+// cadenceBlock builds the block at now, the Pi's clock. next_in_s is
+// relative so the page never compares its own clock with the Pi's (a
+// phone a few seconds off would count down wrong); next_due stays as the
+// absolute time for anything that logs it.
+func cadenceBlock(c cadence.Status, nextDue, now time.Time) sweepCadence {
 	out := sweepCadence{
 		Adaptive: c.Enabled, Mode: string(c.Mode), IntervalS: c.Interval.Seconds(), FastEntries: c.FastEntries,
 	}
 	if !nextDue.IsZero() {
 		d := nextDue.UTC().Format(time.RFC3339)
-		out.NextDue = &d
+		in := math.Round(nextDue.Sub(now).Seconds()*10) / 10
+		out.NextDue, out.NextInS = &d, &in
 	}
 	if t := c.LastTrigger; t != nil {
 		out.LastTrigger = &lastTrigger{
@@ -205,7 +211,7 @@ func (s *Server) apiStatus(w http.ResponseWriter, _ *http.Request) {
 	out.Verbose = snap.Verbose
 	out.Tanks = []json.RawMessage{}
 	out.StartupProblems = problems(snap)
-	out.Sweep = cadenceBlock(snap.Cadence, snap.NextDue)
+	out.Sweep = cadenceBlock(snap.Cadence, snap.NextDue, now)
 	if snap.Last != nil {
 		for _, t := range snap.Last.Tanks {
 			out.Tanks = append(out.Tanks, payload.StateDiagnostic(*snap.Last, t))
