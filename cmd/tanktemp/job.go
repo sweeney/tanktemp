@@ -97,18 +97,18 @@ func (j *sweepJob) Interval() time.Duration { return j.interval }
 // before is finishing (common lifecycle's design, decision 6). It asks the
 // Schedule for the next due time from lifecycle's start for the sweep just
 // done and the interval that sweep decided, counts any due times an overrun
-// passed (onSkip: skipped_ticks), and tells the tracker when the next is
+// passed (onSkip, with the count: skipped_ticks), and tells the tracker when the next is
 // due (onDue: /api/status's next_due).
 //
 // now is lifecycle's clock, deps.Now: in production time.Now, so started,
 // now and every due time carry the monotonic reading, and a wall-clock step
 // can't move the schedule.
 func nextSweep(s *cadence.Schedule, now func() time.Time, interval func() time.Duration,
-	onDue func(time.Time), onSkip func()) func(time.Time, error) time.Time {
+	onDue func(time.Time), onSkip func(n int)) func(time.Time, error) time.Time {
 	return func(started time.Time, _ error) time.Time {
 		due, skipped := s.Next(started, now(), interval())
-		for range skipped {
-			onSkip()
+		if skipped > 0 {
+			onSkip(skipped) // one call with the count, however long the stall
 		}
 		onDue(due)
 		return due

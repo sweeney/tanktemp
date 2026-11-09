@@ -382,7 +382,7 @@ func run(ctx context.Context, cfg config.Config, d deps) error {
 	// of its own; then a tick during a sweep is skipped, as it always was.
 	var next func(time.Time, error) time.Time
 	if d.Tick == nil {
-		next = nextSweep(&cadence.Schedule{}, d.Now, job.Interval, tracker.SetNextDue, tracker.SkippedTick)
+		next = nextSweep(&cadence.Schedule{}, d.Now, job.Interval, tracker.SetNextDue, tracker.SkippedTicks)
 	}
 
 	return lifecycle.Run(ctx, lifecycle.Config{

@@ -56,3 +56,15 @@ func TestNewDefaultsTheCadenceToSlow(t *testing.T) {
 		t.Errorf("default cadence = %+v, want slow at %v, not adaptive", got, interval)
 	}
 }
+
+// SkippedTicks adds an overrun's whole count at once (review on #4), so a
+// long stall costs one lock, not one per missed tick.
+func TestSkippedTicksAddsTheCount(t *testing.T) {
+	tr := newTracker(true)
+	tr.SkippedTick()
+	tr.SkippedTicks(43200)
+	tr.SkippedTicks(0)
+	if got := tr.Snapshot().SkippedTicks; got != 43201 {
+		t.Errorf("SkippedTicks = %d, want 43201", got)
+	}
+}

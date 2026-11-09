@@ -111,6 +111,14 @@ func copyCadence(c cadence.Status) cadence.Status {
 	return c
 }
 
+// SkippedTicks counts n due times an overrun passed (the adaptive
+// cadence's Schedule computes how many, issue #1), in one step.
+func (t *Tracker) SkippedTicks(n int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.skipped += n
+}
+
 // SkippedTick counts a tick that arrived while a sweep was still running.
 func (t *Tracker) SkippedTick() {
 	t.mu.Lock()

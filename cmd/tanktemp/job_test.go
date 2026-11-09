@@ -144,9 +144,9 @@ func TestNextSweep(t *testing.T) {
 	now := t0
 	interval := 30 * time.Second
 	var dues []time.Time
-	skips := 0
+	skips, calls := 0, 0
 	next := nextSweep(&cadence.Schedule{}, func() time.Time { return now }, func() time.Duration { return interval },
-		func(due time.Time) { dues = append(dues, due) }, func() { skips++ })
+		func(due time.Time) { dues = append(dues, due) }, func(n int) { calls++; skips += n })
 
 	now = t0.Add(4 * time.Second)
 	if due := next(t0, nil); !due.Equal(t0.Add(30 * time.Second)) {
@@ -159,5 +159,9 @@ func TestNextSweep(t *testing.T) {
 	}
 	if len(dues) != 2 || !dues[1].Equal(t0.Add(60*time.Second)) || skips != 2 {
 		t.Errorf("tracker told due %v and %d skips; want 2 dues ending +60s, 2 skips", dues, skips)
+	}
+	// One call with the count, however long the stall (review on #4).
+	if calls != 1 {
+		t.Errorf("onSkip called %d times, want once, with the count", calls)
 	}
 }
