@@ -169,7 +169,8 @@ function schedulePoll(nextInS) {
 
 // pollDelay: begin
 // pollDelay is the polling rule, pure so it can be tested on its own
-// (internal/web/pagejs_test.go runs this block under node). Given the Pi's
+// (internal/web/pagejs_test.go runs it under node, from the page as
+// served, where html/template has stripped these comments). Given the Pi's
 // next_in_s, the current back-off and the regular interval (both ms), it
 // returns [the delay before the next poll, the new back-off].
 function pollDelay(nextInS, backoff, interval) {
