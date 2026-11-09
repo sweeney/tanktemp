@@ -361,7 +361,8 @@ func run(ctx context.Context, cfg config.Config, d deps) error {
 	// The ticks. In production the scheduler makes them, one per sweep,
 	// each as far after the last as the cadence decided; every Work reports
 	// to it (below), and lifecycle's OnSkip tells it of a tick lifecycle
-	// dropped. A test's deps.Tick replaces it with ticks of its own.
+	// dropped, which it resends. A test's deps.Tick replaces it with ticks
+	// of its own.
 	tick := d.Tick
 	reportSweep := func(time.Duration) {} // the scheduler's Report, when there is one
 	onSkip := tracker.SkippedTick
@@ -379,7 +380,9 @@ func run(ctx context.Context, cfg config.Config, d deps) error {
 		// goroutine.
 		go sched.run(d.Now())
 		tick, reportSweep = sched.Tick(), sched.Report
-		onSkip = func() { tracker.SkippedTick(); sched.Skipped() }
+		// A tick lifecycle drops here is resent, not lost, so it isn't a
+		// skipped tick; the scheduler counts the ones an overrun misses.
+		onSkip = sched.Skipped
 	}
 
 	return lifecycle.Run(ctx, lifecycle.Config{

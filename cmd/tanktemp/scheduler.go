@@ -22,14 +22,20 @@ import (
 // tick's outcome. Every tick has exactly one:
 //
 //   - lifecycle started a sweep on it, which will Report; or
-//   - lifecycle dropped it (Skipped, from lifecycle's OnSkip). That can
-//     only happen in the instant between a sweep's Work returning and
-//     lifecycle noticing, when the next tick is due almost at once (a
-//     sweep that took about its whole interval).
+//   - lifecycle dropped it (Skipped, from lifecycle's OnSkip), because it
+//     hadn't yet seen the last sweep finish. Report runs in Work's defer,
+//     a moment before lifecycle learns Work has returned, so a tick due in
+//     that moment is dropped although nothing is running. The scheduler
+//     sends the same tick again at once: it isn't an overrun (NextDue
+//     handles those), so it's neither waited on nor counted as skipped.
+//     The resend can only be dropped again until lifecycle reads the
+//     finished sweep, which it is already about to.
 //
-// Waiting for that outcome is what stops the schedule stalling: without
-// Skipped, a dropped tick would leave the scheduler waiting for a Report
-// that never comes, and tanktemp would never sweep again.
+// Waiting for that outcome is what stops the schedule stalling or
+// drifting: without Skipped, a dropped tick would leave the scheduler
+// waiting for a Report that never comes, and tanktemp would never sweep
+// again. In real time the window is microseconds against intervals of
+// seconds; it was found in the virtual-clock tests, where time is free.
 //
 // # Time
 //
@@ -46,7 +52,7 @@ type scheduler struct {
 	after func(time.Duration) <-chan time.Time
 
 	onDue  func(time.Time) // the tracker's SetNextDue, for /api/status
-	onSkip func()          // the tracker's SkippedTick, for ticks an overrun missed
+	onSkip func()          // the tracker's SkippedTick, for ticks an overrun missed (NextDue)
 
 	tick    chan time.Time     // lifecycle's Tick
 	reports chan time.Duration // a sweep finished; the interval it decided
@@ -83,8 +89,8 @@ func (s *scheduler) Report(interval time.Duration) {
 	}
 }
 
-// Skipped says lifecycle dropped the last tick (lifecycle's OnSkip). It never
-// blocks once the scheduler has stopped.
+// Skipped says lifecycle dropped the last tick (lifecycle's OnSkip); the
+// scheduler sends it again. It never blocks once the scheduler has stopped.
 func (s *scheduler) Skipped() {
 	select {
 	case s.skips <- struct{}{}:
@@ -115,19 +121,22 @@ func (s *scheduler) run(start time.Time) {
 			return
 		case <-s.after(due.Sub(s.now())):
 		}
-		select {
-		case <-s.done:
-			return
-		case s.tick <- due:
+		// Send the tick until lifecycle starts a sweep on it: its outcome is
+		// either that sweep's report, or a drop, and then it goes again.
+		for taken := false; !taken; {
+			select {
+			case <-s.done:
+				return
+			case s.tick <- due:
+			}
+			select {
+			case <-s.done:
+				return
+			case interval = <-s.reports:
+				taken = true
+			case <-s.skips:
+			}
 		}
 		anchor = due
-		// The tick's outcome: a sweep that reports a new interval, or a drop
-		// that keeps the old one.
-		select {
-		case <-s.done:
-			return
-		case interval = <-s.reports:
-		case <-s.skips:
-		}
 	}
 }

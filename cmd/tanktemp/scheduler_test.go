@@ -149,17 +149,36 @@ func TestSchedulerSkipsTicksAnOverrunMissed(t *testing.T) {
 	}
 }
 
-// A tick lifecycle dropped (it arrived before lifecycle had seen the last
-// sweep finish) has no sweep to report on it. Skipped says so, and the
-// next tick follows one interval later, so the schedule never stalls.
-func TestSchedulerCarriesOnAfterADroppedTick(t *testing.T) {
+// A tick lifecycle dropped can only have arrived in the instant between
+// the last sweep reporting and lifecycle seeing it finish, since nothing
+// ticks before that report. Nothing was running, so the same tick is sent
+// again at once: no wait, no new due time, and not a skipped tick. (Under
+// load this race happened for real in the virtual-clock run test, when a
+// dropped tick cost a whole interval and the schedule drifted.)
+func TestSchedulerResendsADroppedTick(t *testing.T) {
 	clock := newVirtualClock(t0, 0)
 	r := startScheduler(t, clock)
 	r.s.Report(10 * time.Second)
-	r.nextTick(t) // +10s: dropped by lifecycle
+	first := r.nextTick(t) // +10s: dropped by lifecycle, twice
 	r.s.Skipped()
-	if at := r.nextTick(t); !at.Equal(t0.Add(20 * time.Second)) {
-		t.Fatalf("after a dropped tick, the next is at +%v, want +20s", at.Sub(t0))
+	if again := r.nextTick(t); !again.Equal(first) {
+		t.Fatalf("after a drop, the next tick is at +%v, want the same tick (+%v) again", again.Sub(t0), first.Sub(t0))
+	}
+	r.s.Skipped()
+	if again := r.nextTick(t); !again.Equal(first) {
+		t.Fatalf("after a second drop, the next tick is at +%v, want +%v again", again.Sub(t0), first.Sub(t0))
+	}
+	if waits := clock.Waits(); len(waits) != 1 {
+		t.Errorf("waited %v: a resend must not wait", waits)
+	}
+	if dues, skips := r.recorded(); len(dues) != 1 || skips != 0 {
+		t.Errorf("told the tracker due %v and %d skips; a resend is neither", dues, skips)
+	}
+	// Taken at last: the sweep reports, and the schedule carries on from
+	// that tick.
+	r.s.Report(10 * time.Second)
+	if at := r.nextTick(t); !at.Equal(first.Add(10 * time.Second)) {
+		t.Errorf("then the next tick is at +%v, want +%v", at.Sub(t0), first.Add(10*time.Second).Sub(t0))
 	}
 }
 
