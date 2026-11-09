@@ -32,12 +32,18 @@ func NextDue(anchor time.Time, interval time.Duration, now time.Time) (due time.
 		return now, 0
 	}
 	due = anchor.Add(interval)
-	if !due.Before(now) {
-		return due, 0
+	if due.After(now) {
+		return due, 0 // the usual case: due in the future
 	}
+	// due is now or past: the first due time at or after now is n
+	// intervals on, n = ⌈late/interval⌉. That's the one rule for the
+	// instant itself too: late = 0 gives n = 0, due stands, nothing is
+	// skipped (review on #4: one guard, not two). It's the remainder test,
+	// not (late+interval-1)/interval, so a late near the largest Duration
+	// can't overflow.
 	late := now.Sub(due)
-	n := late / interval // whole intervals passed; one more unless it lands exactly on now
-	if n*interval < late {
+	n := late / interval
+	if late%interval != 0 {
 		n++
 	}
 	return due.Add(n * interval), int(n)
