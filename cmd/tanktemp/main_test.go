@@ -76,6 +76,12 @@ var t0 = time.Date(2026, 11, 2, 21, 0, 0, 0, time.UTC)
 
 func startRig(t *testing.T, src *rt.Fake) *rig {
 	t.Helper()
+	return startRigWith(t, src, testConfig(t))
+}
+
+// startRigWith runs with cfg, so a test can turn log.verbose on.
+func startRigWith(t *testing.T, src *rt.Fake, cfg config.Config) *rig {
+	t.Helper()
 	r := &rig{
 		pub:  &mqttpubtest.Fake{},
 		src:  src,
@@ -96,7 +102,7 @@ func startRig(t *testing.T, src *rt.Fake) *rig {
 		Logger:        log.New(r.logs, "", 0),
 		Version:       "abc1234",
 	}
-	go func() { r.done <- run(context.Background(), testConfig(t), d) }()
+	go func() { r.done <- run(context.Background(), cfg, d) }()
 	return r
 }
 
@@ -245,7 +251,10 @@ func TestCheckConfig(t *testing.T) {
 	_ = os.WriteFile(good, []byte("mqtt: {broker: tcp://b:1883}\ntanks:\n  - device_id: t\n    sensors:\n      - {rom: 28-0000117287e6, position: top, order: 1}\n"), 0o644)
 	_ = os.WriteFile(bad, []byte("tanks: []\n"), 0o644)
 	var out strings.Builder
-	if code := realMain([]string{"-config", good, "-check-config"}, &out); code != 0 || !strings.Contains(out.String(), "1 tank, 1 sensor, publishing to energy/hot_water on tcp://b:1883") {
+	// deploy/lib.sh's parse_check_config reads the prefix and broker from
+	// the end of this line, so it must still end with them.
+	if code := realMain([]string{"-config", good, "-check-config"}, &out); code != 0 || !strings.Contains(out.String(), ": ok: 1 tank, 1 sensor, ") ||
+		!strings.HasSuffix(out.String(), ", publishing to energy/hot_water on tcp://b:1883\n") {
 		t.Errorf("good: code %d, out %q", code, out.String())
 	}
 	out.Reset()
@@ -259,5 +268,132 @@ func TestCheckConfig(t *testing.T) {
 	out.Reset()
 	if code := realMain([]string{"-version"}, &out); code != 0 || strings.TrimSpace(out.String()) != version {
 		t.Errorf("-version: %d %q", code, out.String())
+	}
+}
+
+// verboseConfig is testConfig with log.verbose on.
+func verboseConfig(t *testing.T) config.Config {
+	t.Helper()
+	c := testConfig(t)
+	c.Log.Verbose = true
+	return c
+}
+
+// sweepLines returns the log lines that report a sweep: the verbose line
+// ("sweep 4.0s …") and the fault line ("sweep: …").
+func sweepLines(logs string) []string {
+	var out []string
+	for _, l := range strings.Split(logs, "\n") {
+		if strings.HasPrefix(l, "sweep") {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// cleanSource is both probes reading well, on two buses.
+func cleanSource() *rt.Fake {
+	src := rt.NewFake(map[string][]string{"w1_bus_master1": {top}, "w1_bus_master2": {bottom}}).
+		Script(top, rt.OK(61375)).
+		Script(bottom, rt.OK(12062))
+	src.Infos = map[string]reading.Info{
+		top:    {ExtPower: rt.Bool(true), Resolution: rt.Int(12)},
+		bottom: {ExtPower: rt.Bool(true), Resolution: rt.Int(12)},
+	}
+	return src
+}
+
+// Issue #2, normal running: a clean sweep says nothing at all.
+func TestVerboseOffCleanSweepLogsNothing(t *testing.T) {
+	r := startRig(t, cleanSource())
+	r.waitFor(t, 3) // STARTUP, the first state, the ready heartbeat
+	r.tick <- t0
+	r.waitFor(t, 4) // a second sweep
+	r.sig <- syscall.SIGTERM
+	if err := <-r.done; err != nil {
+		t.Fatal(err)
+	}
+	if got := sweepLines(r.logs.String()); len(got) != 0 {
+		t.Errorf("verbose off, clean sweeps logged %q", got)
+	}
+}
+
+// Issue #2, at the bench: one line per sweep, every probe bottom to top.
+func TestVerboseOnLogsEverySweep(t *testing.T) {
+	r := startRigWith(t, cleanSource(), verboseConfig(t))
+	r.waitFor(t, 3)
+	r.tick <- t0
+	r.waitFor(t, 4)
+	r.sig <- syscall.SIGTERM
+	if err := <-r.done; err != nil {
+		t.Fatal(err)
+	}
+	// The fake clock doesn't move, so every sweep takes 0.0s. bottom is
+	// 12.0625, top is 61.375 - 0.19.
+	want := "sweep 0.0s 2/2 hot-water-cylinder 12.1 61.2"
+	got := sweepLines(r.logs.String())
+	if len(got) != 2 || got[0] != want || got[1] != want {
+		t.Errorf("verbose on: sweep lines = %q, want two of %q", got, want)
+	}
+}
+
+// A failed probe is null in its place, and the fault line is still there,
+// after the verbose line.
+func TestVerboseOnFaultySweepShowsNullAndTheFault(t *testing.T) {
+	src := rt.NewFake(map[string][]string{"w1_bus_master1": {top}}). // bottom unplugged
+										Script(top, rt.OK(61375))
+	src.Infos = map[string]reading.Info{top: {ExtPower: rt.Bool(true), Resolution: rt.Int(12)}}
+	r := startRigWith(t, src, verboseConfig(t))
+	r.waitFor(t, 2)
+	r.sig <- syscall.SIGTERM
+	<-r.done
+	want := []string{
+		"sweep 0.0s 1/2 hot-water-cylinder null 61.2",
+		"sweep: 1 ok, 1 failed, 0s: not_present: hot-water-cylinder/bottom",
+	}
+	if got := sweepLines(r.logs.String()); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("sweep lines = %q\nwant %q", got, want)
+	}
+}
+
+// Verbose must not change behaviour: the same sweeps publish the same
+// messages either way.
+func TestVerboseDoesNotChangeWhatIsPublished(t *testing.T) {
+	publish := func(cfg config.Config) []mqttpub.Message {
+		r := startRigWith(t, cleanSource(), cfg)
+		r.waitFor(t, 3)
+		r.tick <- t0
+		r.waitFor(t, 4)
+		r.sig <- syscall.SIGTERM
+		<-r.done
+		return r.pub.Snapshot()
+	}
+	quiet, verbose := publish(testConfig(t)), publish(verboseConfig(t))
+	if len(quiet) != len(verbose) {
+		t.Fatalf("published %d messages quiet, %d verbose", len(quiet), len(verbose))
+	}
+	for i := range quiet {
+		if quiet[i] != verbose[i] {
+			t.Errorf("message %d differs:\nquiet   %+v\nverbose %+v", i, quiet[i], verbose[i])
+		}
+	}
+}
+
+// -check-config shows the verbose switch, so it's seen before a deploy as
+// well as in /api/status after one (issue #2).
+func TestCheckConfigShowsVerbose(t *testing.T) {
+	dir := t.TempDir()
+	base := "mqtt: {broker: tcp://b:1883}\ntanks:\n  - device_id: t\n    sensors:\n      - {rom: 28-0000117287e6, position: top, order: 1}\n"
+	for _, tt := range []struct{ extra, want string }{
+		{"", "verbose log off"},
+		{"log: {verbose: false}\n", "verbose log off"},
+		{"log: {verbose: true}\n", "verbose log ON"},
+	} {
+		path := filepath.Join(dir, "c.yaml")
+		_ = os.WriteFile(path, []byte(base+tt.extra), 0o644)
+		var out strings.Builder
+		if code := realMain([]string{"-config", path, "-check-config"}, &out); code != 0 || !strings.Contains(out.String(), tt.want) {
+			t.Errorf("%q: code %d, out %q, want it to say %q", tt.extra, code, out.String(), tt.want)
+		}
 	}
 }

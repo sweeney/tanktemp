@@ -78,8 +78,15 @@ func realMain(args []string, out io.Writer) int {
 		for _, t := range cfg.Tanks {
 			n += len(t.Sensors)
 		}
-		fmt.Fprintf(out, "%s: ok: %d tank%s, %d sensor%s, publishing to %s on %s\n",
-			*path, len(cfg.Tanks), plural(len(cfg.Tanks)), n, plural(n), cfg.MQTT.TopicPrefix, cfg.MQTT.Broker)
+		// The verbose state sits before "publishing to": deploy/lib.sh's
+		// parse_check_config reads the prefix and broker from the end of
+		// this line. "ON" is in capitals because it's the one to notice.
+		verbose := "off"
+		if cfg.Log.Verbose {
+			verbose = "ON"
+		}
+		fmt.Fprintf(out, "%s: ok: %d tank%s, %d sensor%s, verbose log %s, publishing to %s on %s\n",
+			*path, len(cfg.Tanks), plural(len(cfg.Tanks)), n, plural(n), verbose, cfg.MQTT.TopicPrefix, cfg.MQTT.Broker)
 		return 0
 	}
 	if err := serve(cfg); err != nil {
@@ -182,6 +189,18 @@ type deps struct {
 	Version string
 }
 
+// verboseLogger is where the bench-only lines go (issue #2, log.verbose):
+// the normal logger when verbose is on, a discard writer when it is off.
+// Code that logs verbose detail just prints to it and never checks the
+// switch itself, so turning it on adds lines and changes nothing else.
+// Adaptive cadence (#1) will take the same logger for its mode changes.
+func verboseLogger(l *log.Logger, verbose bool) *log.Logger {
+	if verbose {
+		return l
+	}
+	return log.New(io.Discard, "", 0)
+}
+
 func eventName(k lifecycle.Kind) string {
 	switch k {
 	case lifecycle.Startup:
@@ -196,6 +215,7 @@ func eventName(k lifecycle.Kind) string {
 // each tank's state and the lifecycle, until a signal.
 func run(ctx context.Context, cfg config.Config, d deps) error {
 	start := d.Now()
+	vlog := verboseLogger(d.Logger, cfg.Log.Verbose)
 	var ids []string
 	for _, t := range cfg.Tanks {
 		ids = append(ids, t.DeviceID)
@@ -277,6 +297,10 @@ func run(ctx context.Context, cfg config.Config, d deps) error {
 				return err
 			}
 			tracker.RecordSweep(sw)
+			// Verbose: every sweep, one line, from the sweep already in hand.
+			// It goes before the fault line, so with verbose on a faulty
+			// sweep reads as its values, then what was wrong with them.
+			vlog.Print(sw.Line())
 			var errs []error
 			for _, t := range sw.Tanks {
 				if err := d.Pub.Publish(mqttpub.Message{
