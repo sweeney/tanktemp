@@ -74,15 +74,52 @@ interval
   every `interval`, and more often while probes change; `timestamp` stays
   authoritative, and staleness is still 3 × the slow interval
   (`docs/WIRE.md`, Cadence).
-- **`/api/status` shows it**, for tuning: `sweep.mode` (`slow`, `hold`,
-  `decay`), `interval_s`, `next_due`, `last_trigger` (probe and rate) and
-  `fast_entries`. The status page counts down to the next sweep. With
-  `log.verbose` on, every trigger and change of mode is logged (below).
-  `-check-config` says what the cadence is.
+- **`/api/status` shows it**, for tuning, in a `sweep` block: `adaptive`
+  (whether `sweep.fast` is set), `mode` (`slow`, `hold`, `decay`),
+  `interval_s`, `next_due` and `next_in_s` (from the Pi's own clock;
+  negative while a sweep is running), `last_trigger` (probe, ROM and
+  signed rate) and `fast_entries`. The status page counts down to the next
+  sweep, polls again just after it, and backs off while one is overdue.
+  With `log.verbose` on, every trigger and change of mode is logged
+  (below). `-check-config` says what the cadence is.
 
-Every key in `fast` has the default shown, so `fast: {}` turns it on. The
-trigger and hold are guesses from two days of recordings (GUESSES G38,
-G39); tune them from `/api/status`.
+Every key in `fast` has the default shown, so `fast: {}` turns it on. A
+`fast:` with nothing under it (every key commented out) is refused rather
+than read as "off": leave the block out for a fixed interval.
+
+### How it works
+
+- **`internal/cadence` decides; it's pure.** After each sweep,
+  `Cadence.Observe` compares every probe with the sweep before and returns
+  the interval to the next one. The interval is a function only of the
+  time since the last trigger, so the whole curve is table-tested with no
+  clock at all.
+- **It runs on the monotonic clock.** Rates and the curve use each sweep's
+  start as `common/lifecycle` hands it to the work (`time.Now`, monotonic).
+  The Pi has no real-time clock and NTP can step the wall clock at boot;
+  that step can't fake or hide a trigger. The published `timestamp` is
+  still the wall clock.
+- **lifecycle schedules it.** lifecycle's `Config.Next` hook (added for
+  this, `lifecycle/v0.2.0`) asks for the next sweep's time only once it has
+  seen the last one finish, so a sweep can never be due while one is still
+  running. `cadence.Schedule` keeps the due times on a grid (each one
+  interval after the previous due time), so scheduling latency can't
+  accumulate. A sweep that overruns skips the due times it missed (counted
+  in `/healthz`'s `skipped_ticks`); nothing is queued.
+- **Staleness and health don't change.** They're measured in slow
+  intervals, so a faster cadence can only make data fresher.
+
+### Tuning
+
+The default trigger (1.5 °C/min) and hold (2m) are guesses from two days of
+recordings (GUESSES G38, G39); tune them from `/api/status` and the verbose
+log. One thing the first test on the rig showed (G51): at a 10 s fast
+interval the trigger is, in practice, a number of sensor steps. 1.0 °C/min
+over 10 s is 0.167 °C, three DS18B20 steps, while over 30 s it's eight. So
+staying fast is much easier than going fast. On the rig that was right
+(after a reheat the outlet probe keeps moving for minutes), but on a noisy
+probe a low trigger could hold fast mode indefinitely; 1.5 °C/min or more
+at 10 s keeps it to four steps.
 
 ## Testing
 
@@ -92,11 +129,20 @@ go test -race ./...
 
 No hardware, root or broker needed. There are two layers:
 
-- **Core logic** (`config`, `sweep`, `payload`, `startup`, `status`) sees the
-  sensors only through `reading.Source`, and is tested against the
-  scriptable `readingtest.Fake`. `boundaries_test.go` fails the build if a
-  core package imports `os`, `io/fs`, `net`, `syscall`, the 1-Wire handler or
-  MQTT.
+- **Core logic** (`cadence`, `config`, `sweep`, `payload`, `startup`,
+  `status`) sees the sensors only through `reading.Source`, and is tested
+  against the scriptable `readingtest.Fake`. `boundaries_test.go` fails the
+  build if a core package imports `os`, `io/fs`, `net`, `syscall`, the
+  1-Wire handler or MQTT.
+- **The adaptive cadence end to end** (`cmd/tanktemp/scenario_test.go`) runs
+  the real `run` on production timers inside a `testing/synctest` bubble,
+  so time is virtual and exact. Each scenario is a table row: what each
+  probe reads sweep by sweep, how long each sweep takes, what goes wrong
+  when (a failed probe, a discovery error, a wall-clock step, SIGTERM), and
+  what every gap between sweeps and the verbose log must show. A new corner
+  case is a new row. The status page's polling rule runs under `node`
+  (`internal/web/pagejs_test.go`); CI needs node, a developer's run skips
+  without it.
 - **The 1-Wire handler** (`internal/onewire`) is tested against real sysfs
   trees captured from the rig with `cmd/w1capture`, plus synthetic faults
   generated from them (`internal/onewire/testdata/gen_fixtures.py`). Every

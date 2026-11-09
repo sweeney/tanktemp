@@ -117,14 +117,14 @@ function (one sweep), a ready check (first full sweep done) and an emitter
 tested on its own, and the run loop itself is tested once, in common.
 
 **The boundaries, which are the point of the layout.** The core packages
-(`config`, `sweep`, `payload`, `startup`, `status`) see the outside world only
+(`cadence`, `config`, `sweep`, `payload`, `startup`, `status`) see the outside world only
 through these interfaces:
 
 | Boundary | Interface | Real | Fake |
 |---|---|---|---|
 | 1-Wire sensors | `reading.Source` | `onewire.Source` | `readingtest.Fake` |
 | MQTT | `Publisher` (declared where it's used) | `mqttpub.MQTTPublisher` | `mqttpub.Fake` |
-| Time | `Clock` (`Now`) | `time.Now` | fixed or stepped clock |
+| Time | `Now` (lifecycle's and the cadence's, monotonic) and `Wall` (the sweep's published timestamp) | `time.Now` for both | a synctest bubble, with `Wall` stepped on its own |
 | Clock sync | `SyncChecker` | the `/run/systemd/timesync` flag | a bool |
 | System info | `fs.FS` + `Statfs` | `/proc`, `/sys` | `fstest.MapFS` |
 
@@ -346,7 +346,9 @@ checks `version` and `status`, so tanktemp's deploy can use the same check.
 `/api/status` returns the full last sweep and startup report as JSON, and
 (issue #1) a `sweep` block with the adaptive cadence. `/` is a
 small server-rendered page with one column per tank, sensors from top to
-bottom, failures shown in place. It fetches `/api/status` every interval.
+bottom, failures shown in place. It fetches `/api/status` every interval,
+and again just after the next sweep is due (from `next_in_s`, the Pi's own
+clock), backing off while a sweep is overdue.
 Unlike boiler's page, it doesn't use MQTT websockets, so it has no broker
 dependency.
 
@@ -385,6 +387,11 @@ above guarantees it.
   `lifecycle.Run` with the fake Source, the fake publisher and a fake clock.
   STARTUP → ready → HEARTBEAT → SIGTERM mid-sweep (a latency-scripted Fake)
   → SHUTDOWN. It pins the bytes and checks that shutdown is prompt.
+- **The adaptive cadence (issue #1)** is pure table tests in `cadence`, plus
+  a scenario table in `cmd/tanktemp` that drives the real `run` on
+  production timers inside `testing/synctest`: each row scripts the probes,
+  sweep durations, faults, wall-clock steps and signals, and states every
+  gap between sweeps.
 - **Hand-written fakes, not mockgen.** The fakes have to play back sequences
   and timing. Expectation-style mocks would pin call order rather than
   behaviour, and break on every refactor. This matches boiler-sensor and
@@ -818,3 +825,8 @@ Released on 2026-11-01. The three branches were merged into
 and tagged `lifecycle/v0.1.0`, `health/v0.1.0`, `mqttpub/v0.1.0` and
 `devices/v0.2.0`. tanktemp pins the first three in `go.mod` and no longer
 uses a `go.work`. tanktemp is public at `sweeney/tanktemp`.
+
+2026-11-09, adaptive cadence (issue #1, sweeney/tanktemp#4): `lifecycle`
+gained `Config.Next` (sweeney/common#14, tagged `lifecycle/v0.2.0`), which
+tanktemp now pins. Tested on the rig with `trigger_c_per_min: 1.0`
+through a reheat (GUESSES G51).

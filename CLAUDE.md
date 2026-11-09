@@ -7,10 +7,10 @@ Read `PLAN.md` (decisions), `docs/WIRE.md` (the contract) and
 
 - **Strict red/green TDD.** Write the failing test, run it and see it fail,
   then make it pass. Report the red as well as the green.
-- **The core is isolated.** `config`, `payload`, `reading`, `startup`,
-  `status` and `sweep` never import `os`, `io/fs`, `net`, `syscall`, the
-  1-Wire handler or MQTT. `boundaries_test.go` enforces it; add any new core
-  package to its list. Outside effects go through interfaces: `reading.Source`
+- **The core is isolated.** `cadence`, `config`, `payload`, `reading`,
+  `startup`, `status` and `sweep` never import `os`, `io/fs`, `net`,
+  `syscall`, the 1-Wire handler or MQTT. `boundaries_test.go` enforces it;
+  add any new core package to its list. Outside effects go through interfaces: `reading.Source`
   for sensors, a `Publisher` declared where it's used, injected time.
 - **`internal/onewire` is the only code that knows about sysfs and DS18B20
   quirks.** New hardware behaviour starts as a captured fixture

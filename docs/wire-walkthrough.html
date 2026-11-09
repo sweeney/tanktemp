@@ -232,8 +232,8 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--info); outline-
   <div class="grid2">
     <div class="card">
       <h4>{prefix}/{device_id}/state</h4>
-      <dl class="kv"><dt>When</dt><dd>every sweep (default 30 s), one message per tank</dd><dt>QoS</dt><dd>0</dd><dt>Retained</dt><dd>yes</dd><dt>Golden</dt><dd>state-ok, state-failures</dd></dl>
-      <p>QoS 0 is fine here because the next sweep replaces the message within 30 s. Because it's retained, a late subscriber gets the last reading straight away, and its <code>timestamp</code> says how old that reading is.</p>
+      <dl class="kv"><dt>When</dt><dd>every sweep, one message per tank: at least every <code>sweep.interval</code> (30 s by default), and as often as every <code>sweep.fast.interval</code> while probes are changing (WIRE.md, Cadence)</dd><dt>QoS</dt><dd>0</dd><dt>Retained</dt><dd>yes</dd><dt>Golden</dt><dd>state-ok, state-failures</dd></dl>
+      <p>QoS 0 is fine here because the next sweep replaces the message within the slow interval (30 s by default). Because it's retained, a late subscriber gets the last reading straight away, and its <code>timestamp</code> says how old that reading is.</p>
     </div>
     <div class="card">
       <h4>{prefix}/status</h4>
@@ -249,7 +249,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--info); outline-
 <section id="lifecycle">
   <div class="kicker">02 · When messages go</div>
   <h2>Lifecycle, over time</h2>
-  <p class="lede">From <code>cmd/tanktemp/main.go</code> and <code>common/lifecycle</code>: STARTUP, the first sweep, a <em>ready</em> HEARTBEAT, then state every 30 s and a heartbeat every 15 min, through a broker drop and a SIGTERM. The right-hand column shows what's retained on the broker after each step, which is exactly what a subscriber connecting at that moment would get. Click a row for details.</p>
+  <p class="lede">From <code>cmd/tanktemp/main.go</code> and <code>common/lifecycle</code>: STARTUP, the first sweep, a <em>ready</em> HEARTBEAT, then state at least every 30 s (faster while probes are changing, with <code>sweep.fast</code>) and a heartbeat every 15 min, through a broker drop and a SIGTERM. The right-hand column shows what's retained on the broker after each step, which is exactly what a subscriber connecting at that moment would get. Click a row for details.</p>
   <div class="legend">
     <span style="--c:var(--copper)"><i></i>status (QoS 1, retained)</span>
     <span style="--c:var(--info)"><i></i>state (QoS 0, retained)</span>
@@ -585,7 +585,7 @@ function wrapText(parent, x, y, text, maxChars, attrs, lh) {
     {t:'T₀', k:'note', label:'sweep 1 (≈ 4 s)', st:'STARTUP (ready:false)', sv:prevState, d:'Buses are read in parallel, about 0.8 s per sensor on each bus. Nothing is on the wire until the sweep has finished.'},
     {t:'+4 s', k:'state', label:'state × each tank', st:'STARTUP (ready:false)', sv:'sweep 1', d:'One retained message per tank on <code>{prefix}/{device_id}/state</code>, at QoS 0. <code>timestamp</code> is when the sweep <em>started</em>.'},
     {t:'+4 s', k:'status', label:'HEARTBEAT · ready:true', st:'HEARTBEAT (ready)', sv:'sweep 1', d:'The first HEARTBEAT after the first sweep is the "ready" signal. There\'s no separate READY event.'},
-    {t:'+30 s', k:'state', label:'state (every interval)', st:'HEARTBEAT (ready)', sv:'sweep 2, 3, …', d:'Every 30 s by default. If a sweep is still running when the next tick comes, that tick is skipped, not queued.'},
+    {t:'+30 s', k:'state', label:'state (every interval)', st:'HEARTBEAT (ready)', sv:'sweep 2, 3, …', d:'Every 30 s by default, or as often as every <code>sweep.fast.interval</code> while a probe is changing, easing back afterwards (WIRE.md, Cadence). A sweep that overruns skips the due times it missed; nothing is queued.'},
     {t:'+15 min', k:'status', label:'HEARTBEAT (scheduled)', st:'HEARTBEAT', sv:'latest sweep', d:'<code>status-heartbeat.golden</code>: counts from the last sweep, <code>unexpected</code> ROMs, and <code>uptime_s</code>.'},
     {t:'drop', k:'will', label:'link lost → broker publishes LWT', st:'LWT', sv:'last sweep before the drop (ageing)', d:'tanktemp didn\'t send a DISCONNECT, so the broker publishes the will on <code>{prefix}/status</code>, retained. The retained state still holds the reading from before the drop, and its <code>timestamp</code> keeps getting older.'},
     {t:'outage', k:'note', label:'sweeps continue; publishes fail', st:'LWT', sv:'last sweep before the drop (ageing)', d:'Sweeps and <code>/healthz</code> keep running, and health is <code>degraded</code> (MQTT disconnected). State publishes fail at once and aren\'t queued.'},

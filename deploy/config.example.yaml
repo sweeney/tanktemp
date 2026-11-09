@@ -10,9 +10,14 @@
 #   attempts: 3        # reads per sensor before giving up (1..10)
 #   fast:              # optional: sweep faster while probes are changing (a
 #                      # draw, a reheat). Absent: always every interval.
-#                      # Any key left out takes the default shown.
+#                      # Any key left out takes the default shown, so
+#                      # fast: {} turns it on; a fast: with nothing under
+#                      # it is refused (leave the block out for "off").
 #     interval: 10s            # at least 2 s and 0.8 s per sensor; under interval
-#     trigger_c_per_min: 1.5   # any probe changing this fast, either way
+#     trigger_c_per_min: 1.5   # any probe changing this fast, either way. At a
+#                              # 10 s fast interval this is a step count (1.5 is
+#                              # 4 sensor steps): lower holds fast more easily
+#                              # (GUESSES G51)
 #     hold: 2m                 # stay fast this long after the last trigger...
 #     decay: 5m                # ...then ease back to interval over this long
 # clock_sync_wait: 2m  # wait this long for NTP at boot, then sweep anyway
