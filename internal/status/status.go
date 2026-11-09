@@ -92,7 +92,7 @@ func (t *Tracker) RecordCadence(c cadence.Status) {
 	t.cadence = copyCadence(c)
 }
 
-// SetNextDue records when the scheduler will next start a sweep, so
+// SetNextDue records when the next sweep is due (lifecycle's Next, via nextSweep), so
 // /api/status can say so as an absolute time (which stays true for as long
 // as it's displayed, unlike "in N s").
 func (t *Tracker) SetNextDue(due time.Time) {
@@ -140,7 +140,7 @@ type Snapshot struct {
 	SkippedTicks  int
 	Verbose       bool           // log.verbose, as set at start
 	Cadence       cadence.Status // the adaptive cadence (issue #1), for /api/status only
-	NextDue       time.Time      // when the next sweep is due; zero until the scheduler says
+	NextDue       time.Time      // when the next sweep is due; zero until the first sweep has finished
 }
 
 // Snapshot returns a copy.

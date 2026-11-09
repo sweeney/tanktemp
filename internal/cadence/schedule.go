@@ -5,25 +5,25 @@ import "time"
 // NextDue is rule 4, the scheduling arithmetic, kept here so it's pure and
 // tested on its own; Schedule uses it, and lifecycle owns the timer.
 //
-// anchor is when the previous tick was due, the moment the sweep that just
-// finished was meant to start. The next tick is due one interval after it,
-// as a time.Ticker would be. Anchoring on the tick, not on when the sweep
-// actually began, means scheduling latency can't accumulate.
+// anchor is when the sweep that just finished was due to start. The next
+// is due one interval after it, as on a time.Ticker's grid. Anchoring on
+// the due time, not on when the sweep actually began, means scheduling
+// latency can't accumulate.
 //
-// If that moment has already passed by now (the sweep overran), the ticks
-// it missed are skipped, not queued: due is the first anchor + k×interval
-// after now, and skipped is how many were passed over (k − 1). A tick
-// exactly at now counts as missed, as one lifecycle would have seen arrive
-// while the sweep was still running. That's what lifecycle did with a
-// ticker before issue #1, and what it still does with any tick that
-// arrives during a sweep.
+// lifecycle asks (its Config.Next) only once it has seen the sweep finish,
+// so at now nothing is running. If the next due time is now or later, it
+// stands. If it has already passed (the sweep overran), the due times it
+// missed are skipped, not queued: due is the first anchor + k×interval at
+// or after now, and skipped is how many were passed over (k − 1). A sweep
+// that ends exactly on the next due time isn't an overrun: the next one
+// starts at once (review on #4; with ticks it would have been missed).
 //
 // It uses only Add and Sub. Times from time.Now carry a monotonic clock
 // reading, and Add keeps it, so a wall-clock step (NTP at boot, on a Pi
 // with no real-time clock) can't move the schedule: its times must come
-// straight from time.Now (lifecycle's started and Now), never through UTC,
-// Round or Truncate, which strip it. The skipped count is computed, not looped, so even a
-// large gap costs nothing.
+// straight from time.Now (lifecycle's started and Now), never through
+// UTC, Round or Truncate, which strip it. The skipped count is computed,
+// not looped, so even a large gap costs nothing.
 //
 // interval must be positive; config guarantees it. A non-positive one gives
 // "now", so the next sweep follows at once rather than never.
@@ -32,10 +32,14 @@ func NextDue(anchor time.Time, interval time.Duration, now time.Time) (due time.
 		return now, 0
 	}
 	due = anchor.Add(interval)
-	if due.After(now) {
+	if !due.Before(now) {
 		return due, 0
 	}
-	n := now.Sub(due)/interval + 1 // ticks at or before now, after anchor
+	late := now.Sub(due)
+	n := late / interval // whole intervals passed; one more unless it lands exactly on now
+	if n*interval < late {
+		n++
+	}
 	return due.Add(n * interval), int(n)
 }
 

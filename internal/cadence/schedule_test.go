@@ -17,9 +17,10 @@ func TestNextDue(t *testing.T) {
 	}{
 		{"a quick sweep", 4 * time.Second, i, 0},
 		{"finished just before the tick", i - time.Millisecond, i, 0},
-		// Exactly on the tick: that tick is already now, so it's missed
-		// (lifecycle would have seen it arrive while the sweep ran).
-		{"finished exactly on the tick", i, 2 * i, 1},
+		// Exactly on the due time: not an overrun. With lifecycle's Next
+		// nothing is running at that instant, so the next sweep starts at
+		// once rather than an interval later (review on #4).
+		{"finished exactly when the next was due", i, i, 0},
 		{"overran by 2 s", 12 * time.Second, 2 * i, 1},
 		{"overran three ticks", 35 * time.Second, 4 * i, 3},
 	}
@@ -40,12 +41,12 @@ func TestNextDueAfterALongGapIsArithmetic(t *testing.T) {
 	if time.Since(start) > 10*time.Millisecond {
 		t.Errorf("took %v", time.Since(start))
 	}
-	if !due.After(now) || due.Sub(now) > 2*time.Second || skipped < 800_000_000 {
-		t.Errorf("due %v after now, skipped %d", due.Sub(now), skipped)
+	if due.Before(now) || due.Sub(now) >= 2*time.Second || skipped < 800_000_000 {
+		t.Errorf("due %v after now (want at or after, within one interval), skipped %d", due.Sub(now), skipped)
 	}
 }
 
-// The scheduler's times come from time.Now and carry a monotonic reading;
+// The schedule's times come from time.Now and carry a monotonic reading;
 // NextDue must keep it, so a wall-clock step (NTP) can't move the schedule.
 func TestNextDueKeepsTheMonotonicClock(t *testing.T) {
 	anchor := time.Now()

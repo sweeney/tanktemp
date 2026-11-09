@@ -43,7 +43,7 @@ func TestAPIStatusSweepBlock(t *testing.T) {
 }
 
 // A config without sweep.fast reports mode slow at the interval, and no
-// trigger. Before the scheduler has said, next_due is null: unknown, not 0.
+// trigger. Before the first sweep has finished, next_due is null: unknown, not 0.
 func TestAPIStatusSweepBlockWithoutFast(t *testing.T) {
 	s := server(true, sweepAt(reading.OK))
 	s.Tracker = status.New(status.Options{Start: start, Interval: 30 * time.Second,

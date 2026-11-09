@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -184,5 +185,19 @@ func TestFastKeysMatchTheStruct(t *testing.T) {
 	}
 	if !reflect.DeepEqual(tags, fastKeys) {
 		t.Errorf("Fast's yaml tags %v, fastKeys %v", tags, fastKeys)
+	}
+}
+
+// An empty or comment-only file has no YAML document at all, so the
+// node-walking checks (checkFastNotNull, lineIndex) see no content. It must
+// come back as the usual list of what's missing, never a panic (review on
+// #4).
+func TestAnEmptyFileIsRefusedNotAPanic(t *testing.T) {
+	for _, y := range []string{"", "# nothing\n", "\n\n"} {
+		_, err := Load([]byte(y))
+		var ve *ValidationError
+		if !errors.As(err, &ve) || !strings.Contains(err.Error(), "no tanks") || !strings.Contains(err.Error(), "mqtt.broker") {
+			t.Errorf("%q: err = %v, want a ValidationError naming the missing tanks and broker", y, err)
+		}
 	}
 }
