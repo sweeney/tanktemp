@@ -67,6 +67,37 @@ http:
 	}
 }
 
+// Issue #2: verbose logging is a plain boolean under log:, off unless asked
+// for. Off is the normal running state; on is for someone at the bench.
+func TestLogVerboseDefaultsOff(t *testing.T) {
+	c, err := Load([]byte(valid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Log.Verbose {
+		t.Errorf("log.verbose defaults to true; it must default to false")
+	}
+}
+
+func TestLogVerboseParses(t *testing.T) {
+	for _, y := range []string{
+		valid + "log: {verbose: true}\n",
+		valid + "log:\n  verbose: true\n",
+	} {
+		c, err := Load([]byte(y))
+		if err != nil {
+			t.Fatalf("%q: %v", y, err)
+		}
+		if !c.Log.Verbose {
+			t.Errorf("%q: log.verbose = false, want true", y)
+		}
+	}
+	// Writing the default out explicitly is fine too.
+	if c, err := Load([]byte(valid + "log: {verbose: false}\n")); err != nil || c.Log.Verbose {
+		t.Errorf("verbose: false: %+v, %v", c.Log, err)
+	}
+}
+
 func TestSensorsComeBackInOrder(t *testing.T) {
 	// Sensors may be written in any order in the file; order: decides.
 	swapped := `
@@ -95,6 +126,10 @@ func TestLoadRejects(t *testing.T) {
 	}{
 		{"not yaml", "tanks: [", "yaml", 0},
 		{"unknown key", valid + "colour: blue\n", "colour", 0},
+		// A typo in the switch must fail loudly, not leave verbose quietly off.
+		{"unknown log key", valid + "log: {verbos: true}\n", "verbos", 0},
+		// A boolean, not levels (issue #2): a level string is refused.
+		{"log level instead of a boolean", valid + "log: {verbose: debug}\n", "yaml", 0},
 		{"unknown sensor key", strings.Replace(valid, "position: top", "position: top\n        hieght_mm: 3", 1), "hieght_mm", 0},
 		{"no tanks", "mqtt: {broker: tcp://b:1883}\n", "no tanks", 0},
 		{"no broker", strings.Replace(valid, "  broker: tcp://broker.example:1883\n", "  broker: \"\"\n", 1), "mqtt.broker", 0},

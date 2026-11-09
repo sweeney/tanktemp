@@ -32,6 +32,7 @@ type Config struct {
 	Heartbeat     time.Duration `yaml:"heartbeat"`
 	HTTP          HTTP          `yaml:"http"`
 	MQTT          MQTT          `yaml:"mqtt"`
+	Log           Log           `yaml:"log"`
 	Tanks         []Tank        `yaml:"tanks"`
 }
 
@@ -53,6 +54,26 @@ type MQTT struct {
 	TopicPrefix  string `yaml:"topic_prefix"`
 	Username     string `yaml:"username"`
 	PasswordFile string `yaml:"password_file"`
+}
+
+// Log is how much tanktemp says in the journal (issue #2).
+//
+// tanktemp has two audiences, so this is one boolean rather than levels:
+//
+//   - normal running (Verbose false, the default): startup problems, sweeps
+//     with faults, MQTT reconnects and the lifecycle, and nothing else;
+//   - someone at the bench (Verbose true): all of that, plus one line for
+//     every sweep and one for every read that had to be retried.
+//
+// It is read once at start; changing it means installing the config and
+// restarting (./setup-pi.sh), which costs one sweep. There is deliberately
+// no SIGHUP or HTTP toggle. If a third audience ever appears, this can grow
+// into levels then; until then a level scheme only invites log lines whose
+// level nobody decided.
+type Log struct {
+	// Verbose: log every sweep and every retry. At a 10 s interval that is
+	// about 8,640 sweep lines a day, so turn it off again after testing.
+	Verbose bool `yaml:"verbose"`
 }
 
 // Tank is one cylinder. DeviceID is its key in devices_<site>, its topic
@@ -85,6 +106,7 @@ func defaults() Config {
 		Heartbeat:     15 * time.Minute,
 		HTTP:          HTTP{Listen: ":80"},
 		MQTT:          MQTT{TopicPrefix: DefaultTopicPrefix},
+		Log:           Log{Verbose: false}, // the zero value, spelled out: quiet unless asked
 	}
 }
 
