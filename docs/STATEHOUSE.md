@@ -26,7 +26,9 @@ Before the adapter is switched on, in this order:
 
 ## What tanktemp publishes, in one paragraph
 
-Every 30 s it reads every DS18B20 probe on every configured cylinder. For
+At least every 30 s, and as often as every 10 s while probes are changing
+(a draw, or a reheat), it reads every DS18B20 probe on every configured
+cylinder (WIRE.md, Cadence). For
 each cylinder it publishes one retained message on
 `{prefix}/{device_id}/state` (QoS 0). The message lists **every** configured
 probe, bottom first (`order` 1 is the bottom), each with its calibrated
@@ -151,7 +153,15 @@ of every cylinder at once. **The retained flag says nothing about age; the
 value only if its `timestamp` is within 3 sweep intervals (90 s) of now.
 Otherwise mark those devices stale, or wait for the next live message.
 Never write a retained message's reading into `device_environment` twice:
-tanktemp republishes every 30 s, so a duplicate timestamp means a replay.
+tanktemp sweeps at least 2 s apart (usually 10–30 s), and `timestamp` is to
+the second, so a duplicate timestamp means a replay. The 90 s rule is in
+**slow** intervals: a faster cadence only makes messages fresher, so it
+doesn't change.
+
+The gap between messages varies (WIRE.md, Cadence). Don't infer it from one
+pair of messages, and don't treat a 10 s gap as a fault: it means a probe
+was changing quickly. Rates (a draw's flow, say) should use each message's
+own `timestamp`, never an assumed interval.
 
 ## Mapping the status topic
 
@@ -182,6 +192,8 @@ online.
 - Two changes were made before any consumer, both in WIRE.md's Changes:
   `attempts` and `bus` left the state message (2026-11-01), and `order`
   now counts from the bottom (2026-11-02; it was 1 = top).
+- The adaptive cadence (2026-11-09, issue #1) changed only how often state
+  messages arrive, not what they contain.
 - Keep the base configurable. It was `test/energy/hot_water` until
   2026-11-02; nothing is published there now.
 

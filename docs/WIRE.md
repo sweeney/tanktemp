@@ -16,7 +16,7 @@ every key is always present (except `reason`, below).
 
 | Topic | When | QoS | Retained |
 |---|---|---|---|
-| `{prefix}/{device_id}/state` | every sweep, one message per tank | 0 | yes |
+| `{prefix}/{device_id}/state` | every sweep, one message per tank (how often: see Cadence) | 0 | yes |
 | `{prefix}/status` | STARTUP, the first HEARTBEAT (`ready`), each scheduled HEARTBEAT, a HEARTBEAT after every MQTT reconnect, SHUTDOWN; and the last will | 1 | yes |
 
 `device_id` is the tank's key in `devices_<site>`, so it is `[a-z0-9_-]+`
@@ -92,6 +92,36 @@ The **last will** is exactly `{"online":false,"event":"LWT"}`, retained, QoS
 1. The broker publishes it if tanktemp vanishes without a SHUTDOWN. It
 carries no timestamp, because a will is fixed when tanktemp connects.
 
+## Cadence
+
+How often a tank's state message arrives. Nothing in any payload describes
+the cadence: a consumer that cares works it out from consecutive
+`timestamp`s.
+
+- **At least every `sweep.interval`** (30 s by default; the "slow"
+  interval). This is the promise consumers build staleness on, and it is
+  the same with or without the fast cadence below.
+- **As often as every `sweep.fast.interval`** (10 s in the example
+  config), when `sweep.fast` is configured, while any probe is changing at
+  `sweep.fast.trigger_c_per_min` or faster, and for up to `hold + decay`
+  after the last such change, while the gap eases back to
+  `sweep.interval`. Without `sweep.fast` the cadence is fixed, as it always
+  was.
+- **`timestamp` stays authoritative.** It is when the sweep started. Sweeps
+  are never closer together than `sweep.fast.interval`, which is at least
+  2 s, so two live state messages for one tank never share a `timestamp`
+  (it is to the second). **A repeated `timestamp` still means a replay** of
+  the retained message.
+- **Staleness is still measured in slow intervals.** A state is stale once
+  it's more than 3 × `sweep.interval` old (90 s by default). Faster sweeps
+  only make data fresher, so nothing that was fresh becomes stale.
+- **Why not a field?** State messages are retained. A field like "next
+  sweep in 10 s" would be wrong for anyone who reads the retained copy
+  later, and a field like "fast because a probe moved" is halfway to draw
+  detection, which belongs downstream with the boiler events, not in
+  tanktemp. The cadence is on tanktemp's own `/api/status` (`sweep`), for
+  tuning, where it is computed per request.
+
 ## Delivery
 
 What MQTT does and doesn't guarantee here:
@@ -108,6 +138,11 @@ What MQTT does and doesn't guarantee here:
 
 ## Changes
 
+- **2026-11-09, issue #1, no payload change:** state messages can arrive
+  faster than `sweep.interval` while probes are changing (Cadence, above).
+  No field was added or changed, and the goldens are unchanged. A
+  consumer's staleness rule (3 × the slow interval) and replay rule (a
+  repeated `timestamp`) both stand.
 - **2026-11-02, before any consumer:** `order` counts from the **bottom**
   (1 = bottom), so it rises with `height_mm` and with the numbers on the
   probes. It was 1 = top. The `sensors` list is still sorted by `order`, so
