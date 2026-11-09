@@ -98,6 +98,8 @@ internal/onewire/        the only code that knows about sysfs or DS18B20s; imple
 internal/config/         Load + Validate the YAML (takes bytes, not a path); Tank and Sensor
 internal/sweep/          config + reading.Source + Clock → Sweep (per tank, ordered,
                          calibrated). Pure
+internal/cadence/        (issue #1) Sweep → the interval until the next sweep: slow,
+                         fast while a probe changes, easing back. Pure
 internal/payload/        the wire contract: topics + JSON encoders. Golden tests live here
 internal/startup/        startup report from reading.Source.Inspect + a SyncChecker
 internal/status/         thread-safe snapshot (last sweep, startup report, MQTT state)
@@ -166,9 +168,14 @@ pi-price-screen.
 ```yaml
 w1_root: /sys/bus/w1/devices        # default
 sweep:
-  interval: 30s
+  interval: 30s                     # slow: the longest gap between sweeps
   attempts: 3
-  parallel: true                    # one goroutine per bus
+  parallel: true                    # one goroutine per bus (dropped: GUESSES G8)
+  fast:                             # optional (issue #1); absent = fixed interval
+    interval: 10s
+    trigger_c_per_min: 1.5
+    hold: 2m
+    decay: 5m
 clock_sync_wait: 2m                 # then sweep anyway, flagged clock_synced:false
 heartbeat: 15m
 http:
@@ -205,6 +212,18 @@ restart, with no SIGHUP or HTTP toggle. `/api/status` and `-check-config`
 show it. The lines are built from the sweep in hand, so it changes nothing
 that is read, published or timed.
 
+`sweep.fast` (2026-11-09, issue #1) is the adaptive cadence: slow by
+default, straight to `fast.interval` when any probe's rate of change (between
+two consecutive OK, non-suspect readings, and at least two sensor steps)
+reaches `trigger_c_per_min`, held for `hold`, then an exponential ease back
+over `decay`. The interval is a pure function of the time since the last
+trigger, in `internal/cadence`, which sees time only through sweep
+timestamps. `cmd/tanktemp`'s scheduler turns it into lifecycle's ticks: one
+interval after the tick before, overruns skipped, never queued. Nothing on
+the wire changes (WIRE.md, Cadence): staleness stays 3 × the slow interval,
+and `/api/status`'s `sweep` block and the verbose log are where it shows.
+Draw detection itself stays downstream.
+
 `Validate` refuses to start the service on any of these, and names the line
 where it can:
 - a ROM that isn't `28-` plus 12 hex digits;
@@ -218,7 +237,11 @@ where it can:
 - unknown keys (`yaml` `KnownFields(true)`, since a typo in a local file
   should fail loudly);
 - an interval shorter than the worst-case sweep (0.8 s × attempts × the most
-  sensors on one bus).
+  sensors on one bus);
+- with `sweep.fast`: a `fast.interval` under 2 s or under that same minimum,
+  or not shorter than `interval`; a `trigger_c_per_min` that isn't a finite
+  number above 0; a negative `hold`; a `decay` that isn't positive; and, as
+  everywhere, an unknown key inside the block.
 
 `tanktemp -check-config` runs the same validation and exits. `setup-pi.sh`
 and `deploy.sh --check` use it.
@@ -318,7 +341,8 @@ load average, memory, root disk, the `NETWORK_*` values from
 `/run/pi-helper.env`), and a `tanks` summary. boiler-sensor's `deploy.sh`
 checks `version` and `status`, so tanktemp's deploy can use the same check.
 
-`/api/status` returns the full last sweep and startup report as JSON. `/` is a
+`/api/status` returns the full last sweep and startup report as JSON, and
+(issue #1) a `sweep` block with the adaptive cadence. `/` is a
 small server-rendered page with one column per tank, sensors from top to
 bottom, failures shown in place. It fetches `/api/status` every interval.
 Unlike boiler's page, it doesn't use MQTT websockets, so it has no broker

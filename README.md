@@ -21,13 +21,68 @@ probes on each, is set in a local config file.
    (the only code that                    (the boundary)     (calibrate,        (wire contract)
     knows about sysfs)                                        order, quality)
                                                                │
-                                                               └──> internal/status ──> internal/web (/healthz, /api/status, /)
+                                                               ├──> internal/status ──> internal/web (/healthz, /api/status, /)
+                                                               └──> internal/cadence ──> how long until the next sweep
 ```
 
 `cmd/tanktemp` wires these together with
 [`common/lifecycle`](https://github.com/sweeney/common) (signals, STARTUP,
 heartbeats, SHUTDOWN, cancellable sweeps), `common/mqttpub` (the resilient
-publisher) and `common/health` (`/healthz`, `sysinfo`).
+publisher) and `common/health` (`/healthz`, `sysinfo`). Its scheduler
+feeds lifecycle's ticks, as far apart as `internal/cadence` decides
+(below).
+
+## Adaptive cadence (sweep fast while probes are changing)
+
+A hot-water draw shows within a sweep or two: the cold inlet falls and the
+outlet rises. Its volume comes from the energy balance, which doesn't need
+fast sampling, but its start, end and flow rate do. Sweeping fast all the
+time triples the messages, nearly all of them overnight cooling. So, with
+`sweep.fast` in the config (issue #1), tanktemp sweeps slowly by default
+and speeds up only while a probe is changing:
+
+```yaml
+sweep:
+  interval: 30s              # slow: the longest gap between sweeps
+  fast:                      # optional; absent = a fixed interval
+    interval: 10s            # jump straight to this...
+    trigger_c_per_min: 1.5   # ...when any probe changes at least this fast, either way
+    hold: 2m                 # stay at fast.interval this long after the last trigger...
+    decay: 5m                # ...then ease back to interval over this long
+```
+
+```
+interval
+ 30 s ─────┐                                   ╭──────────
+           │                              ╭────╯
+           │                         ╭────╯      fast × (slow/fast)^((t−hold)/decay)
+ 10 s      └────────────────────╭────╯
+           ▲ trigger    hold    ▲      decay   ▲
+           t = 0               2m              7m
+```
+
+- **The trigger is a rate**, between a probe's reading in one sweep and the
+  next, so it means the same at either interval. The change must also be
+  at least 0.125 °C (two sensor steps), so a one-step flicker never
+  triggers. Only two OK readings in a row count: a failed probe, one that
+  just recovered, or a suspect 85 °C can't trigger.
+- **The speed-up is immediate, the slow-down gradual.** The next sweep is
+  `fast.interval` after the one that saw the change. Any new change jumps
+  straight back to fast. With the numbers above, one event gets 33 sweeps
+  in the 8 minutes after it, where a fixed 30 s gives 16.
+- **Nothing on the wire changes.** Consumers see state messages at least
+  every `interval`, and more often while probes change; `timestamp` stays
+  authoritative, and staleness is still 3 × the slow interval
+  (`docs/WIRE.md`, Cadence).
+- **`/api/status` shows it**, for tuning: `sweep.mode` (`slow`, `hold`,
+  `decay`), `interval_s`, `next_due`, `last_trigger` (probe and rate) and
+  `fast_entries`. The status page counts down to the next sweep. With
+  `log.verbose` on, every trigger and change of mode is logged (below).
+  `-check-config` says what the cadence is.
+
+Every key in `fast` has the default shown, so `fast: {}` turns it on. The
+trigger and hold are guesses from two days of recordings (GUESSES G38,
+G39); tune them from `/api/status`.
 
 ## Testing
 
@@ -170,8 +225,16 @@ are built from the sweep already in hand.
 it off after testing:** at a 10 s interval it's about 8,640 sweep lines a
 day. journald copes, but they bury the lines that matter.
 
-When adaptive cadence (#1) lands, its mode changes and triggers go to the
-same verbose logger.
+- **the adaptive cadence** (with `sweep.fast`): every trigger, with the
+  probe and its rate, and every other change of mode, with the gap to the
+  next sweep. They start `cadence:`, so `grep '^sweep '` still gives only
+  the readings:
+
+  ```
+  cadence: fast 10s (left/bottom -3.2 °C/min)
+  cadence: decay 10.4s
+  cadence: slow 30s
+  ```
 
 ## Reviewing the guesses
 

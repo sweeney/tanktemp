@@ -6,8 +6,15 @@
 
 # w1_root: /sys/bus/w1/devices
 # sweep:
-#   interval: 30s      # at least 0.8 s per configured sensor
+#   interval: 30s      # at least 0.8 s per configured sensor; the longest gap
 #   attempts: 3        # reads per sensor before giving up (1..10)
+#   fast:              # optional: sweep faster while probes are changing (a
+#                      # draw, a reheat). Absent: always every interval.
+#                      # Any key left out takes the default shown.
+#     interval: 10s            # at least 2 s and 0.8 s per sensor; under interval
+#     trigger_c_per_min: 1.5   # any probe changing this fast, either way
+#     hold: 2m                 # stay fast this long after the last trigger...
+#     decay: 5m                # ...then ease back to interval over this long
 # clock_sync_wait: 2m  # wait this long for NTP at boot, then sweep anyway
 # heartbeat: 15m
 # http:
