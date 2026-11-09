@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -82,6 +84,12 @@ func startRig(t *testing.T, src *rt.Fake) *rig {
 // startRigWith runs with cfg, so a test can turn log.verbose on.
 func startRigWith(t *testing.T, src *rt.Fake, cfg config.Config) *rig {
 	t.Helper()
+	return startRigHTTP(t, src, cfg, nil)
+}
+
+// startRigHTTP also serves HTTP on ln, when it isn't nil.
+func startRigHTTP(t *testing.T, src *rt.Fake, cfg config.Config, ln net.Listener) *rig {
+	t.Helper()
 	r := &rig{
 		pub:  &mqttpubtest.Fake{},
 		src:  src,
@@ -101,6 +109,7 @@ func startRigWith(t *testing.T, src *rt.Fake, cfg config.Config) *rig {
 		Signals:       r.sig,
 		Logger:        log.New(r.logs, "", 0),
 		Version:       "abc1234",
+		Listener:      ln,
 	}
 	go func() { r.done <- run(context.Background(), cfg, d) }()
 	return r
@@ -395,5 +404,34 @@ func TestCheckConfigShowsVerbose(t *testing.T) {
 		if code := realMain([]string{"-config", path, "-check-config"}, &out); code != 0 || !strings.Contains(out.String(), tt.want) {
 			t.Errorf("%q: code %d, out %q, want it to say %q", tt.extra, code, out.String(), tt.want)
 		}
+	}
+}
+
+// run hands log.verbose to the status page: /api/status says what the
+// config said (issue #2).
+func TestAPIStatusReportsTheConfiguredVerbose(t *testing.T) {
+	for _, v := range []bool{false, true} {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg := testConfig(t)
+		cfg.Log.Verbose = v
+		r := startRigHTTP(t, cleanSource(), cfg, ln)
+		r.waitFor(t, 3)
+		resp, err := http.Get("http://" + ln.Addr().String() + "/api/status")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body struct {
+			Verbose *bool `json:"verbose"`
+		}
+		err = json.NewDecoder(resp.Body).Decode(&body)
+		resp.Body.Close()
+		if err != nil || body.Verbose == nil || *body.Verbose != v {
+			t.Errorf("log.verbose %v: /api/status verbose = %v (err %v)", v, body.Verbose, err)
+		}
+		r.sig <- syscall.SIGTERM
+		<-r.done
 	}
 }

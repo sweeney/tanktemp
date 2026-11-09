@@ -224,3 +224,13 @@ func TestFaultReplays(t *testing.T) {
 		})
 	}
 }
+
+// The verbose switch (issue #2) is carried into every Snapshot, so
+// /api/status can show when it's been left on.
+func TestSnapshotCarriesVerbose(t *testing.T) {
+	for _, v := range []bool{false, true} {
+		if got := New(Options{Verbose: v}).Snapshot().Verbose; got != v {
+			t.Errorf("Options.Verbose %v: Snapshot().Verbose = %v", v, got)
+		}
+	}
+}

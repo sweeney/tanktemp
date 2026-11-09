@@ -186,3 +186,18 @@ func TestPage(t *testing.T) {
 		t.Errorf("/nope = %d", rec.Code)
 	}
 }
+
+// /api/status says whether verbose logging is on (issue #2), so it's
+// obvious when it's been left on after testing. It's always present: false
+// is a fact, not an unknown.
+func TestAPIStatusVerbose(t *testing.T) {
+	for _, v := range []bool{false, true} {
+		s := server(true, sweepAt(reading.OK))
+		s.Tracker = status.New(status.Options{Start: start, Interval: 30 * time.Second, Verbose: v})
+		_, body := get(t, s, "/api/status")
+		got, ok := body["verbose"]
+		if !ok || got != v {
+			t.Errorf("verbose %v: /api/status has verbose = %v (present %v)", v, got, ok)
+		}
+	}
+}

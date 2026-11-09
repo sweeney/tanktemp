@@ -223,6 +223,7 @@ func run(ctx context.Context, cfg config.Config, d deps) error {
 	tracker := status.New(status.Options{
 		Start: start, Version: d.Version, Tanks: ids,
 		Interval: cfg.Sweep.Interval, Connected: d.Pub.Connected,
+		Verbose: cfg.Log.Verbose,
 	})
 	prefix := cfg.MQTT.TopicPrefix
 

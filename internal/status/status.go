@@ -32,6 +32,9 @@ type Options struct {
 	Tanks     []string // device IDs, in config order
 	Interval  time.Duration
 	Connected func() bool // whether MQTT is connected right now
+	// Verbose is config log.verbose (issue #2). It's fixed at start, and
+	// carried here only so /api/status can show when it's been left on.
+	Verbose bool
 }
 
 // Tracker is safe for concurrent use.
@@ -87,6 +90,7 @@ type Snapshot struct {
 	Last          *sweep.Sweep // nil before the first sweep
 	Sweeps        int
 	SkippedTicks  int
+	Verbose       bool // log.verbose, as set at start
 }
 
 // Snapshot returns a copy.
@@ -104,6 +108,7 @@ func (t *Tracker) Snapshot() Snapshot {
 		Problems:      append([]startup.Problem(nil), t.problems...),
 		Sweeps:        t.sweeps,
 		SkippedTicks:  t.skipped,
+		Verbose:       t.opts.Verbose,
 	}
 	if t.last != nil {
 		l := *t.last // sweeps are never mutated after recording

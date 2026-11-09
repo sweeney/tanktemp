@@ -132,6 +132,7 @@ type apiStatus struct {
 	IntervalS       float64           `json:"interval_s"`
 	TopicPrefix     string            `json:"topic_prefix"`
 	MQTTConnected   bool              `json:"mqtt_connected"`
+	Verbose         bool              `json:"verbose"` // log.verbose: true means every sweep is being logged (issue #2)
 	Calibrated      bool              `json:"calibrated"`
 	Tanks           []json.RawMessage `json:"tanks"`
 	Unexpected      []string          `json:"unexpected"`
@@ -150,6 +151,7 @@ func (s *Server) apiStatus(w http.ResponseWriter, _ *http.Request) {
 	out.IntervalS = snap.Interval.Seconds()
 	out.TopicPrefix = s.Prefix
 	out.MQTTConnected = snap.MQTTConnected
+	out.Verbose = snap.Verbose
 	out.Tanks = []json.RawMessage{}
 	out.StartupProblems = problems(snap)
 	if snap.Last != nil {
