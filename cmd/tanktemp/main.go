@@ -210,12 +210,16 @@ type deps struct {
 	Pub         publisher
 	Reconnected <-chan struct{} // each MQTT reconnect; nil for none
 	Synced      func() bool
-	Now         func() time.Time
+	// Now is lifecycle's clock, and so the adaptive cadence's: time.Now in
+	// production, whose monotonic reading keeps the schedule clear of
+	// wall-clock steps.
+	Now func() time.Time
+	// Wall stamps each sweep (Sweep.At, published as timestamp). nil: Now,
+	// as in production. Tests set both, to step the wall clock alone.
+	Wall func() time.Time
 
-	After func(time.Duration) <-chan time.Time // the scheduler's timer; nil: time.After
-	// Tick is a test hook: a fixed source of ticks, bypassing the adaptive
-	// cadence's scheduler. nil (production): the scheduler, waiting
-	// whatever internal/cadence decides after each sweep, using After.
+	// Tick is a test hook: fixed ticks instead of the adaptive cadence's
+	// schedule (lifecycle's Next). nil, in production: the schedule.
 	Tick          <-chan time.Time
 	HeartbeatTick <-chan time.Time // nil: every cfg.Heartbeat
 	Signals       <-chan os.Signal // nil: SIGINT and SIGTERM
@@ -356,85 +360,41 @@ func run(ctx context.Context, cfg config.Config, d deps) error {
 		}()
 	}
 
-	sweeper := &sweep.Sweeper{Tanks: cfg.Tanks, Source: d.Source, Now: d.Now, Synced: d.Synced}
+	// The sweep's timestamp is the wall clock (it's published); lifecycle
+	// and the cadence's schedule run on deps.Now, monotonic in production.
+	// They're one clock in production and two in tests, so a test can step
+	// the wall clock alone, as NTP does.
+	wall := d.Wall
+	if wall == nil {
+		wall = d.Now
+	}
+	job := &sweepJob{
+		sweeper: &sweep.Sweeper{Tanks: cfg.Tanks, Source: d.Source, Now: wall, Synced: d.Synced},
+		cadence: cad, tracker: tracker, pub: d.Pub, prefix: prefix,
+		logger: d.Logger, verbose: vlog,
+		interval: cad.Status().Interval,
+	}
 
-	// The ticks. In production the scheduler makes them, one per sweep,
-	// each as far after the last as the cadence decided; every Work reports
-	// to it (below), and lifecycle's OnSkip tells it of a tick lifecycle
-	// dropped, which it resends. A test's deps.Tick replaces it with ticks
-	// of its own.
-	tick := d.Tick
-	reportSweep := func(time.Duration) {} // the scheduler's Report, when there is one
-	onSkip := tracker.SkippedTick
-	if tick == nil {
-		after := d.After
-		if after == nil {
-			after = time.After
-		}
-		sctx, stop := context.WithCancel(ctx)
-		defer stop() // after lifecycle.Run returns: the last sweep has reported by then
-		sched := newScheduler(sctx, d.Now, after, tracker.SetNextDue, tracker.SkippedTick)
-		// The immediate sweep starts about now, without a tick: it's the
-		// first anchor. (Not run's start: the clock sync wait and startup
-		// checks have run since.) d.Now() is evaluated here, not in the
-		// goroutine.
-		go sched.run(d.Now())
-		tick, reportSweep = sched.Tick(), sched.Report
-		// A tick lifecycle drops here is resent, not lost, so it isn't a
-		// skipped tick; the scheduler counts the ones an overrun misses.
-		onSkip = sched.Skipped
+	// The schedule. In production lifecycle asks nextSweep for each next
+	// sweep's time, once it has seen the last one finish (Config.Next,
+	// common lifecycle's decision 6): as far after the last due time as
+	// the cadence decided. A test's deps.Tick replaces it with fixed ticks
+	// of its own; then a tick during a sweep is skipped, as it always was.
+	var next func(time.Time, error) time.Time
+	if d.Tick == nil {
+		next = nextSweep(&cadence.Schedule{}, d.Now, job.Interval, tracker.SetNextDue, tracker.SkippedTick)
 	}
 
 	return lifecycle.Run(ctx, lifecycle.Config{
-		Immediate: true,
-		Interval:  cfg.Sweep.Interval, // unused while Tick is set, which it always is
-		Heartbeat: cfg.Heartbeat,
-		Work: func(ctx context.Context, started time.Time) error {
-			// Every Work reports, even one that fails (a cancelled sweep at
-			// shutdown), or the scheduler would wait for it for ever. A
-			// sweep that didn't complete leaves the cadence as it was.
-			next := cad.Status().Interval
-			defer func() { reportSweep(next) }()
-
-			sw, err := sweeper.Sweep(ctx)
-			if err != nil {
-				return err
-			}
-			// started is lifecycle's start for this unit, from deps.Now
-			// (time.Now: monotonic), so a wall-clock step can't move the
-			// cadence; sw.At is the wall-clock timestamp it publishes.
-			decision := cad.Observe(sw, started)
-			next = decision.Interval
-			tracker.RecordSweep(sw)
-			tracker.RecordCadence(cad.Status())
-			// Verbose: every sweep, one line, from the sweep already in hand.
-			// It goes before the fault line, so with verbose on a faulty
-			// sweep reads as its values, then what was wrong with them.
-			vlog.Print(sw.Line())
-			var errs []error
-			for _, t := range sw.Tanks {
-				if err := d.Pub.Publish(mqttpub.Message{
-					Topic: payload.StateTopic(prefix, t.DeviceID), Payload: string(payload.State(sw, t)), Retained: true,
-				}); err != nil {
-					errs = append(errs, fmt.Errorf("publish %s: %w", t.DeviceID, err))
-				}
-			}
-			if faults := sw.Faults(); faults != "" {
-				ok, failed := sw.Counts()
-				d.Logger.Printf("sweep: %d ok, %d failed, %s: %s", ok, failed, sw.Took(), faults)
-			}
-			// Verbose: a trigger or a change of mode, after the sweep's own
-			// lines, since it's what the sweep decided about the next one.
-			if line := decision.Line(); line != "" {
-				vlog.Print(line)
-			}
-			return errors.Join(errs...)
-		},
+		Immediate:     true,
+		Heartbeat:     cfg.Heartbeat,
+		Work:          job.Work,
+		Next:          next,
 		Ready:         func() bool { return tracker.Snapshot().Ready },
 		Emit:          func(e lifecycle.Event) error { return publishStatus(eventName(e.Kind), e.At, e.Reason) },
-		OnSkip:        onSkip,
+		OnSkip:        tracker.SkippedTick, // only with deps.Tick: Next has no ticks to skip
 		Now:           d.Now,
-		Tick:          tick,
+		Tick:          d.Tick,
 		HeartbeatTick: d.HeartbeatTick,
 		Signals:       d.Signals,
 		Logger:        d.Logger,
