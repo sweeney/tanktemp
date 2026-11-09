@@ -168,9 +168,12 @@ type Decision struct {
 // every other change of mode:
 //
 //	cadence: fast 10s (hot-water-cylinder/bottom -3.2 °C/min)
-//	cadence: decay 10.4s
+//	cadence: decay from 10.4s
 //	cadence: slow 30s
 //
+// The decay line says "from": its first interval is (about) the fast one,
+// and "decay 10s" read as if nothing had changed (review on #4, on the
+// rig). The gaps then rise from there to the slow interval.
 // They start "cadence:", not "sweep", so `grep '^sweep '` still gives the
 // readings and `grep '^sweep:'` the faults (GUESSES G42). The probe is
 // tank/position, as the journal's other lines name it. The interval is the
@@ -180,6 +183,8 @@ func (d Decision) Line() string {
 	switch {
 	case d.Trigger != nil:
 		return fmt.Sprintf("cadence: fast %s (%s/%s %+.1f °C/min)", iv, d.Trigger.DeviceID, d.Trigger.Position, d.Trigger.CPerMin)
+	case d.Changed && d.Mode == Decay:
+		return fmt.Sprintf("cadence: decay from %s", iv)
 	case d.Changed:
 		return fmt.Sprintf("cadence: %s %s", d.Mode, iv)
 	}

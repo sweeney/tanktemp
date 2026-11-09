@@ -232,7 +232,7 @@ day. journald copes, but they bury the lines that matter.
 
   ```
   cadence: fast 10s (left/bottom -3.2 °C/min)
-  cadence: decay 10.4s
+  cadence: decay from 10.4s
   cadence: slow 30s
   ```
 

@@ -575,7 +575,7 @@ func TestLogLines(t *testing.T) {
 	want := []string{
 		"cadence: fast 10s (cyl/bottom -4.0 °C/min)",
 		"cadence: fast 10s (cyl/bottom -3.0 °C/min)",
-		"cadence: decay 10.4s",
+		"cadence: decay from 10.4s",
 		"cadence: slow 30s",
 	}
 	if strings.Join(lines, "\n") != strings.Join(want, "\n") {

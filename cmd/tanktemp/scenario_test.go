@@ -151,7 +151,7 @@ func TestAdaptiveCadenceScenarios(t *testing.T) {
 			name: "a draw: fast at once, hold, ease back, slow",
 			fast: fastDefaults(), verbose: true, probes: map[string]func(int) reading.Reading{bottom: draw}, runFor: 15 * time.Minute,
 			gaps:  theDrawsGaps,
-			lines: []string{"cadence: fast 10s (hot-water-cylinder/bottom -8.0 °C/min)", "cadence: decay 10s", "cadence: slow 30s"},
+			lines: []string{"cadence: fast 10s (hot-water-cylinder/bottom -8.0 °C/min)", "cadence: decay from 10s", "cadence: slow 30s"},
 		},
 		{
 			name:    "no sweep.fast: the same draw changes nothing",
@@ -223,7 +223,7 @@ func TestAdaptiveCadenceScenarios(t *testing.T) {
 			lines: []string{
 				"cadence: fast 10s (hot-water-cylinder/bottom -8.0 °C/min)",
 				"cadence: fast 10s (second/middle +12.0 °C/min)",
-				"cadence: decay 10s", "cadence: slow 30s",
+				"cadence: decay from 10s", "cadence: slow 30s",
 			},
 		},
 		{
@@ -254,7 +254,7 @@ func TestAdaptiveCadenceScenarios(t *testing.T) {
 				return draw(i)
 			}},
 			gaps:  theDrawsGaps,
-			lines: []string{"cadence: fast 10s", "sweep: 1 ok, 1 failed, 0s: not_present: hot-water-cylinder/bottom", "cadence: decay 10s"},
+			lines: []string{"cadence: fast 10s", "sweep: 1 ok, 1 failed, 0s: not_present: hot-water-cylinder/bottom", "cadence: decay from 10s"},
 			check: onlyTheDraw,
 		},
 		{
@@ -277,7 +277,7 @@ func TestAdaptiveCadenceScenarios(t *testing.T) {
 				return draw(i)
 			}},
 			gaps:  theDrawsGaps,
-			lines: []string{"cadence: fast 10s", "sweep: 0 ok, 2 failed, 0s: discovery failed: no 1-Wire bus masters; not_present: hot-water-cylinder/bottom, hot-water-cylinder/top", "cadence: decay 10s"},
+			lines: []string{"cadence: fast 10s", "sweep: 0 ok, 2 failed, 0s: discovery failed: no 1-Wire bus masters; not_present: hot-water-cylinder/bottom, hot-water-cylinder/top", "cadence: decay from 10s"},
 			check: onlyTheDraw,
 		},
 		{
@@ -285,7 +285,7 @@ func TestAdaptiveCadenceScenarios(t *testing.T) {
 			fast: fastDefaults(), verbose: true, probes: map[string]func(int) reading.Reading{bottom: draw}, runFor: 15 * time.Minute,
 			wall:  map[int]time.Duration{5: -time.Hour, 20: 2 * time.Hour},
 			gaps:  theDrawsGaps,
-			lines: []string{"cadence: fast 10s (hot-water-cylinder/bottom -8.0 °C/min)", "cadence: decay 10s", "cadence: slow 30s"},
+			lines: []string{"cadence: fast 10s (hot-water-cylinder/bottom -8.0 °C/min)", "cadence: decay from 10s", "cadence: slow 30s"},
 			check: func(t *testing.T, r scenarioRun) {
 				// The published timestamps did step: they're the wall clock,
 				// and sweeps 6 and 21 are the first stamped after each step.
@@ -339,7 +339,7 @@ func TestAdaptiveCadenceScenarios(t *testing.T) {
 				return draw(i)
 			}},
 			gaps:  []gapRule{exactly(s30, 2), exactly(s10, 13), easing(3), exactly(s10, 13), easingToSlow(18), thenAll(s30)},
-			lines: []string{"cadence: fast 10s", "cadence: decay 10s", "cadence: fast 10s", "cadence: decay 10s", "cadence: slow 30s"},
+			lines: []string{"cadence: fast 10s", "cadence: decay from 10s", "cadence: fast 10s", "cadence: decay from 10s", "cadence: slow 30s"},
 		},
 	}
 	for _, sc := range scenarios {
