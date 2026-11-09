@@ -198,7 +198,7 @@ dimensions are in `devices_<site>`, not here.
 `log.verbose` (2026-11-09, issue #2) is a boolean, not levels, because
 tanktemp has two audiences: normal running and someone at the bench. Off,
 the journal gets startup problems, sweeps with faults, MQTT reconnects and
-the lifecycle. On, it also gets one line per sweep (`sweep 4.0s 10/10 left
+the lifecycle. On, it also gets one line per sweep (`sweep 4.03s 10/10 left
 36.2 … | right 39.9 …`, bottom to top, `null` for a failed probe) and one per
 retried read. It's applied at start: changing it is a config install and
 restart, with no SIGHUP or HTTP toggle. `/api/status` and `-check-config`

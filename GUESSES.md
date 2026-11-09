@@ -36,13 +36,15 @@ The issue settled most of it. These are the choices it left open:
 
 | # | Guess | Why | To change |
 |---|---|---|---|
-| G29 | **One verbose line per sweep, not per tank**, with every tank on it, separated by ` \| `: `sweep 4.0s 9/10 left 36.2 … \| right 39.9 …`. | The issue allowed either. One line keeps a sweep's tanks together, and `grep '^sweep '` still gets everything. | `sweep.Sweep.Line` |
+| G29 | **One verbose line per sweep, not per tank**, with every tank on it, separated by ` \| `: `sweep 4.03s 9/10 left 36.2 … \| right 39.9 …`. After review, the duration is `Sweep.Took()`, exactly as the fault line shows it. | The issue allowed either. One line keeps a sweep's tanks together, and `grep '^sweep '` still gets everything. | `sweep.Sweep.Line` |
 | G30 | **Values to 0.1 °C, by device_id with no positions**, bottom (order 1) first, as the issue's example. A failed probe is `null`, with no code. | Short enough to read across a terminal. The fault line on the next line names the code and the position. | `sweep.Sweep.Line` |
-| G31 | **Every failed attempt is logged, including the last**, with the handler's own error text. `not_present` is never logged as a retry. | The last attempt's error has detail the fault line's code lacks. A missing sensor isn't retried, and the fault line already names it. | `readChecked` in `internal/onewire/source.go` |
+| G31 | **Every failed attempt is logged, including the last**, with the handler's own error text minus its ROM prefix, and named by tank/position and ROM (`cmd/tanktemp`'s `retryLogger`, so `onewire` never sees the config). `not_present` is never logged as a retry. | The last attempt's error has detail the fault line's code lacks. A missing sensor isn't retried, and the fault line already names it. | `readChecked` in `internal/onewire/source.go` |
 | G32 | **The 85 °C extra read is logged** with its outcome. | It's a retry in all but name (G2), and the one most worth seeing at the bench. | `recheck85` |
 | G33 | **`-check-config` says `verbose log off` or `verbose log ON`, before `publishing to`.** | `deploy/lib.sh`'s `parse_check_config` reads the prefix and broker from the end of that line. The capitals make it stand out in `./deploy.sh --check`. | `realMain` |
 | G34 | **No cadence lines yet.** The verbose logger is ready for them, but adaptive cadence (#1) isn't built. | Nothing to log until #1 lands. | #1 |
 | G35 | **`verbose` is in `/api/status` only**, not `/healthz` or the MQTT status. | The issue asked for `/api/status`. The MQTT payloads are the wire contract, and this is a local diagnostic. | `web.apiStatus` |
+| G36 | **A failed discovery leads the always-on fault line** (`discovery failed: …; not_present: …`), rather than getting a line of its own or being verbose-only. Added after review on #3. | When discovery fails every probe fails, so the fault line is printed anyway. This gives the reason at no extra cadence. It slightly widens the "always logged" set the issue listed, but only inside an existing line. | `sweep.Sweep.Faults` |
+| G37 | **Unexpected thermometers end the verbose line** (`\| unexpected 28-…`), and aren't faults. Added after review on #3. | They're what you look for while wiring a probe, and they don't make a sweep fail. | `sweep.Sweep.Line` |
 
 The table below is the original record of each guess.
 

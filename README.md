@@ -138,21 +138,28 @@ gets:
 - **every sweep, one line:** duration, probes OK/total, then each tank's
   calibrated readings to 0.1 °C from the bottom (order 1) up, tanks
   separated by `|`. A failed probe is `null` in its place, and the usual
-  fault line follows:
+  fault line follows with the same duration. A thermometer on a bus that
+  isn't in the config ends the line:
 
   ```
-  sweep 4.0s 9/10 left 36.2 58.4 null 66.1 65.2 | right 39.9 53.3 54.1 49.6 57.2
+  sweep 4.03s 9/10 left 36.2 58.4 null 66.1 65.2 | right 39.9 53.3 54.1 49.6 57.2 | unexpected 28-…
   sweep: 9 ok, 1 failed, 4.03s: crc: left/middle
   ```
 
-- **every retried read:** which attempt failed and why, and the extra read a
-  85.000 °C value gets (GUESSES G2):
+- **every retried read:** the probe's tank/position and ROM, which attempt
+  failed and why, and the extra read a 85.000 °C value gets (GUESSES G2),
+  always with its outcome:
 
   ```
-  read 28-… attempt 1/3: crc (28-…: scratchpad CRC mismatch)
-  read 28-… attempt 1/3: 85.000 °C, reading once more to check
-  read 28-… extra read: 60.000 °C, keeping it
+  read left/middle 28-… attempt 1/3: crc (scratchpad CRC mismatch)
+  read left/top 28-… attempt 1/3: 85.000 °C, reading once more to check
+  read left/top 28-… extra read: 60.000 °C, keeping it
   ```
+
+Whether verbose is on or not, a failed discovery (no bus masters, say) leads
+the fault line, because it's why every probe after it is `not_present`:
+`sweep: 0 ok, 10 failed, 1ms: discovery failed: no 1-Wire bus masters;
+not_present: …`.
 
 `journalctl -u tanktemp -o cat | grep '^sweep '` gives the readings over
 time. Verbose output never changes what is read, published or when: the lines
