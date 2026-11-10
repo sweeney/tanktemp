@@ -111,9 +111,14 @@ than read as "off": leave the block out for a fixed interval.
 
 ### Tuning
 
-The default trigger (1.5 °C/min) and hold (2m) are guesses from two days of
-recordings (GUESSES G38, G39); tune them from `/api/status` and the verbose
-log. One thing the first test on the rig showed (G51): at a 10 s fast
+The default trigger (1.5 °C/min) and hold (2m) started as guesses from two
+days of recordings (GUESSES G38, G39); tune them from `/api/status` and the
+verbose log. A 23 h replay on the rig confirmed 1.5: it catches every draw a
+lower trigger does, at most one sweep later, for about 7% fewer messages.
+It leaves slow warming (under about 1.5 °C/min) at the slow interval; set
+1.0 to sample reheats fast from their first minute. Above 2.0, reheats
+start late and small tap-run draws are missed. One thing the first test on
+the rig showed (G51): at a 10 s fast
 interval the trigger is, in practice, a number of sensor steps. 1.0 °C/min
 over 10 s is 0.167 °C, three DS18B20 steps, while over 30 s it's eight. So
 staying fast is much easier than going fast. On the rig that was right
