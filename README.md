@@ -154,7 +154,12 @@ No hardware, root or broker needed. There are two layers:
   directory under `testdata/sysfs` is a test case with its own
   `expect.json`. There are fuzz targets, every raw register value is
   checked, and the reading contract suite runs against both the fake and the
-  real handler.
+  real handler. CI fuzzes each target for a fixed 1,000,000 inputs
+  (`-fuzztime 1000000x`, not a duration: issue #5, and `ci_test.go` pins
+  it). For a longer run locally, `go test -run '^$' -fuzz '^FuzzParseW1Slave$'
+  -fuzztime 10m ./internal/onewire/`; a time-based run that ends with
+  `context deadline exceeded` and no new file under `testdata/fuzz` found
+  nothing.
 
 To capture a new hardware state as a fixture (read-only on the Pi):
 

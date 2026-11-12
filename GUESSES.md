@@ -68,6 +68,17 @@ choices it left open, or that building it turned up:
 | G50 | **The hold can run one fast sweep longer than `hold`.** The cadence measures time between sweep starts, which lag their due times by a few ms, so a sweep due exactly at `hold` after the trigger can land a hair before it. | Harmless (one more fast sweep), and the alternative, measuring on tick times, would give the core a clock it doesn't have. | `cadence.Settings.at` |
 | G51 | **At the fast interval, the trigger is in practice a step count, so staying fast is easier than going fast.** Found on the rig (review on #4, a reheat at 1.0 °C/min): at a 10 s gap, 1.0 °C/min is 0.167 °C, three DS18B20 steps, and every hold-extending trigger was exactly 1.0 or 1.1. At the 30 s slow interval the same setting needs 0.5 °C, eight steps. Nothing changes for now; the rig stays at 1.0 to gather data. | There it was right: the changes were real and one-way (heating, then the top probe settling for 5 min after the boiler stopped), so a 15 min reheat got a 27 min fast spell, all of it worth sampling. On a noisier probe, three-step jitter could hold fast indefinitely. If that's seen: keep `trigger_c_per_min` at 1.5 or more with a 10 s fast interval (4 steps), or raise `MinChangeC` (G40), or make the minimum change scale with the gap. | `sweep.fast.trigger_c_per_min`, `cadence.MinChangeC` |
 
+## The fuzz step's deadline, issue #5 (2026-11-12)
+
+The issue settled the fix: `-fuzztime 1000000x`, a count of inputs, not
+`20s`. Locally that's 18 s, 13 s and 14 s for the three targets, all
+passing. These are the choices it left open:
+
+| # | Guess | Why | To change |
+|---|---|---|---|
+| G52 | **The fuzz step has `timeout-minutes: 10`.** | A count has no deadline, and go test's `-timeout` doesn't stop a fuzz run: the test binary turns its alarm off once the unit tests and seeds are done (`testing.M.Run` calls `stopAlarm` before fuzzing starts). A local run with `-timeout 5s` and a huge count was still going after 2 minutes. Without a step timeout a truly stuck worker would hold the job for GitHub's 6 h default. The step takes under a minute, so 10 leaves room for a runner several times slower than the 40k executions/s the issue saw, and still fails within minutes. | `timeout-minutes` on `fuzz (short)` in `.github/workflows/ci.yml` |
+| G53 | **`ci_test.go` pins the step**: every `-fuzztime` is a count (`[1-9][0-9]*x`), the step has a timeout, and its `for t in …` loop names exactly the `Fuzz…(*testing.F)` functions in `internal/onewire`'s test files. The last check goes beyond the issue. | Configuration broke the build here with no code wrong, so its shape gets a test like any other behaviour, and `go test ./...` runs it in CI. The target list is checked because `go test -fuzz` with a pattern that matches no target passes silently, so a renamed target would leave the step fuzzing nothing. The loop is read with a regexp, not a shell parser: the step is one short `for` loop, and a rewrite that breaks the regexp fails the test loudly rather than passing. | `ci_test.go` |
+
 The table below is the original record of each guess.
 
 | # | Guess | Why | To change |
