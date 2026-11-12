@@ -434,12 +434,9 @@ the device's quirks are pinned down.
   - when `Check()` passes, the CRC is valid, the value is in range, and it
     matches the kernel's `t=` value.
 
-  CI runs the seeds on every push, plus a short `-fuzz` run: 1,000,000
-  inputs per target (`-fuzztime 1000000x`), about 15 s each. It's a count,
-  not a duration, because a time-based run can end in `context deadline
-  exceeded` with nothing wrong (issue #5); `ci_test.go` pins that, the
-  step's timeout, and that every target is in the loop. Longer runs are
-  done locally.
+  CI runs the seeds on every push, plus a short `-fuzz` run of 1,000,000
+  inputs per target, a count rather than a duration (issue #5, GUESSES
+  G52–G53). Longer runs are done locally.
 - **Exhaustive where it's cheap:** all 65,536 raw temperature register values
   go through `MilliC` and are compared with the kernel's formula.
 - **Concurrency:** `-race`, parallel reads per bus with injected latency, and
