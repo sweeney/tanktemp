@@ -22,10 +22,19 @@ jobs:
         run: go test -run 'Golden' ./internal/payload/...
       - name: test
         run: go test -race -cover ./...
+      # A fixed number of inputs per target, not a duration (issue #5). When a
+      # time-based -fuzztime runs out while a worker is still busy, Go reports
+      # "context deadline exceeded" and fails the target with nothing wrong.
+      # 1,000,000 inputs is about the 20 s each this step used to run, and the
+      # same amount of fuzzing on every runner. A count has no deadline, and
+      # go test's -timeout doesn't cover fuzzing, so timeout-minutes is the
+      # only stop for a worker that truly hangs. ci_test.go pins all of this,
+      # and that the loop names every Fuzz target in internal/onewire.
       - name: fuzz (short)
+        timeout-minutes: 10
         run: |
           for t in FuzzParseW1Slave FuzzScratchpadCheck FuzzMasterSlaves; do
-            go test -run '^$' -fuzz "^$t\$" -fuzztime 20s ./internal/onewire/
+            go test -run '^$' -fuzz "^$t\$" -fuzztime 1000000x ./internal/onewire/
           done
 
   build:
