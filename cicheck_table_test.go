@@ -5,7 +5,9 @@ package tanktemp_test
 // real test files. A new corner case is a new row.
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"slices"
 	"strings"
 	"testing"
@@ -322,7 +324,7 @@ const fuzzA = "func FuzzA(f *testing.F) {}"
 func TestFuzzTargets(t *testing.T) {
 	for _, tc := range []struct {
 		what    string
-		fsys    fstest.MapFS
+		fsys    fs.FS
 		want    []string
 		wantErr string
 	}{
@@ -386,6 +388,16 @@ func FuzzResult(f *testing.F) error { return nil }
 func FuzzValue(f testing.F) {}
 func FuzzGeneric[T any](f *testing.F) {}
 `)},
+			want: nil,
+		},
+		{
+			what: "a name that doesn't start with Fuzz, even with a *testing.F",
+			fsys: fstest.MapFS{"a/a_test.go": src("a", "func helper(f *testing.F) {}\nfunc TestFuzzA(f *testing.F) {}")},
+			want: nil,
+		},
+		{
+			what: "a pointer to something that's neither testing.F nor F",
+			fsys: fstest.MapFS{"a/a_test.go": src("a", "type G[T any] struct{}\nfunc FuzzSlice(f *[]int) {}\nfunc FuzzIndexed(f *G[int]) {}")},
 			want: nil,
 		},
 		{
@@ -453,6 +465,25 @@ func FuzzGeneric[T any](f *testing.F) {}
 			wantErr: "found packages",
 		},
 		{
+			// go/build lists a directory before the walk does, so failing only
+			// the first listing pins go/build's error path, not the walk's.
+			what:    "a directory that can't be listed",
+			fsys:    failFS{MapFS: fstest.MapFS{"a/a_test.go": src("a", fuzzA)}, readDir: "a", listed: map[string]int{}},
+			wantErr: "failFS: ReadDir a",
+		},
+		{
+			what:    "a file whose info can't be read",
+			fsys:    failFS{MapFS: fstest.MapFS{"a/a_test.go": src("a", fuzzA)}, info: "a_test.go"},
+			wantErr: "failFS: Info a_test.go",
+		},
+		{
+			// go/build opens the file through fsys.Open, so only the second
+			// read, the whole file for the parser, fails.
+			what:    "a test file that can't be read",
+			fsys:    failFS{MapFS: fstest.MapFS{"a/a_test.go": src("a", fuzzA)}, readFile: "a/a_test.go"},
+			wantErr: "failFS: ReadFile a/a_test.go",
+		},
+		{
 			what: "an empty tree",
 			fsys: fstest.MapFS{},
 			want: nil,
@@ -466,4 +497,45 @@ func FuzzGeneric[T any](f *testing.F) {}
 			}
 		})
 	}
+}
+
+// failFS is a hand-written fake: an fstest.MapFS that fails one named
+// operation, for the I/O error paths a MapFS can't reach. Everything else
+// goes to the MapFS.
+type failFS struct {
+	fstest.MapFS
+	readDir  string         // the first fs.ReadDir of this directory fails
+	listed   map[string]int // ReadDir calls so far, by directory
+	info     string         // Info of the entry with this base name fails
+	readFile string         // fs.ReadFile of this file fails (fsys.Open still works)
+}
+
+func (f failFS) ReadDir(name string) ([]fs.DirEntry, error) {
+	if f.listed != nil {
+		f.listed[name]++
+	}
+	if name == f.readDir && f.listed[name] == 1 {
+		return nil, errors.New("failFS: ReadDir " + name)
+	}
+	es, err := f.MapFS.ReadDir(name)
+	for i, e := range es {
+		if e.Name() == f.info {
+			es[i] = failInfo{e}
+		}
+	}
+	return es, err
+}
+
+func (f failFS) ReadFile(name string) ([]byte, error) {
+	if name == f.readFile {
+		return nil, errors.New("failFS: ReadFile " + name)
+	}
+	return f.MapFS.ReadFile(name)
+}
+
+// failInfo is a DirEntry whose Info fails.
+type failInfo struct{ fs.DirEntry }
+
+func (e failInfo) Info() (fs.FileInfo, error) {
+	return nil, errors.New("failFS: Info " + e.Name())
 }

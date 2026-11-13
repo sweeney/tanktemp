@@ -212,11 +212,14 @@ func skipDir(name string) bool {
 // (where it would match nothing and pass silently). Nested modules are left
 // to their own CI.
 func fuzzTargets(fsys fs.FS) ([]string, error) {
+	// Every file read goes through fsys. With GOROOT and GOPATH empty,
+	// ImportDir of a local directory never looks anywhere else, so the
+	// HasSubdir hook (used only to place a directory under one of them) is
+	// never called and isn't set.
 	ctxt := build.Default
 	ctxt.GOROOT, ctxt.GOPATH = "", ""
 	ctxt.JoinPath = path.Join
 	ctxt.IsAbsPath = path.IsAbs
-	ctxt.HasSubdir = func(string, string) (string, bool) { return "", false }
 	ctxt.IsDir = func(p string) bool {
 		fi, err := fs.Stat(fsys, p)
 		return err == nil && fi.IsDir()
