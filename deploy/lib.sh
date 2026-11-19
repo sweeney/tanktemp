@@ -29,6 +29,7 @@ SUDO_CMDS="systemctl journalctl cat install cmp" # the commands sudo_rules names
 BOOT_CONFIG="${DEPLOY_BOOT_CONFIG:-/boot/firmware/config.txt}"
 W1_DEVICES="${DEPLOY_W1_DEVICES:-/sys/bus/w1/devices}"
 VERIFY_TIMEOUT="${DEPLOY_VERIFY_TIMEOUT:-60}"
+REBOOT_TIMEOUT="${DEPLOY_REBOOT_TIMEOUT:-300}" # setup-pi.sh: for the Pi to come back with its 1-Wire buses
 BROKER_TIMEOUT="${DEPLOY_BROKER_TIMEOUT:-20}"
 POLL="${DEPLOY_POLL:-1}"
 HOST_FILE=deploy/host # gitignored: one line, user@host

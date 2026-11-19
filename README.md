@@ -303,7 +303,7 @@ as it's given to `tools/guessreview/answers.json`, which is gitignored.
 
 ```sh
 ./setup-pi.sh --check user@host   # read-only: what a first install would do
-./setup-pi.sh user@host           # first install (full sudo): sudo rules, config, unit, first build
+./setup-pi.sh user@host           # first install (full sudo): sudo rules, 1-Wire overlays (+ reboot), config, unit, first build
 ./deploy.sh --check user@host     # read-only pre-flight
 ./deploy.sh user@host             # build, upload, switch, verify, roll back on failure
 ./deploy.sh --rollback user@host

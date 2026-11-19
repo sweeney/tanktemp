@@ -79,9 +79,11 @@ on each, is set in config.
 11. **The prototype rig is the production Pi.** I may test on it, and may stop
     `templog` to do so. **Nothing I do may leave it unable to boot or
     unreachable.** That means read-only `--check` runs first, no edits to
-    `/boot/firmware/config.txt` (the rig's overlays are already there, so
-    `setup-pi.sh` should find nothing to change there), no reboots without
-    asking, and everything I change on it is reversible.
+    `/boot/firmware/config.txt` by hand, no reboots without asking, and
+    everything I change on it is reversible. Since 2026-11-19 (the first rig
+    died; its replacement had a fresh OS) `setup-pi.sh` adds missing
+    `dtoverlay=w1-gpio` lines itself, keeping a backup, and reboots only
+    after asking (or with `--yes`).
 12. **The deploy `lib.sh` is not centralised.** tanktemp copies
     boiler-sensor's, and the copy is recorded in common's PLAN.md.
 

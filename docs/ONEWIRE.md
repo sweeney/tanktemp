@@ -126,7 +126,8 @@ Tank temperatures change over minutes, so a 30 s interval is plenty.
 ### Enabling buses
 
 In `/boot/firmware/config.txt`, add one line per bus. Loading the same overlay
-more than once is supported:
+more than once is supported. `./setup-pi.sh` adds any that are missing (for
+the GPIOs given by `--w1-gpios`, default `4,17`) and reboots, asking first:
 
 ```
 dtoverlay=w1-gpio,gpiopin=4
