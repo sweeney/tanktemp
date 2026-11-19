@@ -5,18 +5,29 @@ This is for statehouse to implement a `tanktemp` adapter, following its
 code. The MQTT contract this builds on is [`WIRE.md`](WIRE.md), which is
 normative; this document says what statehouse should do with it.
 
-Status: **tanktemp is live; the adapter is not implemented.** Since
-2026-11-02 tanktemp publishes on the production prefix, `energy/hot_water`,
-with one cylinder of five probes (a second cylinder is to follow). Nothing
-consumes it yet. The contract was reviewed with its owner, and its changes
-since are listed in WIRE.md's Changes section.
+Status (checked 2026-11-13): **tanktemp is live, and statehouse and
+greenhouse both consume it.** tanktemp has published on the production
+prefix, `energy/hot_water`, since 2026-11-02, and with two cylinders of five
+probes each since 2026-11-08. statehouse's adapter is on: each of the ten
+probes is an `appliance_probe` device such as
+`probe_hot_water_cylinder_left_top`, with identity
+`tanktemp`/`hot_water_cylinder_left.top` and `part_of` its cylinder.
+greenhouse charts all ten, with history from 2026-11-11. The contract was
+reviewed with its owner, and its changes since are listed in WIRE.md's
+Changes section.
 
-Before the adapter is switched on, in this order:
+statehouse doesn't show the cylinders themselves yet: a `telemetry: false`
+entry never enters its store, so the asset relay below (manufacturer, model,
+the `cylinder` block) isn't visible. That's deliberate for now; the owner has
+a separate plan for the cylinders.
+
+These were the steps before the adapter was switched on, in this order, and
+all are done:
 
 1. statehouse moves to `github.com/sweeney/common/devices` **v0.2.0**
-   (tagged; statehouse pins v0.1.0 today), which decodes `part_of`,
-   `telemetry`, `cylinder` and the asset fields, and gives `SendsTelemetry`
-   and `PlaceOf`.
+   (tagged; statehouse pinned v0.1.0 when this was written), which decodes
+   `part_of`, `telemetry`, `cylinder` and the asset fields, and gives
+   `SendsTelemetry` and `PlaceOf`.
 2. statehouse leaves `telemetry: false` entries out of liveness and
    readings (see "devices_<site> entries"). How statehouse, countinghouse
    and greenhouse treat a configured device they never hear from is still
