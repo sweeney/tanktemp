@@ -32,7 +32,7 @@
 mqtt:
   broker: tcp://broker.example:1883
   # client_id: tanktemp-<hostname>
-  # topic_prefix: energy/hot_water   # use test/energy/hot_water while testing
+  # topic_prefix: water/hot/tanktemp   # use test/water/hot/tanktemp while testing
   # username: ""
   # password_file: /etc/tanktemp/mqtt-password   # root:tanktemp 0640
 

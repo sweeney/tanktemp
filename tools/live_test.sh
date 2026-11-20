@@ -29,7 +29,7 @@ not() { ! "$@"; }
 cat >"$WORK/block.yaml" <<'EOF'
 mqtt:
   broker: tcp://broker.example:1883
-  topic_prefix: test/energy/hot_water
+  topic_prefix: test/water/hot/tanktemp
 tanks: []
 EOF
 cat >"$WORK/flow.yaml" <<'EOF'
@@ -39,20 +39,20 @@ EOF
 cat >"$WORK/commented.yaml" <<'EOF'
 mqtt:
   broker: tcp://broker.example:1883
-  # topic_prefix: test/energy/hot_water
+  # topic_prefix: test/water/hot/tanktemp
 EOF
 printf 'tanks: []\n' >"$WORK/nobroker.yaml"
 
 run --check --config "$WORK/block.yaml"
 check "block style: broker and prefix" rc_is 0
-check "block style: url" says "live.html#ws=ws://broker.example:9001&prefix=test/energy/hot_water$"
+check "block style: url" says "live.html#ws=ws://broker.example:9001&prefix=test/water/hot/tanktemp$"
 check "block style: probe ok" says "^ok: broker.example:9001"
 
 run --check --config "$WORK/flow.yaml" --ws-port 8083
-check "flow style: default prefix, custom port" says "#ws=ws://192.0.2.9:8083&prefix=energy/hot_water$"
+check "flow style: default prefix, custom port" says "#ws=ws://192.0.2.9:8083&prefix=water/hot/tanktemp$"
 
 run --check --config "$WORK/commented.yaml"
-check "a commented-out prefix is ignored" says "prefix=energy/hot_water$"
+check "a commented-out prefix is ignored" says "prefix=water/hot/tanktemp$"
 
 NC_FAIL=1 run --check --config "$WORK/block.yaml"
 check "unreachable port fails" rc_is 1
@@ -80,7 +80,7 @@ check "demo url" says "live.html#demo=1$"
 rm -f "$WORK/opened"
 TMPDIR="$WORK" run --config "$WORK/block.yaml"
 check "opens a launcher, not the bare URL" not grep -q "#" "$WORK/opened"
-check "the launcher redirects to the full URL" grep -q "live.html#ws=ws://broker.example:9001&prefix=test/energy/hot_water" "$(cat "$WORK/opened" 2>/dev/null)"
+check "the launcher redirects to the full URL" grep -q "live.html#ws=ws://broker.example:9001&prefix=test/water/hot/tanktemp" "$(cat "$WORK/opened" 2>/dev/null)"
 
 rm -f "$WORK/opened"
 run --check --config "$WORK/block.yaml"

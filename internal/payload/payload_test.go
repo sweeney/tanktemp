@@ -125,10 +125,10 @@ func TestGoldenLWT(t *testing.T) {
 }
 
 func TestTopics(t *testing.T) {
-	if got := StateTopic("energy/hot_water", "hot-water-cylinder"); got != "energy/hot_water/hot-water-cylinder/state" {
+	if got := StateTopic("water/hot/tanktemp", "hot-water-cylinder"); got != "water/hot/tanktemp/hot-water-cylinder/state" {
 		t.Errorf("StateTopic = %s", got)
 	}
-	if got := StatusTopic("test/energy/hot_water"); got != "test/energy/hot_water/status" {
+	if got := StatusTopic("test/water/hot/tanktemp"); got != "test/water/hot/tanktemp/status" {
 		t.Errorf("StatusTopic = %s", got)
 	}
 }

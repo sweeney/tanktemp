@@ -30,7 +30,7 @@ func server(connected bool, sw *sweep.Sweep, problems ...startup.Problem) *Serve
 		Now:     func() time.Time { return start.Add(40 * time.Second) },
 		SysFS:   fstest.MapFS{"proc/loadavg": {Data: []byte("0.1 0.2 0.3 1/1 1\n")}},
 		Disk:    func() (sysinfo.Disk, error) { return sysinfo.Disk{TotalBytes: 1 << 30, FreeBytes: 1 << 29}, nil },
-		Prefix:  "test/energy/hot_water",
+		Prefix:  "test/water/hot/tanktemp",
 	}
 }
 
@@ -153,7 +153,7 @@ func TestAPIStatus(t *testing.T) {
 	if s["attempts"] != float64(1) || s["bus"] != "w1_bus_master1" {
 		t.Errorf("diagnostics: attempts %v bus %v", s["attempts"], s["bus"])
 	}
-	if body["topic_prefix"] != "test/energy/hot_water" || body["calibrated"] != true || body["interval_s"].(float64) != 30 {
+	if body["topic_prefix"] != "test/water/hot/tanktemp" || body["calibrated"] != true || body["interval_s"].(float64) != 30 {
 		t.Errorf("body = %v", body)
 	}
 	if p := body["startup_problems"].([]any); len(p) != 1 {

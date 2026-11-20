@@ -25,13 +25,13 @@ import (
 const (
 	top    = "28-0000117287e6"
 	bottom = "28-000011721ce9"
-	prefix = "test/energy/hot_water"
+	prefix = "test/water/hot/tanktemp"
 )
 
 func testConfig(t *testing.T) config.Config {
 	t.Helper()
 	c, err := config.Load([]byte(`
-mqtt: {broker: tcp://broker.example:1883, topic_prefix: test/energy/hot_water}
+mqtt: {broker: tcp://broker.example:1883, topic_prefix: test/water/hot/tanktemp}
 clock_sync_wait: 0s
 tanks:
   - device_id: hot-water-cylinder
@@ -267,7 +267,7 @@ func TestCheckConfig(t *testing.T) {
 	// deploy/lib.sh's parse_check_config reads the prefix and broker from
 	// the end of this line, so it must still end with them.
 	if code := realMain([]string{"-config", good, "-check-config"}, &out); code != 0 || !strings.Contains(out.String(), ": ok: 1 tank, 1 sensor, ") ||
-		!strings.HasSuffix(out.String(), ", publishing to energy/hot_water on tcp://b:1883\n") {
+		!strings.HasSuffix(out.String(), ", publishing to water/hot/tanktemp on tcp://b:1883\n") {
 		t.Errorf("good: code %d, out %q", code, out.String())
 	}
 	out.Reset()

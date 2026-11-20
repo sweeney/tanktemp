@@ -169,7 +169,7 @@ type Sensor struct {
 // Defaults.
 const (
 	DefaultW1Root      = "/sys/bus/w1/devices"
-	DefaultTopicPrefix = "energy/hot_water"
+	DefaultTopicPrefix = "water/hot/tanktemp"
 )
 
 func defaults() Config {
