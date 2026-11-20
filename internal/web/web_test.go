@@ -201,3 +201,33 @@ func TestAPIStatusVerbose(t *testing.T) {
 		}
 	}
 }
+
+func i64(v int64) *int64   { return &v }
+func str(v string) *string { return &v }
+
+// The meters block answers "is the meter alive?" on its own (washhouse's
+// meter_suspect points here): on /healthz and /api/status alike, after the
+// tanks, and [] with no meter.
+func TestMetersBlock(t *testing.T) {
+	s := server(true, sweepAt(reading.OK))
+	s.Meters = func() []MeterStatus {
+		return []MeterStatus{{
+			DeviceID: "hot_water_meter", Line: "gpiochip0:27", State: MeterCounting,
+			Level: str("closed"), Count: i64(131), CountingSince: str("2026-11-19T17:29:47Z"),
+			LastPulseAt: str("2026-11-20T09:08:43.000Z"), Noise: i64(15), Short: i64(0), Glitches: i64(0), Lost: i64(0),
+			PublishDropped: 2, Queued: 1,
+		}}
+	}
+	want := `{"device_id":"hot_water_meter","line":"gpiochip0:27","state":"counting","reason":null,"level":"closed","count":131,"counting_since":"2026-11-19T17:29:47Z","last_pulse_at":"2026-11-20T09:08:43.000Z","noise":15,"short":0,"glitches":0,"lost":0,"publish_dropped":2,"queued":1}`
+	for _, path := range []string{"/healthz", "/api/status"} {
+		rec, _ := get(t, s, path)
+		b := strings.Join(strings.Fields(rec.Body.String()), "")
+		if !strings.Contains(b, `"meters":[`+want+`]`) {
+			t.Errorf("%s: no meters block %s in\n%s", path, want, b)
+		}
+	}
+	rec, _ := get(t, server(true, sweepAt(reading.OK)), "/api/status")
+	if !strings.Contains(strings.Join(strings.Fields(rec.Body.String()), ""), `"meters":[]`) {
+		t.Errorf("no meters: %s", rec.Body.String())
+	}
+}

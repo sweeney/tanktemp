@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/sweeney/tanktemp/internal/config"
 	"github.com/sweeney/tanktemp/internal/meter"
 	"github.com/sweeney/tanktemp/internal/payload"
+	"github.com/sweeney/tanktemp/internal/web"
 )
 
 // meterQueue bounds the meter messages waiting for MQTT: about 8 minutes
@@ -190,3 +192,77 @@ func (m *meterRun) publisher(ctx context.Context) {
 
 func (m *meterRun) queued() int  { m.mu.Lock(); defer m.mu.Unlock(); return len(m.queue) }
 func (m *meterRun) dropped() int { m.mu.Lock(); defer m.mu.Unlock(); return m.drops }
+
+// meterStatus is the meter as /healthz and /api/status report it: made
+// before the HTTP server starts, so it reads "starting" until the line is
+// requested, then counting, failed or stopped.
+type meterStatus struct {
+	cfg config.Meter
+
+	mu     sync.Mutex
+	state  string
+	reason string
+	mr     *meterRun
+}
+
+// newMeterStatus is nil with no meter (report then says []).
+func newMeterStatus(cfgs []config.Meter) *meterStatus {
+	if len(cfgs) == 0 {
+		return nil
+	}
+	return &meterStatus{cfg: cfgs[0], state: web.MeterStarting}
+}
+
+func (v *meterStatus) counting(mr *meterRun) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.state, v.mr = web.MeterCounting, mr
+}
+
+func (v *meterStatus) fail(err error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.state, v.reason = web.MeterFailed, err.Error()
+}
+
+func (v *meterStatus) stop(err error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.state, v.reason = web.MeterStopped, err.Error()
+}
+
+// report is web.Server.Meters.
+func (v *meterStatus) report() []web.MeterStatus {
+	if v == nil {
+		return nil
+	}
+	v.mu.Lock()
+	state, reason, mr := v.state, v.reason, v.mr
+	v.mu.Unlock()
+	out := web.MeterStatus{DeviceID: v.cfg.DeviceID, Line: fmt.Sprintf("%s:%d", v.cfg.Chip, *v.cfg.GPIO), State: state}
+	if reason != "" {
+		out.Reason = &reason
+	}
+	if mr == nil {
+		return []web.MeterStatus{out}
+	}
+	out.PublishDropped, out.Queued = mr.dropped(), mr.queued()
+	if state != web.MeterCounting {
+		return []web.MeterStatus{out}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	s, ok := mr.loop.Snapshot(ctx, mr.d.Mono())
+	if !ok {
+		return []web.MeterStatus{out} // stopping: OnStop is about to say why
+	}
+	i64 := func(n uint64) *int64 { v := int64(n); return &v }
+	level, since := s.Level.String(), mr.since.UTC().Format(time.RFC3339)
+	out.Level, out.Count, out.CountingSince = &level, i64(s.Count), &since
+	out.Noise, out.Short, out.Glitches, out.Lost = i64(s.Noise), i64(s.Short), i64(s.Glitches), i64(s.Lost)
+	if s.LastPulseAt != nil {
+		p := mr.wallOf(*s.LastPulseAt).UTC().Format("2006-01-02T15:04:05.000Z07:00")
+		out.LastPulseAt = &p
+	}
+	return []web.MeterStatus{out}
+}

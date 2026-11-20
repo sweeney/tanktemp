@@ -29,6 +29,43 @@ type Server struct {
 	SysFS   fs.FS                        // rooted at "/"
 	Disk    func() (sysinfo.Disk, error) // root filesystem size
 	Prefix  string                       // MQTT topic prefix, shown on the page
+	// Meters reports each configured water meter; nil: none.
+	Meters func() []MeterStatus
+}
+
+// Meter states.
+const (
+	MeterStarting = "starting" // tanktemp is starting: the line isn't requested yet
+	MeterCounting = "counting" // the line is requested and the loop running
+	MeterFailed   = "failed"   // the line couldn't be requested (gpio_request_failed)
+	MeterStopped  = "stopped"  // the line stopped while running
+)
+
+// MeterStatus is one water meter on /healthz and /api/status: enough to
+// tell, on its own, whether the meter is alive. Values the meter can't
+// give (a failed or stopped line) are null.
+type MeterStatus struct {
+	DeviceID       string  `json:"device_id"`
+	Line           string  `json:"line"` // chip:gpio
+	State          string  `json:"state"`
+	Reason         *string `json:"reason"` // why failed or stopped
+	Level          *string `json:"level"`
+	Count          *int64  `json:"count"`
+	CountingSince  *string `json:"counting_since"`
+	LastPulseAt    *string `json:"last_pulse_at"`
+	Noise          *int64  `json:"noise"`
+	Short          *int64  `json:"short"`
+	Glitches       *int64  `json:"glitches"`
+	Lost           *int64  `json:"lost"`
+	PublishDropped int     `json:"publish_dropped"` // meter messages dropped by a slow broker (not litres)
+	Queued         int     `json:"queued"`          // meter messages waiting for MQTT
+}
+
+func (s *Server) meters() []MeterStatus {
+	if s.Meters == nil {
+		return []MeterStatus{}
+	}
+	return append([]MeterStatus{}, s.Meters()...)
 }
 
 // Handler returns the routes.
@@ -114,6 +151,7 @@ func (s *Server) healthReport() health.Report {
 			{Key: "ready", Value: snap.Ready},
 			{Key: "mqtt_connected", Value: snap.MQTTConnected},
 			{Key: "tanks", Value: tanks},
+			{Key: "meters", Value: s.meters()},
 			{Key: "last_sweep", Value: last},
 			{Key: "sweeps", Value: snap.Sweeps},
 			{Key: "skipped_ticks", Value: snap.SkippedTicks},
@@ -137,6 +175,7 @@ type apiStatus struct {
 	Verbose         bool              `json:"verbose"` // log.verbose: true means every sweep is being logged (issue #2)
 	Calibrated      bool              `json:"calibrated"`
 	Tanks           []json.RawMessage `json:"tanks"`
+	Meters          []MeterStatus     `json:"meters"`
 	Unexpected      []string          `json:"unexpected"`
 	DiscoverError   *string           `json:"discover_error"`
 	StartupProblems []problem         `json:"startup_problems"`
@@ -210,6 +249,7 @@ func (s *Server) apiStatus(w http.ResponseWriter, _ *http.Request) {
 	out.MQTTConnected = snap.MQTTConnected
 	out.Verbose = snap.Verbose
 	out.Tanks = []json.RawMessage{}
+	out.Meters = s.meters()
 	out.StartupProblems = problems(snap)
 	out.Sweep = cadenceBlock(snap.Cadence, snap.NextDue, now)
 	if snap.Last != nil {

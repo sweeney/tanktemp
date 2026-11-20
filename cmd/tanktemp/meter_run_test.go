@@ -280,3 +280,46 @@ func TestRunShutdownIsNotALineStop(t *testing.T) {
 		t.Errorf("a shutdown logged as the line stopping: %s", r.logs)
 	}
 }
+
+func (r *meterRig) apiMeters(t *testing.T) string {
+	t.Helper()
+	resp, err := http.Get(r.url + "/api/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	s := strings.Join(strings.Fields(string(b)), "")
+	_, m, _ := strings.Cut(s, `"meters":`)
+	return m
+}
+
+// /api/status (and /healthz) say whether the meter is alive, in each state.
+func TestRunReportsTheMeter(t *testing.T) {
+	r := startMeterRig(t, meterConfig(t), nil)
+	r.meterMsgs(t, 1)
+	r.line.Push(99*time.Second, meter.Closed)
+	r.ticks <- 99*time.Second + 50*time.Millisecond
+	r.meterMsgs(t, 2)
+	if m := r.apiMeters(t); !strings.HasPrefix(m, `[{"device_id":"hot_water_meter","line":"gpiochip0:27","state":"counting","reason":null,"level":"closed","count":1,"counting_since":"2026-11-02T21:00:00Z","last_pulse_at":"2026-11-02T20:59:59.000Z","noise":0,"short":0,"glitches":0,"lost":0,"publish_dropped":0,"queued":0}]`) {
+		t.Errorf("counting: %s", m)
+	}
+	r.line.Close()
+	deadline := time.Now().Add(3 * time.Second)
+	for m := r.apiMeters(t); !strings.HasPrefix(m, nospace(`[{"device_id":"hot_water_meter","line":"gpiochip0:27","state":"stopped","reason":"meter: the line's edges stopped","level":null,"count":null`)); m = r.apiMeters(t) {
+		if time.Now().After(deadline) {
+			t.Fatalf("stopped: %s", m)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestRunReportsAFailedMeter(t *testing.T) {
+	r := startMeterRig(t, meterConfig(t), errors.New("GPIO 27 on gpiochip0: device or resource busy"))
+	r.waitFor(t, 3)
+	if m := r.apiMeters(t); !strings.HasPrefix(m, nospace(`[{"device_id":"hot_water_meter","line":"gpiochip0:27","state":"failed","reason":"GPIO 27 on gpiochip0: device or resource busy","level":null,"count":null,"counting_since":null,"last_pulse_at":null,"noise":null,"short":null,"glitches":null,"lost":null,"publish_dropped":0,"queued":0}]`)) {
+		t.Errorf("failed: %s", m)
+	}
+}
+
+func nospace(s string) string { return strings.Join(strings.Fields(s), "") }

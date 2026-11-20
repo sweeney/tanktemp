@@ -319,10 +319,11 @@ func run(ctx context.Context, cfg config.Config, d deps) error {
 		Verbose: cfg.Log.Verbose, Cadence: cad.Status(),
 	})
 	prefix := cfg.MQTT.TopicPrefix
+	meterView := newMeterStatus(cfg.Meters) // before HTTP, which reports it
 
 	if d.Listener != nil {
 		srv := &http.Server{
-			Handler:           (&web.Server{Tracker: tracker, Now: d.Now, SysFS: d.SysFS, Disk: d.Disk, Prefix: prefix}).Handler(),
+			Handler:           (&web.Server{Tracker: tracker, Now: d.Now, SysFS: d.SysFS, Disk: d.Disk, Prefix: prefix, Meters: meterView.report}).Handler(),
 			ReadHeaderTimeout: 5 * time.Second,
 		}
 		go func() {
@@ -360,6 +361,7 @@ func run(ctx context.Context, cfg config.Config, d deps) error {
 	}
 	var mr *meterRun
 	var line meter.Source
+
 	meterCtx, stopMeter := context.WithCancel(context.Background())
 	meterDone := make(chan struct{})
 	defer func() {
@@ -380,10 +382,17 @@ func run(ctx context.Context, cfg config.Config, d deps) error {
 			}
 			mr, err = newMeter(mc, src, meterDeps{
 				Pub: d.Pub, Prefix: prefix, Wall: wall, Mono: d.Mono, Synced: d.Synced, Ticks: ticks, Logger: d.Logger,
-				OnStop: func(err error) { tracker.Fault(fmt.Sprintf("meter %s stopped: %v", mc.DeviceID, err)) },
+				OnStop: func(err error) {
+					meterView.stop(err)
+					tracker.Fault(fmt.Sprintf("meter %s stopped: %v", mc.DeviceID, err))
+				},
 			})
+			if err == nil {
+				meterView.counting(mr)
+			}
 		}
 		if err != nil {
+			meterView.fail(err)
 			report.Problems = append(report.Problems, startup.Problem{
 				Code: startup.CodeGPIORequestFailed, Message: fmt.Sprintf("meter %s: %v", mc.DeviceID, err),
 			})
