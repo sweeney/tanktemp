@@ -98,6 +98,7 @@ on each, is set in config.
 ```
 cmd/tanktemp/            main.go: flags (-config, -version, -check-config), wiring, nothing else
 cmd/w1capture/           read-only: snapshots /sys/bus/w1/devices into a fixture directory
+cmd/pulsewatch/          read-only: watches the meter's GPIO line, says what the counter makes of each edge
 internal/reading/        the domain boundary: Reading, Code (stable error codes), Topology,
                          and the Source interface. Fake + contract suite in reading/readingtest
 internal/onewire/        the only code that knows about sysfs or DS18B20s; implements
@@ -108,6 +109,10 @@ internal/sweep/          config + reading.Source + Clock → Sweep (per tank, or
                          calibrated). Pure
 internal/cadence/        (issue #1) Sweep → the interval until the next sweep: slow,
                          fast while a probe changes, easing back. Pure
+internal/meter/          (#9) the water meter: Edge, the Source interface, Counter (the
+                         litre rules, pure) and Loop (owns it). Fake + contract in metertest
+internal/gpioedge/       (#9) the only code that knows about GPIO: the meter's line through
+                         the character device (go-gpiocdev); implements meter.Source
 internal/payload/        the wire contract: topics + JSON encoders. Golden tests live here
 internal/startup/        startup report from reading.Source.Inspect + a SyncChecker
 internal/status/         thread-safe snapshot (last sweep, startup report, MQTT state)
@@ -115,6 +120,7 @@ internal/web/            /, /api/status, /healthz (via common/health)
 deploy/                  lib.sh (from boiler-sensor), tanktemp.service, config.example.yaml
 deploy.sh  setup-pi.sh  deploy_test.sh
 docs/ONEWIRE.md          moved from prototype/
+docs/METER.md            the water meter's hardware and counting (#9)
 docs/WIRE.md             the MQTT contract, normative
 docs/STATEHOUSE.md       the adapter spec for statehouse
 ```
@@ -131,6 +137,7 @@ through these interfaces:
 | Boundary | Interface | Real | Fake |
 |---|---|---|---|
 | 1-Wire sensors | `reading.Source` | `onewire.Source` | `readingtest.Fake` |
+| The water meter's GPIO line (#9) | `meter.Source` | `gpioedge.Open` | `metertest.Fake` |
 | MQTT | `Publisher` (declared where it's used) | `mqttpub.MQTTPublisher` | `mqttpub.Fake` |
 | Time | `Now` (lifecycle's and the cadence's, monotonic) and `Wall` (the sweep's published timestamp) | `time.Now` for both | a synctest bubble, with `Wall` stepped on its own |
 | Clock sync | `SyncChecker` | the `/run/systemd/timesync` flag | a bool |
@@ -165,7 +172,8 @@ guessed at.
 **Enforced, not just intended:** `boundaries_test.go` at the repo root runs
 `go list -deps` and fails if any core package imports `os`, `io/fs`, `net`,
 `syscall`, Paho, `common/mqttpub` or `internal/onewire`. Only `main.go`,
-`onewire`, `web` and `cmd/w1capture` touch the outside world.
+`onewire`, `gpioedge`, `web`, `cmd/w1capture` and `cmd/pulsewatch` touch
+the outside world.
 
 Dependencies: `gopkg.in/yaml.v3`, `common/lifecycle`, `common/mqttpub`
 (Paho), `common/health`. Otherwise stdlib. `CGO_ENABLED=0`. Go 1.26, as
@@ -349,7 +357,8 @@ It reports the same fields as boiler-sensor and pi-price-screen: `status`,
 `detail`, `version`, `uptime_s`, `start_time`, `goroutines`, `heap_mb`,
 `sys_mb`. It adds a `system` block from `health/sysinfo` (CPU temperature,
 load average, memory, root disk, the `NETWORK_*` values from
-`/run/pi-helper.env`), and a `tanks` summary. boiler-sensor's `deploy.sh`
+`/run/pi-helper.env`), a `tanks` summary, and (#9) a `meters` block: each
+meter's state, level, count and counters. boiler-sensor's `deploy.sh`
 checks `version` and `status`, so tanktemp's deploy can use the same check.
 
 `/api/status` returns the full last sweep and startup report as JSON, and
@@ -809,7 +818,7 @@ the pattern of its `boiler`, `ups` and `climate` adapters.
 
 None open as of 2026-11-11. Questions that turn up go here.
 
-## Build status (2026-11-13)
+## Build status (2026-11-20)
 
 Built overnight on 2026-10-31, released on 2026-11-01, and running on the rig
 since. How it got here is kept below, under History.
@@ -826,6 +835,7 @@ since. How it got here is kept below, under History.
 | 10 devices follow-up | released, `devices/v0.2.0`: asset fields, `cylinder`, `part_of`, `telemetry`, `PlaceOf` |
 | 11 the rig | **in production** on `water/hot/tanktemp` (on `energy/hot_water` until 2026-11-20), both tanks fitted (5 probes each), `templog` disabled. Adaptive cadence (#4) is merged and live at `trigger_c_per_min: 1.5`; verbose logging is off again. About 50 single read retries a day across both buses, all recovered on the second attempt. **Not done:** the power-on-reset and data-line captures, and the water-bath calibration (offsets are 0); these need hands on the rig |
 | follow-up | **Remove templog** (G24): due since 2026-11-08. It stays disabled, as the fallback, until you say |
+| water meter | **live on the rig** since 2026-11-20 (sweeney/tanktemp#9): a reed meter on GPIO 27, counted inside tanktemp and published to `water/hot/tanktemp/meter`. Plan in `docs/WATER-METER-PLAN.md`, the hardware in `docs/METER.md`. The unit swaps `PrivateDevices=true` for GPIO access (phase 9 had left `gpio` out). **Not done:** the bucket test, the cadence flow trigger, the status page's meter view |
 | 12 hand-off | **done.** `docs/STATEHOUSE.md` written. The tank and probe entries are in `devices_<site>`, probes with a room of their own. Checked 2026-11-13: statehouse's adapter is on, with all ten probes online as `appliance_probe` devices, and greenhouse charts them, with history from 2026-11-11. statehouse doesn't show the cylinders themselves (`telemetry: false`, so no asset relay yet); that's deliberate, and the owner has a plan for it |
 
 ### History

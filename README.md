@@ -3,14 +3,20 @@
 Reads DS18B20 1-Wire temperature probes fitted to unvented hot water
 cylinders, on a Raspberry Pi. It publishes every sweep to MQTT and serves
 `/healthz` and a status page. Any number of cylinders, and any number of
-probes on each, is set in a local config file.
+probes on each, is set in a local config file. It also counts a reed-switch
+hot-water meter on a GPIO line, one litre per pulse, and publishes the count
+([Water meter](#water-meter)).
 
 - **Wire contract:** [`docs/WIRE.md`](docs/WIRE.md), pinned by the goldens
   in `internal/payload/testdata/`.
 - **For statehouse:** [`docs/STATEHOUSE.md`](docs/STATEHOUSE.md), the
   adapter spec.
 - **The hardware, and everything learned on the test rig:**
-  [`docs/ONEWIRE.md`](docs/ONEWIRE.md).
+  [`docs/ONEWIRE.md`](docs/ONEWIRE.md) for the probes,
+  [`docs/METER.md`](docs/METER.md) for the water meter.
+- **The water meter's plan**, including what washhouse does with it:
+  [`docs/WATER-METER-PLAN.md`](docs/WATER-METER-PLAN.md), with a worked day
+  in [`docs/WATER-METER-WALKTHROUGH.md`](docs/WATER-METER-WALKTHROUGH.md).
 - **Plan and decisions:** [`PLAN.md`](PLAN.md). Choices made without asking
   are in [`GUESSES.md`](GUESSES.md).
 
@@ -23,7 +29,16 @@ probes on each, is set in a local config file.
                                                                │
                                                                ├──> internal/status ──> internal/web (/healthz, /api/status, /)
                                                                └──> internal/cadence ──> how long until the next sweep
+
+/dev/gpiochip0 ──> internal/gpioedge ──meter.Source──> internal/meter ──> internal/payload ──> MQTT ({prefix}/meter)
+   (the only code that                 (the boundary)   (Counter: the    (wire contract)
+    knows about GPIO)                                    litre rules;
+                                                         Loop: owns it)
 ```
+
+The meter runs beside the sweeps, on its own goroutine, so a litre never
+waits for a 1-Wire read. Each sweep also publishes the meter's count as of
+its start, so the tank states and the count are a matched snapshot.
 
 `cmd/tanktemp` wires these together with
 [`common/lifecycle`](https://github.com/sweeney/common) (signals, STARTUP,
@@ -126,6 +141,63 @@ staying fast is much easier than going fast. On the rig that was right
 probe a low trigger could hold fast mode indefinitely; 1.5 °C/min or more
 at 10 s keeps it to four steps.
 
+## Water meter
+
+A reed-switch meter on the hot-water pipe closes a contact once per litre.
+tanktemp counts the closings on one GPIO line and publishes raw facts to
+`{prefix}/meter`, retained: the count, when the last litre came, how long the
+reed stayed closed, and how many edges it rejected and why. Flow, draws and
+circulation are for consumers. The payload is in
+[`docs/WIRE.md`](docs/WIRE.md), Meter; the hardware, the kernel's behaviour
+and what the rig showed are in [`docs/METER.md`](docs/METER.md).
+
+```yaml
+meters:                            # optional; absent = no meter, no GPIO opened
+  - device_id: hot_water_meter     # its key in devices_<site>; unique across tanks too
+    gpio: 27                       # the BCM line (2..27), wired to the reed with GND
+    litres_per_pulse: 1            # the meter's K
+    # chip: gpiochip0
+    # debounce: 20ms               # kernel debounce: required, at least 5ms
+    # hold: 20ms                   # a closing counts once held this long
+    # min_interval: 600ms          # the shortest gap between litres (at most 700ms)
+```
+
+The pin is in the config, not the code: tanktemp requests exactly the
+`chip` and `gpio` given, with the pull-up on, so open reads high and closed
+low. One meter is supported for now.
+
+- **How a litre is counted.** One litre per change from open to closed,
+  judged on the level the kernel reads, never on an edge's label. The
+  kernel debounces first. Then, in order, an edge is rejected as `lost` (a
+  gap in the kernel's event numbers: tanktemp resyncs and counts nothing
+  across it), `noise` (it doesn't change the level), `short` (a closing
+  that doesn't hold for `hold`) or a `glitch` (too soon after the last
+  litre). The counters are published, and expected to stay 0.
+- **When it publishes.** A `pulse` within `hold` + 50 ms of each counted
+  closing; an `open` when that litre's closing ends, with how long it
+  lasted; and a `sweep` with every sweep. `seq` numbers the messages with
+  no gaps, and `count` never falls as `seq` rises.
+- **Nothing is persisted.** The count starts at 0 when tanktemp starts, and
+  `counting_since` says when; consumers take differences.
+- **Health.** `/healthz` and `/api/status` have a `meters` block: `state`
+  (`starting`, `counting`, `failed`, `stopped`), the level, the count and
+  counters, `publish_dropped` and `queued`. The status message lists
+  `meters`. A line that can't be requested (busy, not permitted, no chip)
+  is the startup problem `gpio_request_failed`: tanktemp is `degraded`, and
+  the probes carry on. The status page doesn't show the meter yet.
+- **`-check-config`** names the meter, its line and its timings.
+- **Permissions.** The unit gives tanktemp the GPIO chips and the `gpio`
+  group, and nothing else new ([Deploying](#deploying)).
+
+To watch the line on the Pi, with tanktemp stopped (only one process can
+hold it), `cmd/pulsewatch` prints what the counter makes of each edge:
+
+```sh
+GOOS=linux GOARCH=arm GOARM=6 CGO_ENABLED=0 go build -o pulsewatch ./cmd/pulsewatch
+# copy to the Pi, stop tanktemp, then:
+./pulsewatch -for 2m    # GPIO 27 on gpiochip0; -debounce, -hold, -min-interval to tune
+```
+
 ## Testing
 
 ```sh
@@ -134,11 +206,21 @@ go test -race ./...
 
 No hardware, root or broker needed. There are two layers:
 
-- **Core logic** (`cadence`, `config`, `sweep`, `payload`, `startup`,
-  `status`) sees the sensors only through `reading.Source`, and is tested
-  against the scriptable `readingtest.Fake`. `boundaries_test.go` fails the
+- **Core logic** (`cadence`, `config`, `meter`, `sweep`, `payload`,
+  `startup`, `status`) sees the sensors only through `reading.Source` and
+  the meter only through `meter.Source`. It's tested against the scriptable
+  `readingtest.Fake` and `metertest.Fake`. `boundaries_test.go` fails the
   build if a core package imports `os`, `io/fs`, `net`, `syscall`, the
   1-Wire handler or MQTT.
+- **The meter's counter** (`internal/meter`) is table-tested edge by edge,
+  and replays a real night's raw edges from the rig
+  (`internal/meter/testdata/first-night`: 277 edges, the boiler's spikes
+  included) against an `expect.json` worked out independently. The replay
+  runs raw, debounced, and with the state machine alone. `meter.Loop` is
+  tested for ordering under `-race`: a tick or a snapshot never overtakes a
+  queued edge. `metertest.Contract` runs against both the fake and the real
+  GPIO source; `cmd/tanktemp` drives the whole meter path (messages, `seq`,
+  the queue, SHUTDOWN, a failed request) with the fake.
 - **The adaptive cadence end to end** (`cmd/tanktemp/scenario_test.go`) runs
   the real `run` on production timers inside a `testing/synctest` bubble,
   so time is virtual and exact. Each scenario is a table row: what each
@@ -165,7 +247,7 @@ No hardware, root or broker needed. There are two layers:
 To capture a new hardware state as a fixture (read-only on the Pi):
 
 ```sh
-GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o w1capture ./cmd/w1capture
+GOOS=linux GOARCH=arm GOARM=6 CGO_ENABLED=0 go build -o w1capture ./cmd/w1capture   # the rig's Zero W; arm64 for a Zero 2 W
 # copy to the Pi, then:  ./w1capture -out /tmp/<scenario> [-steps 6 -interval 10s]
 ```
 
@@ -210,9 +292,21 @@ CI). It checks that every configured ROM is present, reads OK first time, is
 in powered mode and is at 12-bit:
 
 ```sh
-GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go test -c -tags hardware -o onewire.test ./internal/onewire/
+GOOS=linux GOARCH=arm GOARM=6 CGO_ENABLED=0 go test -c -tags hardware -o onewire.test ./internal/onewire/
 scp onewire.test user@host:/tmp/
 ssh user@host 'TANKTEMP_ROMS=28-…,28-… /tmp/onewire.test -test.run Hardware -test.v; rm /tmp/onewire.test'
+```
+
+The meter's line has one too. It needs tanktemp stopped, because only one
+process can hold the line. It requests the real line, runs
+`metertest.Contract` against it, and checks the line can't be requested
+twice. `TANKTEMP_METER_WATCH=60s` also prints every edge while you run a
+tap ([`docs/METER.md`](docs/METER.md), Tools):
+
+```sh
+GOOS=linux GOARCH=arm GOARM=6 CGO_ENABLED=0 go test -c -tags hardware -o gpioedge.test ./internal/gpioedge/
+# on the Pi, with tanktemp stopped:
+TANKTEMP_METER_LINE=gpiochip0:27 ./gpioedge.test -test.v
 ```
 
 The common modules (`lifecycle`, `health`, `mqttpub`) are pinned in `go.mod`
@@ -316,6 +410,20 @@ user with mode 0755. That directory holds the timestamped builds, the
 `.previous`, and the unit runs `/opt/tanktemp/tanktemp-bin`.
 `/etc/tanktemp/config.yaml` (and any `password_file`) is root:tanktemp 0640,
 so `deploy.sh` runs `-check-config` through `sudo -u tanktemp`.
+
+The unit (`tanktemp.service`) is hardened. For the water meter, it uses
+`DevicePolicy=closed` with `DeviceAllow=char-gpiochip rw` and
+`SupplementaryGroups=gpio` in place of `PrivateDevices=true`, which would
+hide the GPIO chips. The rest of what `PrivateDevices` gave is spelled out:
+the `@raw-io` system calls filtered, native architecture only, and
+`/dev/shm` hidden. `systemd-analyze security` scores it 3.6, against 3.7
+before (lower is better). The service user isn't added to `gpio`; only the
+service gets it. Both scripts refuse a Pi with no `gpio` group (Raspberry
+Pi OS makes it), because systemd can't start the unit without it.
+
+**Deploy the build before the config.** A build from before the meter
+refuses a config with a `meters` block, so on a Pi that's behind,
+`./deploy.sh` first, then `./setup-pi.sh` to install the new config.
 
 A Pi set up before this keeps its builds in `~/tanktemp`. To move it, run
 `./setup-pi.sh --check`, then `./setup-pi.sh`: it copies the builds, repoints

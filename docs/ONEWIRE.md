@@ -550,6 +550,8 @@ old logger, before filtering).
 
 ## Related
 
+- [`METER.md`](METER.md): the same for the water meter on GPIO 27.
+
 - `scratch/temp-pi/NOTES.md`: the operational notes for the test rig itself
   (files, commands, history).
 - `scratch/temp-pi/templog/`: the shell logger, with tests.

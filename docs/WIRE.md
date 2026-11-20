@@ -213,10 +213,11 @@ What MQTT does and doesn't guarantee here:
 
 ## Changes
 
-- **DRAFT, not yet released: the water meter.** New topic `{prefix}/meter`
-  (Meter, above); status gains `meters` (`[]` with none) and the
-  `startup_problems` code `gpio_request_failed`. Tank state is unchanged.
-  Consumers that decode status strictly must accept the new key.
+- **2026-11-20, additive: the water meter** (sweeney/tanktemp#9). New
+  topic `{prefix}/meter` (Meter, above), live on the rig since 22:09 UTC;
+  status gains `meters` (`[]` with none) and the `startup_problems` code
+  `gpio_request_failed`. Tank state is unchanged. Consumers that decode
+  status strictly must accept the new key.
 
 - **2026-11-20, BREAKING, topics only:** the production prefix moved from
   `energy/hot_water` to `water/hot/tanktemp`, so the topics are now

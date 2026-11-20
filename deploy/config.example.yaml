@@ -3,6 +3,7 @@
 # Copy this to deploy/config.local.yaml (gitignored), fill in your broker and
 # your sensors' ROM IDs, and run ./setup-pi.sh, which validates it and
 # installs it. Every key except mqtt.broker and tanks has a default (shown).
+# The water meter (meters, at the end) is optional.
 
 # w1_root: /sys/bus/w1/devices
 # sweep:
@@ -46,3 +47,18 @@ tanks:
       - {rom: 28-000000000003, position: bottom, order: 1, height_mm: 100}
       - {rom: 28-000000000002, position: middle, order: 2, height_mm: 800}
       - {rom: 28-000000000001, position: top, order: 3, height_mm: 1500}
+
+# A reed-switch water meter on a GPIO line (docs/METER.md; on the wire:
+# docs/WIRE.md, Meter). Optional: without it no GPIO chip is opened. One meter
+# for now. The pin is read with the pull-up on (open high, closed low): wire
+# the reed between the GPIO and GND, with the Pi powered off.
+# meters:
+#   - device_id: hot-water-meter   # its key in devices_<site>; unique across tanks too
+#     gpio: 27                     # required: the BCM line, 2..27 (0 and 1 are the HAT ID pins)
+#     litres_per_pulse: 1          # required: the meter's K, > 0
+#     chip: gpiochip0
+#     debounce: 20ms               # kernel debounce; at least 5ms (spikes from nearby
+#                                  # switching otherwise reach the counter)
+#     hold: 20ms                   # a closing counts once held this long
+#     min_interval: 600ms          # the shortest gap between litres; at most 700ms (a
+#                                  # 5 m3/h meter at full flow gives one every 0.72 s)

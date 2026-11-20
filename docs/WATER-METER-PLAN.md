@@ -5,8 +5,28 @@ night of raw edges was recorded (§0). Covers how **tanktemp** publishes a
 pulsed water meter and how **washhouse** uses it. The worked example is in
 [`WATER-METER-WALKTHROUGH.md`](WATER-METER-WALKTHROUGH.md), and the
 interactive one, including a replay of the real night, in
-[`water-meter-explainer.html`](water-meter-explainer.html). No meter code is
-built yet, and washhouse itself is still a plan.
+[`water-meter-explainer.html`](water-meter-explainer.html).
+
+**Status, 2026-11-20: tanktemp's part (§4) is built and live** on the rig
+(sweeney/tanktemp#9). How it works now is in [`METER.md`](METER.md), the
+config in the README, the wire in WIRE.md. This plan stays as the record of
+why; where the build went another way:
+
+- **Config** (§4.2): `chip` is a name (default `gpiochip0`), not found by
+  label; there is no `active_low` key (the pull-up is always on, so closed
+  reads low); `hold` was added; `debounce` must be at least 5 ms, and
+  `min_interval` at most 700 ms. GPIO 0 and 1 are refused.
+- **Unit** (§3, §4.1): `DevicePolicy=closed` with `DeviceAllow=char-gpiochip
+  rw` and `SupplementaryGroups=gpio`; the `tanktemp` user is **not** added
+  to `gpio`. `setup-pi.sh` and `deploy.sh` refuse a Pi with no `gpio` group;
+  they don't check the line is free (a busy line is `gpio_request_failed`
+  at start).
+- **Wire** (§4.4): WIRE.md added `seq`, `meters: []` with none, and the
+  `lost` bound of 2 × `lost`.
+- **Not built yet:** the cadence flow trigger (`sweep.fast.on_flow`, a
+  separate PR), the bucket test (§8), and the status page's meter view.
+
+washhouse itself is still a plan.
 
 **Since 2026-11-20 this plan lives in tanktemp's repo**, with tanktemp as the
 single writer: washhouse sends changes to §6–7 as patches. Where it and
