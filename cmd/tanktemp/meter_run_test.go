@@ -240,3 +240,43 @@ func TestRunDegradesWhenTheMeterLineStops(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 }
+
+// -check-config shows the meter's settings with the defaults filled in,
+// before "publishing to" (deploy/lib.sh reads the prefix and broker from
+// the end of the line).
+func TestCheckConfigShowsTheMeter(t *testing.T) {
+	path := t.TempDir() + "/c.yaml"
+	_ = os.WriteFile(path, []byte("mqtt: {broker: tcp://b:1883}\ntanks:\n  - device_id: t\n    sensors:\n      - {rom: 28-0000117287e6, position: top, order: 1}\nmeters:\n  - {device_id: hot_water_meter, gpio: 27, litres_per_pulse: 1}\n"), 0o644)
+	var out strings.Builder
+	if code := realMain([]string{"-config", path, "-check-config"}, &out); code != 0 ||
+		!strings.Contains(out.String(), ", meter hot_water_meter on gpiochip0:27 (1 L/pulse, debounce 20ms, hold 20ms, min interval 600ms), publishing to water/hot/tanktemp on tcp://b:1883\n") {
+		t.Errorf("code %d, out %q", code, out.String())
+	}
+}
+
+// When run returns, the meter's line has been released (Close), as the
+// Contract has it.
+func TestRunClosesTheMeterLine(t *testing.T) {
+	r := startMeterRig(t, meterConfig(t), nil)
+	r.meterMsgs(t, 1)
+	r.stop(t)
+	select {
+	case _, ok := <-r.line.Edges():
+		if ok {
+			t.Error("an edge after run returned")
+		}
+	case <-time.After(time.Second):
+		t.Error("the line is still open after run returned")
+	}
+}
+
+// A shutdown is not the line stopping: the meter is stopped before its
+// line is released, so no "stopped" fault or log line appears.
+func TestRunShutdownIsNotALineStop(t *testing.T) {
+	r := startMeterRig(t, meterConfig(t), nil)
+	r.meterMsgs(t, 1)
+	r.stop(t)
+	if strings.Contains(r.logs.String(), "not counting") {
+		t.Errorf("a shutdown logged as the line stopping: %s", r.logs)
+	}
+}

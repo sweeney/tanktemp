@@ -88,8 +88,13 @@ func realMain(args []string, out io.Writer) int {
 		if cfg.Log.Verbose {
 			verbose = "ON"
 		}
-		fmt.Fprintf(out, "%s: ok: %d tank%s, %d sensor%s, %s, verbose log %s, publishing to %s on %s\n",
-			*path, len(cfg.Tanks), plural(len(cfg.Tanks)), n, plural(n), cadenceSummary(cfg.Sweep), verbose, cfg.MQTT.TopicPrefix, cfg.MQTT.Broker)
+		meters := ""
+		for _, m := range cfg.Meters {
+			meters += fmt.Sprintf(", meter %s on %s:%d (%v L/pulse, debounce %s, hold %s, min interval %s)",
+				m.DeviceID, m.Chip, *m.GPIO, m.LitresPerPulse, shortDuration(m.Debounce), shortDuration(m.Hold), shortDuration(m.MinInterval))
+		}
+		fmt.Fprintf(out, "%s: ok: %d tank%s, %d sensor%s, %s, verbose log %s%s, publishing to %s on %s\n",
+			*path, len(cfg.Tanks), plural(len(cfg.Tanks)), n, plural(n), cadenceSummary(cfg.Sweep), verbose, meters, cfg.MQTT.TopicPrefix, cfg.MQTT.Broker)
 		return 0
 	}
 	if err := serve(cfg); err != nil {
@@ -354,13 +359,21 @@ func run(ctx context.Context, cfg config.Config, d deps) error {
 		meterIDs = append(meterIDs, m.DeviceID)
 	}
 	var mr *meterRun
+	var line meter.Source
 	meterCtx, stopMeter := context.WithCancel(context.Background())
 	meterDone := make(chan struct{})
-	defer func() { stopMeter(); <-meterDone }()
+	defer func() {
+		stopMeter()
+		<-meterDone
+		if line != nil {
+			line.Close() // released once the meter has stopped, never before
+		}
+	}()
 	if len(cfg.Meters) > 0 && d.OpenMeter != nil {
 		mc := cfg.Meters[0]
 		src, err := d.OpenMeter(mc)
 		if err == nil {
+			line = src
 			ticks := d.MeterTicks
 			if ticks == nil {
 				ticks = monoTicks(meterCtx, d.Mono, MeterTick)
