@@ -29,7 +29,10 @@ type Server struct {
 	SysFS   fs.FS                        // rooted at "/"
 	Disk    func() (sysinfo.Disk, error) // root filesystem size
 	Prefix  string                       // MQTT topic prefix, shown on the page
-	// Meters reports each configured water meter; nil: none.
+	// Meters reports each configured water meter; nil: none. tanktemp's
+	// takes the meter loop's snapshot as of the request, which first
+	// confirms any closing whose hold has passed: so a GET can be what
+	// publishes a litre's MQTT message (correctly: it is only time passing).
 	Meters func() []MeterStatus
 }
 

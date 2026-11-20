@@ -1623,10 +1623,18 @@ case_72() {
     check "from /opt/tanktemp/tanktemp-bin" grep -qx 'ExecStart=/opt/tanktemp/tanktemp-bin -config /etc/tanktemp/config.yaml' "$unit"
     check "with the home hidden (ProtectHome=yes)" grep -qx 'ProtectHome=yes' "$unit"
     for line in AmbientCapabilities=CAP_NET_BIND_SERVICE CapabilityBoundingSet=CAP_NET_BIND_SERVICE NoNewPrivileges=true \
-        ProtectSystem=strict PrivateTmp=true PrivateDevices=true ProtectKernelTunables=true ProtectKernelModules=true \
+        ProtectSystem=strict PrivateTmp=true ProtectKernelTunables=true ProtectKernelModules=true \
         ProtectKernelLogs=true ProtectControlGroups=true 'RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX' \
         RestrictNamespaces=true LockPersonality=true MemoryDenyWriteExecute=true MemoryMax=64M; do
         check "the unit keeps $line" grep -qx "$line" "$unit"
+    done
+    # The water meter's GPIO line (docs/WIRE.md, Meter; the owner's decision
+    # of 2026-11-20): PrivateDevices would hide /dev/gpiochip*, so instead
+    # the device policy is closed (the standard pseudo-devices only) plus
+    # the GPIO chips, read-write, and the gpio group they belong to.
+    check "the unit no longer hides all devices (PrivateDevices)" not grep -qE '^PrivateDevices=(true|yes)' "$unit"
+    for line in DevicePolicy=closed 'DeviceAllow=char-gpiochip rw' SupplementaryGroups=gpio; do
+        check "the unit has $line" grep -qx "$line" "$unit"
     done
     # shellcheck disable=SC2016
     OUT=$(cd "$HERE" && env -u DEPLOY_PI_DIR bash -c 'source deploy/lib.sh; echo "$PI_DIR $LINK $SVC_USER"')
