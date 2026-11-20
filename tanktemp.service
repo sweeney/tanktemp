@@ -29,10 +29,17 @@ PrivateTmp=true
 # would hide /dev/gpiochip*, so instead: no device but the standard
 # pseudo-devices (closed), plus the GPIO chips, and their group (gpio, as
 # Raspberry Pi OS makes them root:gpio 0660). Without a meter configured
-# none of them is opened.
+# none of them is opened. And what PrivateDevices=true also gave, spelled
+# out (systemd.exec(5)): the @raw-io system calls filtered, no foreign
+# architectures, and the host's /dev/shm hidden (tanktemp never uses it).
+# systemd-analyze security on the rig, 2026-11-20: 3.6, against the old
+# unit's 3.7 (without these three lines, 4.0).
 DevicePolicy=closed
 DeviceAllow=char-gpiochip rw
 SupplementaryGroups=gpio
+SystemCallFilter=~@raw-io
+SystemCallArchitectures=native
+InaccessiblePaths=-/dev/shm
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectKernelLogs=true

@@ -179,6 +179,7 @@ if [ \"\${pid:-0}\" -gt 0 ] 2>/dev/null; then u=\$(ps -o user:32= -p \$pid) || t
 $(state templog)
 $(perms "$CONFIG_PATH")
 [ -e $SUDOERS ] && echo yes || echo no
+getent group gpio >/dev/null 2>&1 && echo gpio-yes || echo gpio-no
 for c in $SUDO_CMDS; do p=\$(PATH=$SUDO_PATH command -v \$c) || p=MISSING; printf '%s=%s ' \$c \"\$p\"; done; echo") || refuse "cannot ssh to $REMOTE"
 {
     read -r remote_arch
@@ -204,12 +205,14 @@ for c in $SUDO_CMDS; do p=\$(PATH=$SUDO_PATH command -v \$c) || p=MISSING; print
     read -r templog_active
     read -r config_perms
     read -r have_sudoers
+    read -r gpio_group
     read -r sudo_paths
 } <<<"$facts"
 pi_has_config=no
 [ "$config_perms" = MISSING ] || pi_has_config=yes
 
 goarch_for "$remote_arch" || refuse "$REMOTE is '$remote_arch', which this script does not build for"
+[ "$gpio_group" = gpio-yes ] || refuse "$REMOTE has no gpio group: the unit runs tanktemp with SupplementaryGroups=gpio (for the water meter's GPIO line), and without that group systemd cannot start it at all. Raspberry Pi OS makes it; create it (groupadd --system gpio) first"
 need_sudo "$sudo_answer"
 info "arch $remote_arch, $SERVICE $active$([ "$running_as" = NONE ] || echo " as $running_as")"
 

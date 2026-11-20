@@ -168,6 +168,7 @@ $(sudo_probe)
 cat $PI_DIR/.previous 2>/dev/null || echo NONE
 [ -f $CONFIG_PATH ] && echo config-yes || echo config-no
 systemctl is-active templog 2>/dev/null || true
+getent group gpio >/dev/null 2>&1 && echo gpio-yes || echo gpio-no
 ls -1t $PI_DIR 2>/dev/null | grep '^$SERVICE-2' || true") || refuse "cannot ssh to $REMOTE"
 
 {
@@ -182,10 +183,12 @@ ls -1t $PI_DIR 2>/dev/null | grep '^$SERVICE-2' || true") || refuse "cannot ssh 
     read -r recorded_prev
     read -r have_config
     read -r templog
+    read -r gpio_group
     builds=$(cat)
 } <<<"$remote_facts"
 
 goarch_for "$remote_arch" || refuse "$REMOTE is '$remote_arch', which this script does not build for"
+[ "$gpio_group" = gpio-yes ] || refuse "$REMOTE has no gpio group: the unit runs tanktemp with SupplementaryGroups=gpio (for the water meter's GPIO line), and without that group systemd cannot start it at all. Raspberry Pi OS makes it; create it (groupadd --system gpio) first"
 info "arch $remote_arch, service $active"
 need_sudo "$sudo_answer"
 if [ "$CURRENT" = MISSING ] && [ "$old_layout" = old-layout ]; then

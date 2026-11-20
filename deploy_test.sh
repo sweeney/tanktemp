@@ -464,6 +464,17 @@ fi
 PATH="${PATH//$RSTUBS:/}" exec id "$@"
 EOF
 
+# getent group gpio: Raspberry Pi OS has it; FAKE_NO_GPIO_GROUP=1 takes it away.
+cat >"$RSTUBS/getent" <<'EOF'
+#!/usr/bin/env bash
+if [ "$1 $2" = "group gpio" ]; then
+    [ "${FAKE_NO_GPIO_GROUP:-0}" != 1 ] || exit 2
+    echo "gpio:x:986:"
+    exit 0
+fi
+PATH="${PATH//$RSTUBS:/}" exec getent "$@"
+EOF
+
 cat >"$RSTUBS/useradd" <<'EOF'
 #!/usr/bin/env bash
 echo "useradd $*" >>"$FAKE_STATE/log"
@@ -1383,6 +1394,25 @@ case_106() {
     check "and sets up nothing else" [ ! -e "$PI" ]
 }
 
+# The unit runs tanktemp with SupplementaryGroups=gpio (the water meter):
+# without a gpio group on the Pi systemd can't start it at all, probes and
+# all, so both scripts refuse before anything changes (review on 1fbfac7).
+case_108() {
+    fresh
+    before=$(snapshot)
+    setup FAKE_NO_GPIO_GROUP=1 -- --check
+    check "setup --check refuses a Pi with no gpio group (2)" rc_is 2
+    check "setup says why" says "no gpio group"
+    deploy FAKE_NO_GPIO_GROUP=1 -- --check
+    check "deploy --check refuses it too (2)" rc_is 2
+    check "deploy says why" says "no gpio group"
+    deploy FAKE_NO_GPIO_GROUP=1 -- --yes
+    check "deploy refuses it (2)" rc_is 2
+    check "and changes nothing" [ "$(snapshot)" = "$before" ]
+    setup -- --check
+    check "with the group, setup --check passes" rc_is 0
+}
+
 case_107() {
     fresh
     sed -i.bak '/^dtoverlay=w1-gpio/d' "$CASE/boot/config.txt"
@@ -1633,7 +1663,11 @@ case_72() {
     # the device policy is closed (the standard pseudo-devices only) plus
     # the GPIO chips, read-write, and the gpio group they belong to.
     check "the unit no longer hides all devices (PrivateDevices)" not grep -qE '^PrivateDevices=(true|yes)' "$unit"
-    for line in DevicePolicy=closed 'DeviceAllow=char-gpiochip rw' SupplementaryGroups=gpio; do
+    # and what PrivateDevices=true also gave, spelled out (systemd.exec(5)):
+    # the @raw-io filter, no foreign architectures, no host /dev/shm.
+    # systemd-analyze security on the rig: old 3.7, this 3.6.
+    for line in DevicePolicy=closed 'DeviceAllow=char-gpiochip rw' SupplementaryGroups=gpio \
+        'SystemCallFilter=~@raw-io' SystemCallArchitectures=native InaccessiblePaths=-/dev/shm; do
         check "the unit has $line" grep -qx "$line" "$unit"
     done
     # shellcheck disable=SC2016
