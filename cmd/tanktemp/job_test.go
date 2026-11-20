@@ -19,11 +19,19 @@ import (
 // mockgen). Each records what it was asked.
 
 type fakeSweeper struct {
-	sw  sweep.Sweep
-	err error
+	sw     sweep.Sweep
+	err    error
+	starts []time.Time
 }
 
-func (f *fakeSweeper) Sweep(context.Context) (sweep.Sweep, error) { return f.sw, f.err }
+func (f *fakeSweeper) SweepAt(_ context.Context, start time.Time) (sweep.Sweep, error) {
+	f.starts = append(f.starts, start)
+	return f.sw, f.err
+}
+
+type fakeMeterSweep struct{ at []time.Time }
+
+func (f *fakeMeterSweep) sweep(_ context.Context, at time.Time) { f.at = append(f.at, at) }
 
 type fakeCadence struct {
 	decision cadence.Decision
@@ -206,4 +214,23 @@ func (pw prefixWriter) Write(b []byte) (int, error) {
 		return 0, err
 	}
 	return pw.w.Write(b)
+}
+
+// With a meter, the job asks for its state as of the sweep's start, before
+// sweeping, stamped with exactly the start it gives the sweep (WIRE.md,
+// Meter: a matched snapshot); without one, nothing changes.
+func TestSweepJobSweepsTheMeterAtTheSweepsStart(t *testing.T) {
+	start := t0.Add(1234 * time.Millisecond)
+	sw, m := &fakeSweeper{sw: jobSweep(false)}, &fakeMeterSweep{}
+	j := &sweepJob{
+		sweeper: sw, cadence: &fakeCadence{}, tracker: &fakeRecorder{}, pub: &mqttpubtest.Fake{}, prefix: prefix,
+		logger: log.New(io.Discard, "", 0), verbose: log.New(io.Discard, "", 0),
+		wall: func() time.Time { return start }, meter: m,
+	}
+	if err := j.Work(context.Background(), t0); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.at) != 1 || !m.at[0].Equal(start) || len(sw.starts) != 1 || !sw.starts[0].Equal(start) {
+		t.Errorf("meter swept at %v, sweep started at %v; want both %v", m.at, sw.starts, start)
+	}
 }

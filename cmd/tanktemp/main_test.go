@@ -46,14 +46,13 @@ tanks:
 }
 
 type rig struct {
-	pub   *mqttpubtest.Fake
-	src   *rt.Fake
-	tick  chan time.Time
-	hb    chan time.Time
-	sig   chan os.Signal
-	done  chan error
-	clock time.Time
-	logs  *syncBuf
+	pub  *mqttpubtest.Fake
+	src  *rt.Fake
+	tick chan time.Time
+	hb   chan time.Time
+	sig  chan os.Signal
+	done chan error
+	logs *syncBuf
 }
 
 // syncBuf is a log destination the test can read while run writes to it.

@@ -165,7 +165,14 @@ func tenths(c float64) string {
 
 // Sweep reads every configured sensor once (with the Source's retries).
 func (s *Sweeper) Sweep(ctx context.Context) (Sweep, error) {
-	start := s.Now().UTC()
+	return s.SweepAt(ctx, s.Now())
+}
+
+// SweepAt is Sweep with its start (its At) given by the caller, which can
+// then stamp something else with exactly the same instant: the water
+// meter's sweep message (docs/WIRE.md, Meter).
+func (s *Sweeper) SweepAt(ctx context.Context, start time.Time) (Sweep, error) {
+	start = start.UTC()
 	out := Sweep{At: start, ClockSynced: s.Synced()}
 
 	top, err := s.Source.Discover(ctx)

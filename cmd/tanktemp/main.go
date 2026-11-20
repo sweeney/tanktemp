@@ -29,6 +29,8 @@ import (
 	"github.com/sweeney/common/mqttpub/retry"
 	"github.com/sweeney/tanktemp/internal/cadence"
 	"github.com/sweeney/tanktemp/internal/config"
+	"github.com/sweeney/tanktemp/internal/gpioedge"
+	"github.com/sweeney/tanktemp/internal/meter"
 	"github.com/sweeney/tanktemp/internal/onewire"
 	"github.com/sweeney/tanktemp/internal/payload"
 	"github.com/sweeney/tanktemp/internal/reading"
@@ -195,6 +197,10 @@ func serve(cfg config.Config) error {
 		Logger:      logger,
 		Verbose:     vlog,
 		Version:     version,
+		OpenMeter: func(m config.Meter) (meter.Source, error) {
+			return gpioedge.Open(m.Chip, *m.GPIO, m.Debounce)
+		},
+		Mono: gpioedge.Now,
 	})
 }
 
@@ -231,6 +237,15 @@ type deps struct {
 	Logger  *log.Logger
 	Verbose *log.Logger // bench-only lines (log.verbose); nil: discarded
 	Version string
+
+	// The water meter (docs/WIRE.md, Meter). OpenMeter requests a meter's
+	// line (gpioedge.Open in production); nil: meters aren't opened.
+	OpenMeter func(config.Meter) (meter.Source, error)
+	// Mono is the clock edges are stamped on (gpioedge.Now).
+	Mono func() time.Duration
+	// MeterTicks is "now" on Mono for the meter's loop. nil, in
+	// production: every 50 ms from Mono (GUESSES G59).
+	MeterTicks <-chan time.Duration
 }
 
 // verboseLogger is where the bench-only lines go (issue #2, log.verbose):
@@ -322,6 +337,51 @@ func run(ctx context.Context, cfg config.Config, d deps) error {
 		d.Logger.Printf("clock not NTP-synced after %v; sweeps will say clock_synced:false", cfg.ClockSyncWait)
 	}
 	report := startup.Check(ctx, cfg.Tanks, d.Source)
+
+	// The sweep's timestamp is the wall clock (it's published); lifecycle
+	// and the cadence's schedule run on deps.Now, monotonic in production.
+	// They're one clock in production and two in tests, so a test can step
+	// the wall clock alone, as NTP does.
+	wall := d.Wall
+	if wall == nil {
+		wall = d.Now
+	}
+
+	// The water meter (docs/WIRE.md, Meter), on its own context: at
+	// SHUTDOWN it publishes a last state and flushes before stopping.
+	var meterIDs []string
+	for _, m := range cfg.Meters {
+		meterIDs = append(meterIDs, m.DeviceID)
+	}
+	var mr *meterRun
+	meterCtx, stopMeter := context.WithCancel(context.Background())
+	meterDone := make(chan struct{})
+	defer func() { stopMeter(); <-meterDone }()
+	if len(cfg.Meters) > 0 && d.OpenMeter != nil {
+		mc := cfg.Meters[0]
+		src, err := d.OpenMeter(mc)
+		if err == nil {
+			ticks := d.MeterTicks
+			if ticks == nil {
+				ticks = monoTicks(meterCtx, d.Mono, MeterTick)
+			}
+			mr, err = newMeter(mc, src, meterDeps{
+				Pub: d.Pub, Prefix: prefix, Wall: wall, Mono: d.Mono, Synced: d.Synced, Ticks: ticks, Logger: d.Logger,
+				OnStop: func(err error) { tracker.Fault(fmt.Sprintf("meter %s stopped: %v", mc.DeviceID, err)) },
+			})
+		}
+		if err != nil {
+			report.Problems = append(report.Problems, startup.Problem{
+				Code: startup.CodeGPIORequestFailed, Message: fmt.Sprintf("meter %s: %v", mc.DeviceID, err),
+			})
+		}
+	}
+	if mr != nil {
+		go func() { defer close(meterDone); mr.Run(meterCtx) }()
+	} else {
+		close(meterDone)
+	}
+
 	for _, p := range report.Problems {
 		d.Logger.Printf("startup: %s", p.Message)
 	}
@@ -333,7 +393,7 @@ func run(ctx context.Context, cfg config.Config, d deps) error {
 			Topic: payload.StatusTopic(prefix),
 			Payload: string(payload.Status(payload.StatusInput{
 				Event: event, At: at, Version: snap.Version, Ready: snap.Ready,
-				Uptime: at.Sub(start), Tanks: snap.Tanks, Last: snap.Last,
+				Uptime: at.Sub(start), Tanks: snap.Tanks, Meters: meterIDs, Last: snap.Last,
 				Problems: snap.Problems, Reason: reason,
 			})),
 			QOS: 1, Retained: true,
@@ -360,19 +420,15 @@ func run(ctx context.Context, cfg config.Config, d deps) error {
 		}()
 	}
 
-	// The sweep's timestamp is the wall clock (it's published); lifecycle
-	// and the cadence's schedule run on deps.Now, monotonic in production.
-	// They're one clock in production and two in tests, so a test can step
-	// the wall clock alone, as NTP does.
-	wall := d.Wall
-	if wall == nil {
-		wall = d.Now
-	}
 	job := &sweepJob{
 		sweeper: &sweep.Sweeper{Tanks: cfg.Tanks, Source: d.Source, Now: wall, Synced: d.Synced},
 		cadence: cad, tracker: tracker, pub: d.Pub, prefix: prefix,
 		logger: d.Logger, verbose: vlog,
 		interval: cad.Status().Interval,
+		wall:     wall,
+	}
+	if mr != nil {
+		job.meter = mr
 	}
 
 	// The schedule. In production lifecycle asks nextSweep for each next
@@ -386,12 +442,17 @@ func run(ctx context.Context, cfg config.Config, d deps) error {
 	}
 
 	return lifecycle.Run(ctx, lifecycle.Config{
-		Immediate:     true,
-		Heartbeat:     cfg.Heartbeat,
-		Work:          job.Work,
-		Next:          next,
-		Ready:         func() bool { return tracker.Snapshot().Ready },
-		Emit:          func(e lifecycle.Event) error { return publishStatus(eventName(e.Kind), e.At, e.Reason) },
+		Immediate: true,
+		Heartbeat: cfg.Heartbeat,
+		Work:      job.Work,
+		Next:      next,
+		Ready:     func() bool { return tracker.Snapshot().Ready },
+		Emit: func(e lifecycle.Event) error {
+			if e.Kind == lifecycle.Shutdown && mr != nil {
+				mr.finish(wall(), MeterFlush) // the meter's last state goes before SHUTDOWN
+			}
+			return publishStatus(eventName(e.Kind), e.At, e.Reason)
+		},
 		OnSkip:        tracker.SkippedTick, // only with deps.Tick: Next has no ticks to skip
 		Now:           d.Now,
 		Tick:          d.Tick,
@@ -399,4 +460,34 @@ func run(ctx context.Context, cfg config.Config, d deps) error {
 		Signals:       d.Signals,
 		Logger:        d.Logger,
 	})
+}
+
+// The meter's clock ticks and its shutdown flush (GUESSES G59).
+const (
+	MeterTick  = 50 * time.Millisecond
+	MeterFlush = 2 * time.Second
+)
+
+// monoTicks sends now (on mono) every d until ctx ends: the meter loop's
+// ticks, so a held closing is confirmed within d without waiting for the
+// next edge.
+func monoTicks(ctx context.Context, mono func() time.Duration, d time.Duration) <-chan time.Duration {
+	out := make(chan time.Duration)
+	go func() {
+		t := time.NewTicker(d)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				select {
+				case out <- mono():
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+	return out
 }

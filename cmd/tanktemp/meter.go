@@ -25,6 +25,9 @@ type meterDeps struct {
 	Synced func() bool
 	Ticks  <-chan time.Duration // "now" on Mono, every 50 ms; nil: none (edges and sweeps still confirm)
 	Logger *log.Logger
+	// OnStop is told if the line stops (the meter is then not counting):
+	// run makes health degraded with it. nil: just logged.
+	OnStop func(error)
 }
 
 // meterRun is the water meter inside tanktemp (docs/WIRE.md, Meter): its
@@ -50,6 +53,7 @@ type meterRun struct {
 
 	mu    sync.Mutex
 	queue []payload.MeterInput
+	busy  bool // a message is being published
 	drops int
 	wake  chan struct{}
 }
@@ -70,6 +74,32 @@ func (m *meterRun) Run(ctx context.Context) {
 	go m.publisher(ctx)
 	if err := m.loop.Run(ctx); err != nil {
 		m.d.Logger.Printf("meter %s: %v; not counting until tanktemp restarts", m.cfg.DeviceID, err)
+		if m.d.OnStop != nil {
+			m.d.OnStop(err)
+		}
+	}
+}
+
+// finish is the meter's part of SHUTDOWN: a last sweep-type message as of
+// now (at, on the wall clock), then everything queued published, waiting
+// at most timeout, before the status says SHUTDOWN.
+func (m *meterRun) finish(at time.Time, timeout time.Duration) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	m.sweep(ctx, at)
+	for {
+		m.mu.Lock()
+		idle := len(m.queue) == 0 && !m.busy
+		m.mu.Unlock()
+		if idle {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			m.d.Logger.Printf("meter %s: %d messages not published by shutdown", m.cfg.DeviceID, m.queued())
+			return
+		case <-time.After(5 * time.Millisecond):
+		}
 	}
 }
 
@@ -144,6 +174,7 @@ func (m *meterRun) publisher(ctx context.Context) {
 		}
 		in := m.queue[0]
 		m.queue = m.queue[1:]
+		m.busy = true
 		m.mu.Unlock()
 		m.seq++
 		in.Seq = m.seq
@@ -151,6 +182,9 @@ func (m *meterRun) publisher(ctx context.Context) {
 		if err := m.d.Pub.Publish(msg); err != nil {
 			m.d.Logger.Printf("meter %s: publish: %v", m.cfg.DeviceID, err)
 		}
+		m.mu.Lock()
+		m.busy = false
+		m.mu.Unlock()
 	}
 }
 

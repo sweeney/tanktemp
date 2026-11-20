@@ -49,6 +49,7 @@ type Tracker struct {
 
 	mu       sync.Mutex
 	problems []startup.Problem
+	faults   []string
 	last     *sweep.Sweep
 	sweeps   int
 	skipped  int
@@ -66,6 +67,14 @@ func New(o Options) *Tracker {
 		o.Cadence = cadence.Status{Mode: cadence.Slow, Interval: o.Interval}
 	}
 	return &Tracker{opts: o, cadence: copyCadence(o.Cadence)}
+}
+
+// Fault records something found broken while running (the water meter's
+// line stopped): health is degraded, with it, until tanktemp restarts.
+func (t *Tracker) Fault(msg string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.faults = append(t.faults, msg)
 }
 
 // SetStartup records the startup checks.
@@ -135,6 +144,7 @@ type Snapshot struct {
 	MQTTConnected bool
 	Ready         bool
 	Problems      []startup.Problem
+	Faults        []string
 	Last          *sweep.Sweep // nil before the first sweep
 	Sweeps        int
 	SkippedTicks  int
@@ -156,6 +166,7 @@ func (t *Tracker) Snapshot() Snapshot {
 		MQTTConnected: connected,
 		Ready:         t.last != nil,
 		Problems:      append([]startup.Problem(nil), t.problems...),
+		Faults:        append([]string(nil), t.faults...),
 		Sweeps:        t.sweeps,
 		SkippedTicks:  t.skipped,
 		Verbose:       t.opts.Verbose,
@@ -187,6 +198,7 @@ func (s Snapshot) Health(now time.Time) Health {
 	for _, p := range s.Problems {
 		h.Detail = append(h.Detail, "startup: "+p.Message)
 	}
+	h.Detail = append(h.Detail, s.Faults...)
 	if s.Last == nil {
 		h.Status = StatusStarting
 		h.Detail = append([]string{"no complete sweep yet"}, h.Detail...)

@@ -372,3 +372,18 @@ func TestLineEndsWithUnexpectedProbes(t *testing.T) {
 		t.Errorf("Faults() = %q: an unexpected probe isn't a fault", got)
 	}
 }
+
+// SweepAt takes the sweep's start from its caller, which stamps something
+// else with the same instant (the water meter's sweep message); Now is then
+// read only for the end, to time the sweep.
+func TestSweepAtUsesTheGivenStart(t *testing.T) {
+	src := rt.NewFake(buses())
+	start := t0.In(time.FixedZone("x", 3600))
+	sw, err := (&Sweeper{Tanks: tanks(), Source: src, Now: func() time.Time { return t0.Add(2 * time.Second) }, Synced: func() bool { return true }}).SweepAt(context.Background(), start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sw.At.Equal(t0) || sw.At.Location() != time.UTC || sw.Duration != 2*time.Second {
+		t.Errorf("At %v, Duration %v", sw.At, sw.Duration)
+	}
+}

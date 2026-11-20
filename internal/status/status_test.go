@@ -234,3 +234,16 @@ func TestSnapshotCarriesVerbose(t *testing.T) {
 		}
 	}
 }
+
+// A fault found while running (the water meter's line stopped) degrades
+// health, with its reason, until restart: a meter that silently stopped
+// counting looks like nobody using water.
+func TestFaultDegradesHealth(t *testing.T) {
+	tr := newTracker(true)
+	tr.RecordSweep(okSweep(start))
+	tr.Fault("meter hot_water_meter stopped: the line's edges stopped")
+	h := tr.Snapshot().Health(start.Add(time.Second))
+	if h.Status != StatusDegraded || !strings.Contains(strings.Join(h.Detail, "|"), "meter hot_water_meter stopped") {
+		t.Errorf("health = %+v", h)
+	}
+}

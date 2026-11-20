@@ -20,7 +20,14 @@ import (
 // job_test.go drives every path with hand-written fakes and no run.
 type sweepJob struct {
 	sweeper interface {
-		Sweep(context.Context) (sweep.Sweep, error)
+		SweepAt(context.Context, time.Time) (sweep.Sweep, error)
+	}
+	// wall stamps the sweep (its At); nil: time.Now.
+	wall func() time.Time
+	// meter, when there is one, publishes its state as of the sweep's
+	// start, stamped with the sweep's own At (WIRE.md, Meter).
+	meter interface {
+		sweep(context.Context, time.Time)
 	}
 	cadence interface {
 		Observe(sweep.Sweep, time.Time) cadence.Decision
@@ -57,7 +64,15 @@ type sweepJob struct {
 // publish error doesn't undo the rest: the sweep happened, and the cadence
 // moved on with it.
 func (j *sweepJob) Work(ctx context.Context, started time.Time) error {
-	sw, err := j.sweeper.Sweep(ctx)
+	wall := j.wall
+	if wall == nil {
+		wall = time.Now
+	}
+	at := wall()
+	if j.meter != nil {
+		j.meter.sweep(ctx, at)
+	}
+	sw, err := j.sweeper.SweepAt(ctx, at)
 	if err != nil {
 		return err
 	}
