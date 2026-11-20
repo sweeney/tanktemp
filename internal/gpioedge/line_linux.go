@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/warthog618/go-gpiocdev"
+	"golang.org/x/sys/unix"
 
 	"github.com/sweeney/tanktemp/internal/meter"
 )
@@ -72,4 +73,15 @@ func (s *line) Close() error {
 	close(s.edges)
 	s.mu.Unlock()
 	return s.l.Close()
+}
+
+// Now is CLOCK_MONOTONIC, the clock the kernel stamps edges with
+// (WithMonotonicEventClock): the meter turns an edge's time into wall time
+// against it.
+func Now() time.Duration {
+	var ts unix.Timespec
+	if err := unix.ClockGettime(unix.CLOCK_MONOTONIC, &ts); err != nil {
+		panic(err) // CLOCK_MONOTONIC always exists on Linux
+	}
+	return time.Duration(ts.Nano())
 }

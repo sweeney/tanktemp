@@ -17,3 +17,9 @@ type line struct{ meter.Source }
 func request(chip string, offset int, debounce time.Duration) (*line, error) {
 	return nil, errors.New("GPIO lines need Linux")
 }
+
+var start = time.Now()
+
+// Now, off Linux, is time since the process started: there are no kernel
+// edges to match, only the tests' clock to keep monotonic.
+func Now() time.Duration { return time.Since(start) }

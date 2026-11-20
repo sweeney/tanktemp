@@ -32,3 +32,13 @@ func TestOpenRefusesShortDebounce(t *testing.T) {
 		t.Error("a 4ms debounce was accepted")
 	}
 }
+
+// Now reads the clock edges are stamped on, CLOCK_MONOTONIC, so the meter
+// can turn an edge's time into wall time. It only ever goes forward.
+func TestNowIsMonotonic(t *testing.T) {
+	a := Now()
+	time.Sleep(2 * time.Millisecond)
+	if b := Now(); b <= a || b-a < time.Millisecond || b-a > time.Second {
+		t.Errorf("Now %v then %v", a, b)
+	}
+}
