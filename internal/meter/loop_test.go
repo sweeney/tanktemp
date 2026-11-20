@@ -57,7 +57,7 @@ func (h *harness) none(t *testing.T) {
 	t.Helper()
 	// A snapshot round trip proves the loop has handled everything sent so
 	// far; anything it emitted is then already in out.
-	h.loop.Snapshot(context.Background())
+	h.loop.Snapshot(context.Background(), 0)
 	select {
 	case e := <-h.out:
 		t.Fatalf("emitted %+v", e)
@@ -105,7 +105,7 @@ func TestLoopEdgeConfirmsWithoutATick(t *testing.T) {
 func TestLoopSnapshot(t *testing.T) {
 	h := start(t, meter.Closed)
 	h.src.Push(1000*ms, meter.Open)
-	s, ok := h.loop.Snapshot(context.Background())
+	s, ok := h.loop.Snapshot(context.Background(), 0)
 	if !ok || s.Level != meter.Open || s.Count != 0 {
 		t.Errorf("snapshot %+v, %v", s, ok)
 	}
@@ -127,7 +127,7 @@ func TestLoopStopsWithItsContext(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 100*ms)
 	defer cancel()
-	if _, ok := h.loop.Snapshot(ctx); ok {
+	if _, ok := h.loop.Snapshot(ctx, 0); ok {
 		t.Error("a snapshot from a stopped loop")
 	}
 }
@@ -161,7 +161,7 @@ func TestLoopConcurrentSnapshots(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for range 200 {
-				h.loop.Snapshot(context.Background())
+				h.loop.Snapshot(context.Background(), 0)
 			}
 		}()
 	}
@@ -177,7 +177,35 @@ func TestLoopConcurrentSnapshots(t *testing.T) {
 		}
 	}
 	wg.Wait()
-	if s, _ := h.loop.Snapshot(context.Background()); s.Count != 200 {
+	if s, _ := h.loop.Snapshot(context.Background(), 0); s.Count != 200 {
 		t.Errorf("count %d, want 200", s.Count)
+	}
+}
+
+// A tick must not overtake an edge already queued (review on 1a037c4): a
+// closing at 1000 ms reopened at 1005 ms (a spike) is one short and no
+// litre, even when a tick at 1050 ms is ready at the same time.
+func TestLoopTickNeverOvertakesAQueuedEdge(t *testing.T) {
+	h := start(t, meter.Open)
+	h.src.Push(1000*ms, meter.Closed)
+	h.src.Push(1005*ms, meter.Open)
+	h.ticks <- 1050 * ms
+	h.none(t)
+	if s, _ := h.loop.Snapshot(context.Background(), 1050*ms); s.Count != 0 || s.Short != 1 {
+		t.Errorf("snapshot %+v; want count 0, short 1", s)
+	}
+}
+
+// A snapshot is as of the now it's given: a closing whose hold has passed
+// is confirmed (and published) first, not left for the next tick.
+func TestLoopSnapshotConfirmsAHeldClosing(t *testing.T) {
+	h := start(t, meter.Open)
+	h.src.Push(1000*ms, meter.Closed)
+	s, ok := h.loop.Snapshot(context.Background(), 1020*ms)
+	if !ok || s.Count != 1 {
+		t.Errorf("snapshot %+v, %v; want the held closing counted", s, ok)
+	}
+	if e := h.next(t); e.ev.Kind != meter.Pulse {
+		t.Errorf("emitted %+v", e)
 	}
 }
