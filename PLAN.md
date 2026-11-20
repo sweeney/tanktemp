@@ -1,10 +1,12 @@
 # tanktemp: plan
 
-Status: **first version built overnight on 2026-10-31, local only** (nothing
-pushed). Phases 0–8 and 10 are done; phase 9 (deploy) and phase 11 (the rig)
-are under way. See "Build status" at the end, and `GUESSES.md` for every
-choice made without asking. The plan below is as agreed, with the decisions
-taken during the build folded in.
+Status (2026-11-13): **built, released and running on the rig, and
+consumed by statehouse and greenhouse.** Phases 0–12 are done, apart from
+the hardware captures and calibration in phase 11 that need hands on the
+rig. The rest of what's open is follow-up in other repos: `iot` on
+`lifecycle`, and ups-mqtt and netmon on `mqttpub`. See "Build status" at
+the end, and `GUESSES.md` for every choice made without asking. The plan
+below is as agreed, with the decisions taken during the build folded in.
 
 ## What it is
 
@@ -77,9 +79,11 @@ on each, is set in config.
 11. **The prototype rig is the production Pi.** I may test on it, and may stop
     `templog` to do so. **Nothing I do may leave it unable to boot or
     unreachable.** That means read-only `--check` runs first, no edits to
-    `/boot/firmware/config.txt` (the rig's overlays are already there, so
-    `setup-pi.sh` should find nothing to change there), no reboots without
-    asking, and everything I change on it is reversible.
+    `/boot/firmware/config.txt` by hand, no reboots without asking, and
+    everything I change on it is reversible. Since 2026-11-19 (the first rig
+    died; its replacement had a fresh OS) `setup-pi.sh` adds missing
+    `dtoverlay=w1-gpio` lines itself, keeping a backup, and reboots only
+    after asking (or with `--yes`).
 12. **The deploy `lib.sh` is not centralised.** tanktemp copies
     boiler-sensor's, and the copy is recorded in common's PLAN.md.
 
@@ -798,11 +802,31 @@ the pattern of its `boiler`, `ups` and `climate` adapters.
 
 ## Open questions
 
-None open as of 2026-10-31. Questions that turn up during the build go here.
+None open as of 2026-11-11. Questions that turn up go here.
 
-## Build status (2026-10-31, overnight)
+## Build status (2026-11-13)
 
-Everything is local. Nothing is pushed, tagged or merged.
+Built overnight on 2026-10-31, released on 2026-11-01, and running on the rig
+since. How it got here is kept below, under History.
+
+| Phase | State |
+|---|---|
+| 0–3 repo, config, reading + onewire, sweep + startup | done |
+| 4 wire contract | done. Not reviewed before the encoders were written (G13); instead you asked for a walkthrough, `docs/wire-walkthrough.html`, which found and fixed ten places where docs and code disagreed |
+| 5 lifecycle | released, `lifecycle/v0.2.0` (with `Config.Next`, for the adaptive cadence). **`iot` is not rebuilt on it** (two test incompatibilities, see `lifecycle-DESIGN.md` in common), so sweeney/boiler-sensor#6 is still open |
+| 6 health | released, `health/v0.1.0`. pi-price-screen moved onto it (sweeney/pi-price-screen#3, closed) |
+| 7 mqttpub | released, `mqttpub/v0.1.0`. **ups-mqtt and netmon are not migrated**, though the plan put that before the tag |
+| 8 web + main | done |
+| 9 deploy | done: `setup-pi.sh`, `deploy.sh` and their stub tests |
+| 10 devices follow-up | released, `devices/v0.2.0`: asset fields, `cylinder`, `part_of`, `telemetry`, `PlaceOf` |
+| 11 the rig | **in production** on `energy/hot_water`, both tanks fitted (5 probes each), `templog` disabled. Adaptive cadence (#4) is merged and live at `trigger_c_per_min: 1.5`; verbose logging is off again. About 50 single read retries a day across both buses, all recovered on the second attempt. **Not done:** the power-on-reset and data-line captures, and the water-bath calibration (offsets are 0); these need hands on the rig |
+| follow-up | **Remove templog** (G24): due since 2026-11-08. It stays disabled, as the fallback, until you say |
+| 12 hand-off | **done.** `docs/STATEHOUSE.md` written. The tank and probe entries are in `devices_<site>`, probes with a room of their own. Checked 2026-11-13: statehouse's adapter is on, with all ten probes online as `appliance_probe` devices, and greenhouse charts them, with history from 2026-11-11. statehouse doesn't show the cylinders themselves (`telemetry: false`, so no asset relay yet); that's deliberate, and the owner has a plan for it |
+
+### History
+
+The first night's table (2026-10-31), when everything was local and
+nothing was pushed, tagged or merged:
 
 | Phase | State |
 |---|---|

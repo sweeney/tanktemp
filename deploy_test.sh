@@ -483,6 +483,16 @@ for cmd in reboot shutdown; do
     # shellcheck disable=SC2016 # $* and $FAKE_STATE are for the stub
     printf '#!/usr/bin/env bash\necho "REBOOT %s $*" >>"$FAKE_STATE/log"\n' "$cmd" >"$RSTUBS/$cmd"
 done
+# reboot: the Pi comes back with one w1_bus_master per dtoverlay=w1-gpio line
+# in config.txt (FAKE_REBOOT_NO_BUS=1: with none, as if the line were wrong).
+cat >"$RSTUBS/reboot" <<'EOF'
+#!/usr/bin/env bash
+echo "REBOOT reboot $*" >>"$FAKE_STATE/log"
+rm -rf "$DEPLOY_W1_DEVICES"/w1_bus_master*
+[ "${FAKE_REBOOT_NO_BUS:-0}" = 1 ] && exit 0
+n=$(grep -c '^[[:space:]]*dtoverlay=w1-gpio' "$DEPLOY_BOOT_CONFIG") || true
+for ((i = 1; i <= n; i++)); do mkdir -p "$DEPLOY_W1_DEVICES/w1_bus_master$i"; done
+EOF
 
 cat >"$RSTUBS/uname" <<'EOF'
 #!/usr/bin/env bash
@@ -671,7 +681,7 @@ run() {
         DEPLOY_PI_DIR="$PI" DEPLOY_BIN_LINK="$CASE/bin/tanktemp" DEPLOY_UNIT_LINK="$CASE/etc/tanktemp.service" \
         DEPLOY_CONFIG_PATH="$CASE/etc/tanktemp/config.yaml" DEPLOY_BOOT_CONFIG="$CASE/boot/config.txt" \
         DEPLOY_W1_DEVICES="$CASE/w1" DEPLOY_HTTP_HOST=pi.test DEPLOY_VERIFY_TIMEOUT=2 DEPLOY_SETTLE=0 \
-        DEPLOY_POLL=0.1 DEPLOY_BROKER_TIMEOUT=1 DEPLOY_SUDOERS="$SUDOERS_F" DEPLOY_SUDO_PATH="$SPATH" ${envs[@]+"${envs[@]}"} \
+        DEPLOY_POLL=0.1 DEPLOY_REBOOT_TIMEOUT=3 DEPLOY_BROKER_TIMEOUT=1 DEPLOY_SUDOERS="$SUDOERS_F" DEPLOY_SUDO_PATH="$SPATH" ${envs[@]+"${envs[@]}"} \
         bash "$REPO/$script" "$@" 2>&1 <<<"$INPUT") && RC=0 || RC=$?
 }
 deploy() { run deploy.sh "$@"; }
@@ -1244,30 +1254,144 @@ case_48() {
     check "setup --check leaves templog running" templog_on
 }
 
-case_49() {
+# no_w1: a bare Pi whose config.txt has no 1-Wire overlay, so no bus.
+no_w1() {
     bare
-    sed -i.bak 's/^dtoverlay=w1-gpio.*/#&/' "$CASE/boot/config.txt"
+    sed -i.bak '/^dtoverlay=w1-gpio/d' "$CASE/boot/config.txt"
+    rm -f "$CASE/boot/config.txt.bak"
+    rm -rf "$CASE/w1"/w1_bus_master*
     cp "$CASE/boot/config.txt" "$GDIR/config.txt.before"
-    for args in --check --yes; do
-        setup -- "$args"
-        check "no dtoverlay=w1-gpio ($args) is refused" rc_is 2
-        check "it prints the line to add ($args)" says 'dtoverlay=w1-gpio,gpiopin='
-        check "config.txt is not edited ($args)" cmp -s "$CASE/boot/config.txt" "$GDIR/config.txt.before"
-        check "and nothing reboots ($args)" not logged REBOOT
-        check "and nothing else is done ($args)" nothing_set_up
-    done
-    check "templog is left alone (no dtoverlay)" templog_on
+}
+w1_lines() { grep -c "^dtoverlay=w1-gpio,gpiopin=$1\$" "$CASE/boot/config.txt" || true; }
+# the last [section] in config.txt is [all], and the lines follow it
+w1_under_all() {
+    [ "$(grep '^\[' "$CASE/boot/config.txt" | tail -1)" = '[all]' ] &&
+        awk '/^\[/ { s = $0 } /^dtoverlay=w1-gpio/ && s != "[all]" { bad = 1 } END { exit bad }' "$CASE/boot/config.txt"
+}
+reboots() { grep -c REBOOT "$FAKE_STATE/log" || true; }
+config_txt_kept() { head -n "$(wc -l <"$GDIR/config.txt.before")" "$CASE/boot/config.txt" | cmp -s - "$GDIR/config.txt.before"; }
+
+case_49() {
+    no_w1
+    before=$(snapshot)
+    setup -- --check
+    check "--check with no 1-Wire overlay passes" rc_is 0
+    check "it would add the GPIO4 line" says 'dtoverlay=w1-gpio,gpiopin=4'
+    check "and the GPIO17 line" says 'dtoverlay=w1-gpio,gpiopin=17'
+    check "to config.txt, keeping a copy" says 'config.txt.tanktemp-backup'
+    check "and would reboot" says 'reboot'
+    check "and still lists the rest of setup" says "build $VERSION"
+    check "--check edits nothing" [ "$(snapshot)" = "$before" ]
+    check "--check does not reboot" not logged REBOOT
 }
 
 case_50() {
-    bare
-    rm -rf "$CASE/w1"/w1_bus_master*
+    no_w1
     setup -- --yes
-    check "dtoverlay without a w1_bus_master is refused" rc_is 2
-    check "it says the bus is not there" says 'w1_bus_master'
-    check "and to reboot (by hand)" says '[Rr]eboot the Pi yourself'
-    check "without rebooting" not logged REBOOT
-    check "having done nothing (no bus)" nothing_set_up
+    check "--yes with no 1-Wire overlay sets up (rc $RC)" rc_is 0
+    check "it adds the GPIO4 line once" [ "$(w1_lines 4)" -eq 1 ]
+    check "and the GPIO17 line once" [ "$(w1_lines 17)" -eq 1 ]
+    check "under [all]" w1_under_all
+    check "keeping what was there" config_txt_kept
+    check "with a copy of the old file" cmp -s "$CASE/boot/config.txt.tanktemp-backup" "$GDIR/config.txt.before"
+    check "it reboots once" [ "$(reboots)" -eq 1 ]
+    check "it says the buses are up" says '2 bus master'
+    check "then carries on: a first build runs" new_build_is_running
+    check "as tanktemp" runs_as tanktemp
+    before=$(snapshot)
+    setup -- --yes
+    check "again: nothing to do" says 'already set up: nothing to do'
+    check "again: no second reboot" [ "$(reboots)" -eq 1 ]
+    check "again: changes nothing" [ "$(snapshot)" = "$before" ]
+}
+
+case_100() {
+    no_w1
+    INPUT=$'y\nn\n' setup --
+    check "declining the config.txt edit stops setup (2)" rc_is 2
+    check "config.txt is unchanged" cmp -s "$CASE/boot/config.txt" "$GDIR/config.txt.before"
+    check "no backup is made" [ ! -e "$CASE/boot/config.txt.tanktemp-backup" ]
+    check "nothing reboots (declined edit)" not logged REBOOT
+}
+
+case_101() {
+    no_w1
+    INPUT=$'y\ny\nn\n' setup --
+    check "declining the reboot stops setup (2)" rc_is 2
+    check "the lines were added (agreed)" [ "$(w1_lines 17)" -eq 1 ]
+    check "nothing reboots (declined reboot)" not logged REBOOT
+    setup -- --check
+    check "then --check would reboot" says 'reboot'
+    check "but not add the lines again" not says 'add to'
+    setup -- --yes
+    check "then --yes reboots and sets up" rc_is 0
+    check "still one GPIO17 line" [ "$(w1_lines 17)" -eq 1 ]
+    check "one reboot in all" [ "$(reboots)" -eq 1 ]
+}
+
+case_102() {
+    no_w1
+    printf 'dtoverlay=w1-gpio,gpiopin=4\ndtoverlay=w1-gpio,gpiopin=17\n' >>"$CASE/boot/config.txt"
+    cp "$CASE/boot/config.txt" "$GDIR/config.txt.before"
+    setup -- --yes
+    check "lines there but no bus: setup reboots and sets up (rc $RC)" rc_is 0
+    check "without editing config.txt" cmp -s "$CASE/boot/config.txt" "$GDIR/config.txt.before"
+    check "one reboot (lines there)" [ "$(reboots)" -eq 1 ]
+}
+
+case_103() {
+    no_w1
+    echo 'dtoverlay=w1-gpio,gpiopin=4' >>"$CASE/boot/config.txt"
+    cp "$CASE/boot/config.txt" "$GDIR/config.txt.before"
+    mkdir -p "$CASE/w1/w1_bus_master1"
+    setup -- --yes
+    check "one of two lines there: adds the other (rc $RC)" rc_is 0
+    check "GPIO4 not added twice" [ "$(w1_lines 4)" -eq 1 ]
+    check "GPIO17 added" [ "$(w1_lines 17)" -eq 1 ]
+    check "two buses after the reboot" says '2 bus master'
+}
+
+case_104() {
+    no_w1
+    printf '[pi5]\ndtoverlay=nospi10\n' >>"$CASE/boot/config.txt"
+    printf 'no newline at the end' >>"$CASE/boot/config.txt"
+    cp "$CASE/boot/config.txt" "$GDIR/config.txt.before"
+    setup -- --yes
+    check "a file ending in another section (rc $RC)" rc_is 0
+    check "gets an [all] before the lines" w1_under_all
+    check "and its last line is kept whole" grep -qx 'no newline at the end' "$CASE/boot/config.txt"
+}
+
+case_105() {
+    no_w1
+    setup -- --yes --w1-gpios 5
+    check "--w1-gpios 5 sets up (rc $RC)" rc_is 0
+    check "with a GPIO5 line" [ "$(w1_lines 5)" -eq 1 ]
+    check "and no GPIO4 or GPIO17 line" [ "$(w1_lines 4)$(w1_lines 17)" = 00 ]
+    no_w1
+    setup -- --check --w1-gpios 4,x
+    check "--w1-gpios 4,x is refused" rc_is 2
+    check "naming the bad value" says 'w1-gpios'
+}
+
+case_106() {
+    no_w1
+    setup FAKE_REBOOT_NO_BUS=1 DEPLOY_REBOOT_TIMEOUT=1 -- --yes
+    check "no bus after the reboot stops setup (3)" rc_is 3
+    check "it says the bus did not come up" says 'w1_bus_master'
+    check "it reboots only once" [ "$(reboots)" -eq 1 ]
+    check "and sets up nothing else" [ ! -e "$PI" ]
+}
+
+case_107() {
+    fresh
+    sed -i.bak '/^dtoverlay=w1-gpio/d' "$CASE/boot/config.txt"
+    cp "$CASE/boot/config.txt" "$GDIR/config.txt.before"
+    setup FAKE_SUDO=scoped -- --yes
+    check "with only the scoped sudo rules, a config.txt edit is refused" rc_is 2
+    check "saying it needs full sudo" says 'need full sudo'
+    check "config.txt unchanged (scoped)" cmp -s "$CASE/boot/config.txt" "$GDIR/config.txt.before"
+    check "no reboot (scoped)" not logged REBOOT
 }
 
 case_51() {

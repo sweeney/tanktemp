@@ -8,6 +8,8 @@
 #   ./setup-pi.sh --config PATH  the config to install (default deploy/config.local.yaml)
 #   ./setup-pi.sh --allow-unpushed  build the first install from a commit that is
 #                                not pushed (or with no git remote): a warning
+#   ./setup-pi.sh --w1-gpios LIST  the GPIOs (BCM numbers, comma-separated) the
+#                                1-Wire buses' data wires are on (default 4,17)
 #   ./setup-pi.sh [opts] user@host  the Pi; without it, the one line of
 #                                deploy/host (gitignored). The repo names no host.
 #
@@ -34,10 +36,15 @@
 #      its staged copy (~/.tanktemp-config.yaml.incoming). Checked with visudo
 #      -c before it goes in, never installed if that fails. One that differs
 #      is shown as a diff and replaced (asking first).
-#   0. Checks only: 1-Wire must be set up already. /boot/firmware/config.txt
-#      needs a dtoverlay=w1-gpio line and /sys/bus/w1/devices a
-#      w1_bus_master. This script never edits config.txt and never reboots:
-#      it prints the line to add and stops.
+#   0. 1-Wire (with full sudo): /boot/firmware/config.txt needs a
+#      dtoverlay=w1-gpio,gpiopin=N line for each of --w1-gpios. Any that are
+#      missing are added at the end, under [all] (an [all] line first if the
+#      file ends in another section), the file as it was kept once as
+#      config.txt.tanktemp-backup. Then, if there are fewer w1_bus_master*
+#      in /sys/bus/w1/devices than overlay lines, the Pi is rebooted (asking
+#      first: --yes does not ask), this waits for the buses to appear, and
+#      runs itself again to carry on. If they do not appear, it stops; it
+#      never reboots twice. Nothing else in config.txt is changed.
 #   1. templog (a logger that reads the same probes; only one reader may run):
 #      if it is active or enabled, `systemctl disable --now templog`, and the
 #      command to bring it back is printed.
@@ -91,7 +98,9 @@ set -euo pipefail
 
 usage() { sed -n '3,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//p;}' "$0"; }
 
-CHECK=0 YES=0 ALLOW_UNPUSHED=0 REMOTE="" CONFIG=""
+ORIG_ARGS=("$@") ORIG_PWD=$PWD
+SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+CHECK=0 YES=0 ALLOW_UNPUSHED=0 REMOTE="" CONFIG="" W1_GPIOS=4,17
 while [ $# -gt 0 ]; do
     case "$1" in
         --check) CHECK=1 ;;
@@ -102,12 +111,19 @@ while [ $# -gt 0 ]; do
             CONFIG="$2"
             shift ;;
         --config=*) CONFIG="${1#--config=}" ;;
+        --w1-gpios)
+            [ $# -ge 2 ] || { echo "--w1-gpios needs a list, e.g. 4,17" >&2; exit 2; }
+            W1_GPIOS="$2"
+            shift ;;
+        --w1-gpios=*) W1_GPIOS="${1#--w1-gpios=}" ;;
         -h | --help) usage; exit 0 ;;
         -*) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
         *) [ -z "$REMOTE" ] || { echo "only one host, please" >&2; exit 2; }; REMOTE="$1" ;;
     esac
     shift
 done
+[[ "$W1_GPIOS" =~ ^[0-9]{1,2}(,[0-9]{1,2})*$ ]] || { echo "--w1-gpios '$W1_GPIOS': want GPIO numbers separated by commas, e.g. 4,17" >&2; exit 2; }
+IFS=, read -r -a W1_PINS <<<"$W1_GPIOS"
 # --config is relative to where this was run from.
 CONFIG_GIVEN=0
 if [ -n "$CONFIG" ]; then
@@ -146,7 +162,7 @@ echo \$HOME
 id -un
 id -gn
 $(sudo_probe)
-if [ -r $BOOT_CONFIG ]; then grep -c '^[[:space:]]*dtoverlay=w1-gpio' $BOOT_CONFIG || true; else echo UNREADABLE; fi
+if [ -r $BOOT_CONFIG ]; then grep '^[[:space:]]*dtoverlay=w1-gpio' $BOOT_CONFIG | sed -e 's/.*gpiopin=\\([0-9]*\\).*/\\1/' -e t -e 's/.*/4/' | tr '\\n' ' '; echo; else echo UNREADABLE; fi
 ls -d $W1_DEVICES/w1_bus_master* 2>/dev/null | wc -l
 id -gn $SVC_USER 2>/dev/null || echo NONE
 $(perms "$PI_DIR")
@@ -197,28 +213,24 @@ goarch_for "$remote_arch" || refuse "$REMOTE is '$remote_arch', which this scrip
 need_sudo "$sudo_answer"
 info "arch $remote_arch, $SERVICE $active$([ "$running_as" = NONE ] || echo " as $running_as")"
 
-# 1-Wire: checked, never changed here.
+# 1-Wire: the overlay line for each bus in config.txt, and a bus master for
+# each line. overlays is the GPIOs of the lines there (no gpiopin= is GPIO4).
 masters="${masters//[[:space:]]/}"
-if [ "$overlays" = UNREADABLE ]; then
-    refuse "cannot read $BOOT_CONFIG on $REMOTE to check for dtoverlay=w1-gpio"
-elif [ "${overlays:-0}" -eq 0 ]; then
-    cat >&2 <<EOF
-
-1-Wire is not set up on $REMOTE: $BOOT_CONFIG has no dtoverlay=w1-gpio line.
-This script never edits $BOOT_CONFIG and never reboots. Add one line per
-bus, under [all], naming the GPIO (BCM numbering) the bus's data wire is on:
-
-    dtoverlay=w1-gpio,gpiopin=4
-
-(a second bus: another line, e.g. dtoverlay=w1-gpio,gpiopin=17). Then reboot
-the Pi yourself, check that ls $W1_DEVICES shows a w1_bus_master, and run
-this again.
-EOF
-    refuse "no dtoverlay=w1-gpio in $BOOT_CONFIG"
-elif [ "${masters:-0}" -eq 0 ]; then
-    refuse "$BOOT_CONFIG has $overlays dtoverlay=w1-gpio line(s), but $W1_DEVICES has no w1_bus_master*: the overlay is not loaded. Reboot the Pi yourself (or check the line) and run this again"
+[ "$overlays" != UNREADABLE ] || refuse "cannot read $BOOT_CONFIG on $REMOTE to check for dtoverlay=w1-gpio"
+read -r -a have_pins <<<"$overlays"
+W1_ADD=()
+for p in "${W1_PINS[@]}"; do
+    case " ${have_pins[*]-} " in *" $p "*) ;; *) W1_ADD+=("$p") ;; esac
+done
+want_buses=$(printf '%s\n' ${have_pins[@]+"${have_pins[@]}"} ${W1_ADD[@]+"${W1_ADD[@]}"} | sort -u | grep -c . || true)
+W1_REBOOT=0
+if [ ${#W1_ADD[@]} -gt 0 ] || [ "${masters:-0}" -lt "$want_buses" ]; then
+    W1_REBOOT=1
+    [ "${SETUP_PI_REBOOTED:-0}" != 1 ] || refuse "after the reboot $W1_DEVICES has ${masters:-0} w1_bus_master*, not $want_buses: check the dtoverlay=w1-gpio line(s) in $BOOT_CONFIG"
+    info "1-Wire: overlay line(s) for GPIO ${have_pins[*]:-none}, ${masters:-0} bus master(s); want GPIO ${W1_PINS[*]}"
+else
+    info "1-Wire: ${#have_pins[@]} dtoverlay=w1-gpio line(s), $masters bus master(s)"
 fi
-info "1-Wire: $overlays dtoverlay=w1-gpio line(s), $masters bus master(s)"
 
 # The service user: made here, or there already with its own group.
 case "$user_group" in
@@ -353,6 +365,10 @@ todo=()
 if [ $SUDOERS_CHANGE -ne 0 ]; then
     todo+=("$([ $SUDOERS_CHANGE -eq 1 ] && echo install || echo replace) $SUDOERS: sudo rules for $deploy_user scoped to what ./deploy.sh and config changes run, with no password (checked with visudo first)")
 fi
+W1_LINES=""
+for p in ${W1_ADD[@]+"${W1_ADD[@]}"}; do W1_LINES="$W1_LINES${W1_LINES:+; }dtoverlay=w1-gpio,gpiopin=$p"; done
+[ ${#W1_ADD[@]} -eq 0 ] || todo+=("add to $BOOT_CONFIG, under [all]: $W1_LINES (the file as it is now kept as $BOOT_CONFIG.tanktemp-backup)")
+[ $W1_REBOOT -eq 0 ] || todo+=("reboot $REMOTE to load the 1-Wire overlay, wait for $want_buses bus master(s), then carry on with the rest")
 [ $templog_on -eq 0 ] || todo+=("stop and disable templog (to bring it back: $TEMPLOG_BACK)")
 [ "$user_group" != NONE ] || todo+=("create the $SVC_USER system user (no home, no login shell)")
 CONFIG_TODO="install $CONFIG as $CONFIG_PATH (root:$SVC_USER 0640)"
@@ -468,6 +484,41 @@ $visudo_out"
     r "sudo mv -f $sudoers_tmp $SUDOERS" || stopped "moving $SUDOERS into place failed"
     CHANGED=1
     info "$SUDOERS installed: ./deploy.sh and config changes need no password from here"
+fi
+
+# 1-Wire: the overlay lines appended (the file as it was kept once), then a
+# reboot to load them, then this script again, from the start.
+if [ ${#W1_ADD[@]} -gt 0 ]; then
+    confirm "Add $W1_LINES to $BOOT_CONFIG on $REMOTE?"
+    say "adding the 1-Wire overlay line(s) to $BOOT_CONFIG"
+    read -r -d '' W1_EDIT <<'EOS' || true
+f="$1"
+shift
+[ -e "$f.tanktemp-backup" ] || sudo cp -p "$f" "$f.tanktemp-backup" || exit 1
+{
+    [ -z "$(tail -c1 "$f")" ] || echo
+    [ "$(grep '^\[' "$f" | tail -1)" = '[all]' ] || echo '[all]'
+    echo '# 1-Wire buses for tanktemp (added by setup-pi.sh)'
+    for p in "$@"; do echo "dtoverlay=w1-gpio,gpiopin=$p"; done
+} | sudo tee -a "$f" >/dev/null && sync
+EOS
+    r "bash -c $(printf %q "$W1_EDIT") _ $BOOT_CONFIG ${W1_ADD[*]}" || stopped "editing $BOOT_CONFIG failed (the old file is $BOOT_CONFIG.tanktemp-backup)"
+fi
+if [ $W1_REBOOT -eq 1 ]; then
+    confirm "Reboot $REMOTE now, to load the 1-Wire overlay? (setup carries on once it is back)"
+    say "rebooting $REMOTE"
+    r "sudo reboot" >/dev/null 2>&1 || true # the connection drops as it goes down
+    deadline=$((SECONDS + REBOOT_TIMEOUT))
+    while :; do
+        n=$(r "ls -d $W1_DEVICES/w1_bus_master* 2>/dev/null | wc -l" 2>/dev/null) || n=0
+        n="${n//[[:space:]]/}"
+        [ "${n:-0}" -lt "$want_buses" ] || break
+        [ $SECONDS -lt $deadline ] || stopped "$REMOTE did not come back with $want_buses w1_bus_master* in $W1_DEVICES within ${REBOOT_TIMEOUT}s: check that it booted, and the dtoverlay=w1-gpio line(s) in $BOOT_CONFIG"
+        sleep "$POLL"
+    done
+    say "$REMOTE is back, with $n bus master(s): carrying on"
+    cd "$ORIG_PWD"
+    SETUP_PI_REBOOTED=1 exec bash "$SELF" ${ORIG_ARGS[@]+"${ORIG_ARGS[@]}"}
 fi
 
 if [ $templog_on -eq 1 ]; then

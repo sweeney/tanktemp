@@ -9,3 +9,4 @@
 /bin/
 /tools/guessreview/answers.json
 /*.local.json
+/scratchpad/
