@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sweeney/tanktemp/internal/meter"
 	"github.com/sweeney/tanktemp/internal/reading"
 	"github.com/sweeney/tanktemp/internal/startup"
 	"github.com/sweeney/tanktemp/internal/sweep"
@@ -162,7 +163,7 @@ func TestGoldenMeterPulse(t *testing.T) {
 	golden(t, "meter-pulse.golden", Meter(MeterInput{
 		DeviceID: "hot_water_meter", Trigger: TriggerPulse,
 		At: time.Date(2026, 11, 20, 7, 5, 4, 7e6, time.UTC), ClockSynced: true, Seq: 1,
-		LitresPerPulse: 1, Level: "closed",
+		LitresPerPulse: 1, Level: meter.Closed,
 		CountingSince: time.Date(2026, 11, 20, 7, 0, 41, 300e6, time.UTC),
 		Count:         1,
 		LastPulseAt:   ptr(time.Date(2026, 11, 20, 7, 5, 4, 7_400_000, time.UTC)),
@@ -173,7 +174,7 @@ func TestGoldenMeterOpen(t *testing.T) {
 	golden(t, "meter-open.golden", Meter(MeterInput{
 		DeviceID: "hot_water_meter", Trigger: TriggerOpen,
 		At: time.Date(2026, 11, 20, 7, 12, 58, 853e6, time.UTC), ClockSynced: true, Seq: 3671,
-		LitresPerPulse: 1, Level: "open",
+		LitresPerPulse: 1, Level: meter.Open,
 		CountingSince: time.Date(2026, 11, 19, 22, 41, 7, 0, time.UTC),
 		Count:         1833,
 		LastPulseAt:   ptr(time.Date(2026, 11, 20, 7, 12, 57, 312_900_000, time.UTC)),
@@ -189,7 +190,7 @@ func TestGoldenMeterSweepNone(t *testing.T) {
 	golden(t, "meter-sweep-none.golden", Meter(MeterInput{
 		DeviceID: "hot_water_meter", Trigger: TriggerSweep,
 		At: time.Date(2026, 11, 20, 1, 30, 0, 0, time.UTC), Seq: 7,
-		LitresPerPulse: 10, Level: "closed",
+		LitresPerPulse: 10, Level: meter.Closed,
 		CountingSince: time.Date(2026, 11, 20, 1, 27, 0, 0, time.UTC),
 	}))
 }
@@ -197,5 +198,35 @@ func TestGoldenMeterSweepNone(t *testing.T) {
 func TestMeterTopic(t *testing.T) {
 	if got := MeterTopic("water/hot/tanktemp"); got != "water/hot/tanktemp/meter" {
 		t.Errorf("MeterTopic = %s", got)
+	}
+}
+
+// Some meters have a fractional K (0.1 or 2.5 litres per pulse): it must
+// survive the encoding exactly.
+func TestMeterFractionalK(t *testing.T) {
+	for _, tt := range []struct {
+		k    float64
+		want string
+	}{{0.1, `"litres_per_pulse":0.1,`}, {2.5, `"litres_per_pulse":2.5,`}, {1, `"litres_per_pulse":1,`}} {
+		got := string(Meter(MeterInput{DeviceID: "m", Trigger: TriggerSweep, LitresPerPulse: tt.k, Level: meter.Open}))
+		if !strings.Contains(got, tt.want) {
+			t.Errorf("K %v: %s, want %s", tt.k, got, tt.want)
+		}
+	}
+}
+
+// Trigger and Level are typed: a misspelt value doesn't compile, and the
+// encoder spells the real ones as WIRE.md does.
+func TestMeterEnumsOnTheWire(t *testing.T) {
+	for _, tt := range []struct {
+		tr    Trigger
+		l     meter.Level
+		trig  string
+		level string
+	}{{TriggerPulse, meter.Closed, "pulse", "closed"}, {TriggerOpen, meter.Open, "open", "open"}, {TriggerSweep, meter.Open, "sweep", "open"}} {
+		got := string(Meter(MeterInput{Trigger: tt.tr, Level: tt.l}))
+		if !strings.Contains(got, `"trigger":"`+tt.trig+`"`) || !strings.Contains(got, `"level":"`+tt.level+`"`) {
+			t.Errorf("%s", got)
+		}
 	}
 }

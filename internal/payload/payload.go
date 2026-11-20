@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/sweeney/tanktemp/internal/meter"
 	"github.com/sweeney/tanktemp/internal/reading"
 	"github.com/sweeney/tanktemp/internal/startup"
 	"github.com/sweeney/tanktemp/internal/sweep"
@@ -189,22 +190,26 @@ func mustMarshal(v any) []byte {
 // MeterTopic is the water meter's topic: one per tanktemp.
 func MeterTopic(prefix string) string { return prefix + "/meter" }
 
+// Trigger is why a meter message was sent (WIRE.md, Meter). Typed, so the
+// cmd wiring can only hand the encoder one of these.
+type Trigger string
+
 // Meter triggers.
 const (
-	TriggerPulse = "pulse"
-	TriggerOpen  = "open"
-	TriggerSweep = "sweep"
+	TriggerPulse Trigger = "pulse"
+	TriggerOpen  Trigger = "open"
+	TriggerSweep Trigger = "sweep"
 )
 
 // MeterInput is everything a meter message reports, already on the wall clock.
 type MeterInput struct {
 	DeviceID                     string
-	Trigger                      string
+	Trigger                      Trigger
 	At                           time.Time
 	ClockSynced                  bool
 	Seq                          uint64
 	LitresPerPulse               float64
-	Level                        string
+	Level                        meter.Level
 	CountingSince                time.Time
 	Count                        uint64
 	LastPulseAt                  *time.Time
@@ -246,10 +251,10 @@ func Meter(in MeterInput) []byte {
 		DeviceID:       in.DeviceID,
 		Timestamp:      timestamp(in.At),
 		ClockSynced:    in.ClockSynced,
-		Trigger:        in.Trigger,
+		Trigger:        string(in.Trigger),
 		Seq:            in.Seq,
 		LitresPerPulse: in.LitresPerPulse,
-		Level:          in.Level,
+		Level:          in.Level.String(),
 		CountingSince:  timestamp(in.CountingSince),
 		Count:          in.Count,
 		LastIntervalMS: millis(in.LastInterval),
