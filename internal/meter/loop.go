@@ -64,7 +64,11 @@ func (l *Loop) Run(ctx context.Context) error {
 				return ErrSourceClosed
 			}
 			l.publish(l.k.Tick(r.now))
-			r.reply <- l.k.Snapshot()
+			s := l.k.Snapshot()
+			if r.sweep {
+				l.emit(Event{Kind: Swept, At: r.now, Snap: s})
+			}
+			r.reply <- s
 		}
 	}
 }
@@ -92,6 +96,7 @@ func (l *Loop) publish(evs []Event) {
 
 type request struct {
 	now   time.Duration
+	sweep bool
 	reply chan Snapshot
 }
 
@@ -100,7 +105,18 @@ type request struct {
 // whose hold has passed by now confirmed (and published) first.
 // false if Run has stopped, or ctx ended first.
 func (l *Loop) Snapshot(ctx context.Context, now time.Duration) (Snapshot, bool) {
-	r := request{now: now, reply: make(chan Snapshot, 1)}
+	return l.ask(ctx, request{now: now, reply: make(chan Snapshot, 1)})
+}
+
+// Sweep is Snapshot that also emits the state as a Swept event, on Run's
+// goroutine, in order with the litres: what a caller publishes in emit
+// order is then in the counter's order.
+func (l *Loop) Sweep(ctx context.Context, now time.Duration) bool {
+	_, ok := l.ask(ctx, request{now: now, sweep: true, reply: make(chan Snapshot, 1)})
+	return ok
+}
+
+func (l *Loop) ask(ctx context.Context, r request) (Snapshot, bool) {
 	select {
 	case l.reqs <- r:
 		s, ok := <-r.reply

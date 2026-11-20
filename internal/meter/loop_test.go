@@ -209,3 +209,16 @@ func TestLoopSnapshotConfirmsAHeldClosing(t *testing.T) {
 		t.Errorf("emitted %+v", e)
 	}
 }
+
+// Sweep emits the state as a Swept event, after any pulse its now confirms.
+func TestLoopSweepEmitsInOrder(t *testing.T) {
+	h := start(t, meter.Open)
+	h.src.Push(1000*ms, meter.Closed)
+	if !h.loop.Sweep(context.Background(), 1020*ms) {
+		t.Fatal("Sweep failed")
+	}
+	a, b := h.next(t), h.next(t)
+	if a.ev.Kind != meter.Pulse || b.ev.Kind != meter.Swept || b.ev.At != 1020*ms || b.snap.Count != 1 {
+		t.Errorf("emitted %+v then %+v", a, b)
+	}
+}

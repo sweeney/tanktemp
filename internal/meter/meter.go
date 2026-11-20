@@ -80,6 +80,10 @@ const (
 	// Opened is the opening that ends a counted pulse; Snapshot's
 	// LastClosed then holds how long it was closed.
 	Opened Kind = "open"
+	// Swept is the state asked for by Loop.Sweep, emitted in turn with the
+	// litres, so a caller numbering events in emit order never sees the
+	// count go backwards.
+	Swept Kind = "sweep"
 )
 
 // Event is something a caller publishes: a counted litre, or the end of

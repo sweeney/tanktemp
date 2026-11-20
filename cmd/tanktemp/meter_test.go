@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -225,8 +226,17 @@ func TestMeterQueueIsBoundedAndDropsTheOldest(t *testing.T) {
 	}
 	close(pub.release)
 	all := published(t, &pub.Fake, 1+meterQueue)
-	if seqOf(t, all[0].Payload) != "1" || seqOf(t, all[1].Payload) != strconv.Itoa(2000-meterQueue+1) || seqOf(t, all[meterQueue].Payload) != "2000" {
-		t.Errorf("seqs %s, %s … %s", seqOf(t, all[0].Payload), seqOf(t, all[1].Payload), seqOf(t, all[meterQueue].Payload))
+	// Litre i's messages were the (2i-1)th and 2ith; the oldest 975 went,
+	// so after the first (litre 1's pulse) come messages 977 (litre 489's
+	// pulse) to 2000 (litre 1000's open), in order, numbered 1, 2, 3...
+	for i, p := range all {
+		if seqOf(t, p.Payload) != strconv.Itoa(i+1) {
+			t.Fatalf("message %d has seq %s", i, seqOf(t, p.Payload))
+		}
+	}
+	if !contains(all[0].Payload, `"trigger":"pulse"`, `"count":1,`) || !contains(all[1].Payload, `"trigger":"pulse"`, `"count":489,`) ||
+		!contains(all[meterQueue].Payload, `"trigger":"open"`, `"count":1000,`) {
+		t.Errorf("survivors %s / %s / %s", all[0].Payload, all[1].Payload, all[meterQueue].Payload)
 	}
 }
 
@@ -245,7 +255,7 @@ func TestMeterSweepMessagesCoalesce(t *testing.T) {
 	}
 	close(pub.release)
 	all := published(t, &pub.Fake, 3)
-	if !contains(all[1].Payload, `"trigger":"pulse"`) || !contains(all[2].Payload, `"trigger":"sweep","seq":4`) {
+	if !contains(all[1].Payload, `"trigger":"pulse"`) || !contains(all[2].Payload, `"trigger":"sweep","seq":3`) {
 		t.Errorf("published %v", all)
 	}
 }
@@ -255,6 +265,67 @@ func waitQueued(t *testing.T, m *meterRun, n int) {
 	for deadline := time.Now().Add(2 * time.Second); m.queued() != n; time.Sleep(time.Millisecond) {
 		if time.Now().After(deadline) {
 			t.Fatalf("queued %d, want %d", m.queued(), n)
+		}
+	}
+}
+
+// In seq order the published count never goes backwards (review on
+// 376ae58): sweeps snapshot on one goroutine while litres are counted on
+// another, and their messages must still be numbered in the order the
+// counter produced them.
+func TestMeterCountNeverGoesBackwardsInSeqOrder(t *testing.T) {
+	pub := &mqttpubtest.Fake{}
+	m, src := newTestMeter(t, pub)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := range 300 {
+			src.Push(time.Duration(i)*time.Second, meter.Closed)
+			src.Push(time.Duration(i)*time.Second+400*ms, meter.Open)
+		}
+	}()
+	for range 300 {
+		m.sweep(context.Background(), wallAt)
+	}
+	<-done
+	m.sweep(context.Background(), wallAt)
+	deadline := time.Now().Add(2 * time.Second)
+	for m.queued() > 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	time.Sleep(20 * ms)
+	type msg struct{ seq, count int }
+	var got []msg
+	for _, p := range pub.All("water/hot/tanktemp/meter") {
+		s, _ := strconv.Atoi(seqOf(t, p.Payload))
+		_, rest, _ := strings.Cut(p.Payload, `"count":`)
+		c, _, _ := strings.Cut(rest, ",")
+		n, _ := strconv.Atoi(c)
+		got = append(got, msg{s, n})
+	}
+	slices.SortFunc(got, func(a, b msg) int { return a.seq - b.seq })
+	for i := 1; i < len(got); i++ {
+		if got[i].count < got[i-1].count {
+			t.Fatalf("seq %d count %d after seq %d count %d", got[i].seq, got[i].count, got[i-1].seq, got[i-1].count)
+		}
+	}
+}
+
+// Numbered as they're published: seq has no gaps, even when sweep messages
+// coalesce or the queue drops one (review on 376ae58).
+func TestMeterSeqHasNoGaps(t *testing.T) {
+	pub := &blockingPub{release: make(chan struct{})}
+	m, _ := newTestMeter(t, pub)
+	m.emit(meter.Event{Kind: meter.Pulse, Snap: meter.Snapshot{Level: meter.Closed, Count: 1}})
+	waitQueued(t, m, 0) // taken: stalls in Publish
+	m.sweep(context.Background(), wallAt)
+	m.sweep(context.Background(), wallAt) // replaces the first
+	m.emit(meter.Event{Kind: meter.Opened, Snap: meter.Snapshot{Level: meter.Open, Count: 1}})
+	close(pub.release)
+	all := published(t, &pub.Fake, 3)
+	for i, p := range all {
+		if seqOf(t, p.Payload) != strconv.Itoa(i+1) {
+			t.Errorf("message %d has seq %s", i, seqOf(t, p.Payload))
 		}
 	}
 }

@@ -30,30 +30,28 @@ type meterDeps struct {
 // meterRun is the water meter inside tanktemp (docs/WIRE.md, Meter): its
 // line's Loop, and its messages on {prefix}/meter.
 //
-// Messages are built on the goroutine that has them (the loop's, for a
-// litre and its opening; the sweep's, for a sweep) and numbered there from
-// one series, then handed to a queue that one goroutine publishes from, so
-// a slow broker never stalls the counting. The queue is bounded: when it is
-// full the oldest litre message goes (and is counted, for /healthz); a
-// sweep message replaces any sweep message still waiting. No litre is lost
-// with a message: each carries the cumulative count, and consumers see the
-// seq gap.
+// Every message comes from the loop's goroutine, in the counter's order: a
+// litre, the opening that ends it, and a sweep's state (asked for with
+// Loop.Sweep, so it can't be overtaken by a litre counted meanwhile). They
+// queue for one publisher goroutine, so a slow broker never stalls the
+// counting, which numbers each as it publishes it: seq has no gaps. The
+// queue is bounded: full, its oldest litre message goes (counted, for
+// /healthz); a sweep message replaces any sweep message still waiting. No
+// litre is lost with a message: each carries the cumulative count, so a
+// consumer sees missed litre messages as a jump in count.
 type meterRun struct {
 	cfg   config.Meter
 	d     meterDeps
 	since time.Time
 	loop  *meter.Loop
 
+	sweepAt time.Time // the sweep being asked for: written before, read on, the loop's goroutine
+	seq     uint64    // the publisher's alone
+
 	mu    sync.Mutex
-	seq   uint64
-	queue []queued
+	queue []payload.MeterInput
 	drops int
 	wake  chan struct{}
-}
-
-type queued struct {
-	msg   mqttpub.Message
-	sweep bool
 }
 
 // newMeter is the meter on src, counting from now.
@@ -77,18 +75,20 @@ func (m *meterRun) Run(ctx context.Context) {
 
 // emit is the Loop's: a counted litre or the opening that ends one.
 func (m *meterRun) emit(e meter.Event) {
-	tr := payload.TriggerPulse
-	if e.Kind == meter.Opened {
-		tr = payload.TriggerOpen
+	switch e.Kind {
+	case meter.Pulse:
+		m.publish(payload.TriggerPulse, m.wallOf(e.At), e.Snap)
+	case meter.Opened:
+		m.publish(payload.TriggerOpen, m.wallOf(e.At), e.Snap)
+	case meter.Swept:
+		m.publish(payload.TriggerSweep, m.sweepAt, e.Snap)
 	}
-	m.publish(tr, m.wallOf(e.At), e.Snap)
 }
 
 // sweep publishes the meter as of a sweep's start, stamped like its states.
 func (m *meterRun) sweep(ctx context.Context, at time.Time) {
-	if s, ok := m.loop.Snapshot(ctx, m.d.Mono()); ok {
-		m.publish(payload.TriggerSweep, at, s)
-	}
+	m.sweepAt = at
+	m.loop.Sweep(ctx, m.d.Mono())
 }
 
 // wallOf turns a time on the edges' clock into wall time.
@@ -96,13 +96,10 @@ func (m *meterRun) wallOf(mono time.Duration) time.Time {
 	return m.d.Wall().Add(mono - m.d.Mono())
 }
 
-// publish numbers a message and queues it.
+// publish queues a message (numbered when it's published).
 func (m *meterRun) publish(tr payload.Trigger, at time.Time, s meter.Snapshot) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.seq++
 	in := payload.MeterInput{
-		DeviceID: m.cfg.DeviceID, Trigger: tr, At: at, ClockSynced: m.d.Synced(), Seq: m.seq,
+		DeviceID: m.cfg.DeviceID, Trigger: tr, At: at, ClockSynced: m.d.Synced(),
 		LitresPerPulse: m.cfg.LitresPerPulse, Level: s.Level, CountingSince: m.since, Count: s.Count,
 		LastInterval: s.LastInterval, LastClosed: s.LastClosed,
 		Noise: s.Noise, Short: s.Short, Glitches: s.Glitches, Lost: s.Lost,
@@ -111,10 +108,11 @@ func (m *meterRun) publish(tr payload.Trigger, at time.Time, s meter.Snapshot) {
 		w := m.wallOf(*s.LastPulseAt)
 		in.LastPulseAt = &w
 	}
-	q := queued{msg: mqttpub.Message{Topic: payload.MeterTopic(m.d.Prefix), Payload: string(payload.Meter(in)), Retained: true}, sweep: tr == payload.TriggerSweep}
-	if q.sweep {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if tr == payload.TriggerSweep {
 		for i, old := range m.queue {
-			if old.sweep {
+			if old.Trigger == payload.TriggerSweep {
 				m.queue = append(m.queue[:i], m.queue[i+1:]...)
 				break
 			}
@@ -124,7 +122,7 @@ func (m *meterRun) publish(tr payload.Trigger, at time.Time, s meter.Snapshot) {
 		m.queue = m.queue[1:]
 		m.drops++
 	}
-	m.queue = append(m.queue, q)
+	m.queue = append(m.queue, in)
 	select {
 	case m.wake <- struct{}{}:
 	default:
@@ -144,10 +142,13 @@ func (m *meterRun) publisher(ctx context.Context) {
 			}
 			continue
 		}
-		q := m.queue[0]
+		in := m.queue[0]
 		m.queue = m.queue[1:]
 		m.mu.Unlock()
-		if err := m.d.Pub.Publish(q.msg); err != nil {
+		m.seq++
+		in.Seq = m.seq
+		msg := mqttpub.Message{Topic: payload.MeterTopic(m.d.Prefix), Payload: string(payload.Meter(in)), Retained: true}
+		if err := m.d.Pub.Publish(msg); err != nil {
 			m.d.Logger.Printf("meter %s: publish: %v", m.cfg.DeviceID, err)
 		}
 	}
