@@ -17,6 +17,7 @@ import (
 	"math"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -34,6 +35,7 @@ type Config struct {
 	MQTT          MQTT          `yaml:"mqtt"`
 	Log           Log           `yaml:"log"`
 	Tanks         []Tank        `yaml:"tanks"`
+	Meters        []Meter       `yaml:"meters"`
 }
 
 // Sweep is how often and how hard the sensors are read.
@@ -166,6 +168,40 @@ type Sensor struct {
 	OffsetC  float64 `yaml:"offset_c"`  // optional calibration, added to the raw reading
 }
 
+// Meter defaults and limits (GUESSES G54-G56).
+var DefaultMeter = Meter{Chip: "gpiochip0", Debounce: 20 * time.Millisecond, Hold: 20 * time.Millisecond, MinInterval: 600 * time.Millisecond}
+
+const (
+	// MinMeterDebounce: below this a typo could leave today's unfiltered
+	// wiring undefended against the boiler's spikes.
+	MinMeterDebounce = 5 * time.Millisecond
+	// MaxMeterMinInterval: the meter's maximum flow (Q4, 83 L/min) is a
+	// litre every 0.72 s, so a longer backstop would drop real litres.
+	MaxMeterMinInterval = 700 * time.Millisecond
+	// MaxGPIO is the highest BCM line on the 40-pin header.
+	MaxGPIO = 27
+)
+
+var meterKeys = []string{"device_id", "chip", "gpio", "litres_per_pulse", "debounce", "hold", "min_interval"}
+
+// UnmarshalYAML starts each meter from DefaultMeter, and refuses unknown
+// keys (n.Decode alone wouldn't: KnownFields doesn't reach custom decoders).
+func (m *Meter) UnmarshalYAML(n *yaml.Node) error {
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		k := n.Content[i]
+		if !slices.Contains(meterKeys, k.Value) {
+			return fmt.Errorf("line %d: meters: unknown key %q (known: %s)", k.Line, k.Value, strings.Join(meterKeys, ", "))
+		}
+	}
+	type plain Meter // the same fields without this method, so Decode doesn't recurse
+	p := plain(DefaultMeter)
+	if err := n.Decode(&p); err != nil {
+		return err
+	}
+	*m = Meter(p)
+	return nil
+}
+
 // Defaults.
 const (
 	DefaultW1Root      = "/sys/bus/w1/devices"
@@ -259,6 +295,7 @@ func (v *validator) add(line int, path, format string, args ...any) {
 
 func (v *validator) check(c *Config) {
 	v.checkService(c)
+	defer v.checkMeters(c)
 	if len(c.Tanks) == 0 {
 		v.add(0, "tanks", "no tanks configured")
 	}
@@ -461,4 +498,68 @@ func mapValue(n *yaml.Node, key string) *yaml.Node {
 		}
 	}
 	return nil
+}
+
+// Meter is a reed-switch water meter on a GPIO line (docs/WIRE.md, Meter):
+//
+//	meters:
+//	  - device_id: hot_water_meter   # its key in devices_<site>; unique across tanks too
+//	    gpio: 27                     # the BCM line, on the 40-pin header (0..27)
+//	    litres_per_pulse: 1          # the meter's K; required
+//	    chip: gpiochip0              # default
+//	    debounce: 20ms               # kernel debounce: required, at least 5ms (GUESSES G54)
+//	    hold: 20ms                   # a closing counts once held this long (G55)
+//	    min_interval: 600ms          # the shortest gap between counted litres (G56)
+//
+// The line is read with the pull-up on: open reads high, closed low. One
+// meter only for now: WIRE.md gives a second one its own topic, not yet built.
+type Meter struct {
+	DeviceID       string        `yaml:"device_id"`
+	Chip           string        `yaml:"chip"`
+	GPIO           *int          `yaml:"gpio"`
+	LitresPerPulse float64       `yaml:"litres_per_pulse"`
+	Debounce       time.Duration `yaml:"debounce"`
+	Hold           time.Duration `yaml:"hold"`
+	MinInterval    time.Duration `yaml:"min_interval"`
+}
+
+func (v *validator) checkMeters(c *Config) {
+	if len(c.Meters) > 1 {
+		v.add(0, "meters", "%d meters: only one meter is supported for now", len(c.Meters))
+	}
+	ids := map[string]bool{}
+	for _, t := range c.Tanks {
+		ids[t.DeviceID] = true
+	}
+	for i, m := range c.Meters {
+		p := fmt.Sprintf("meters[%d]", i)
+		switch {
+		case !reDeviceID.MatchString(m.DeviceID):
+			v.add(0, p+".device_id", "%q must be lowercase letters, digits, _ and - (it is its devices_<site> key)", m.DeviceID)
+		case ids[m.DeviceID]:
+			v.add(0, p+".device_id", "device_id %q used twice (tanks and meters share them)", m.DeviceID)
+		}
+		ids[m.DeviceID] = true
+		if m.GPIO == nil || *m.GPIO < 0 || *m.GPIO > MaxGPIO {
+			v.add(0, p+".gpio", "required: a BCM line 0..%d", MaxGPIO)
+		}
+		if m.Chip == "" {
+			v.add(0, p+".chip", "empty (the default is %s)", DefaultMeter.Chip)
+		}
+		if !(m.LitresPerPulse > 0) {
+			v.add(0, p+".litres_per_pulse", "required, and greater than 0 (the meter's K)")
+		}
+		if m.Debounce < MinMeterDebounce {
+			v.add(0, p+".debounce", "%v: must be at least %v; the kernel debounce keeps electrical spikes from counting as litres", m.Debounce, MinMeterDebounce)
+		}
+		if m.MinInterval > MaxMeterMinInterval {
+			v.add(0, p+".min_interval", "%v is over %v: at the meter's maximum flow a real litre comes every 0.72 s", m.MinInterval, MaxMeterMinInterval)
+		}
+		if m.Debounce >= m.MinInterval {
+			v.add(0, p+".debounce", "%v must be shorter than min_interval (%v)", m.Debounce, m.MinInterval)
+		}
+		if m.Hold < 0 || m.Hold >= m.MinInterval {
+			v.add(0, p+".hold", "%v must be 0 or more and shorter than min_interval (%v)", m.Hold, m.MinInterval)
+		}
+	}
 }

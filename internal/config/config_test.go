@@ -222,3 +222,76 @@ func TestNearMisses(t *testing.T) {
 		}
 	}
 }
+
+const withMeter = valid + `meters:
+  - device_id: hot_water_meter
+    gpio: 27
+    litres_per_pulse: 1
+`
+
+// The water meter (docs/WIRE.md, Meter): optional, and with it the counting
+// rules default to GUESSES G54-G56.
+func TestMeterDefaults(t *testing.T) {
+	c, err := Load([]byte(valid))
+	if err != nil || c.Meters != nil {
+		t.Fatalf("no meters block: %v, %+v", err, c.Meters)
+	}
+	c, err = Load([]byte(withMeter))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Meters) != 1 {
+		t.Fatalf("meters = %+v", c.Meters)
+	}
+	m := c.Meters[0]
+	if m.DeviceID != "hot_water_meter" || m.Chip != "gpiochip0" || m.GPIO == nil || *m.GPIO != 27 || m.LitresPerPulse != 1 ||
+		m.Debounce != 20*time.Millisecond || m.Hold != 20*time.Millisecond || m.MinInterval != 600*time.Millisecond {
+		t.Errorf("meter = %+v", m)
+	}
+}
+
+func TestMeterOverrides(t *testing.T) {
+	c, err := Load([]byte(withMeter + "    chip: gpiochip4\n    debounce: 10ms\n    hold: 30ms\n    min_interval: 500ms\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := c.Meters[0]
+	if m.Chip != "gpiochip4" || m.Debounce != 10*time.Millisecond || m.Hold != 30*time.Millisecond || m.MinInterval != 500*time.Millisecond {
+		t.Errorf("meter = %+v", m)
+	}
+}
+
+func TestMeterRejects(t *testing.T) {
+	two := withMeter + "  - {device_id: cold_water_meter, gpio: 22, litres_per_pulse: 1}\n"
+	for _, tt := range []struct{ name, yaml, want string }{
+		{"unknown key", withMeter + "    gpoi: 3\n", "gpoi"},
+		{"gpio not a number", strings.Replace(withMeter, "gpio: 27", "gpio: pin13", 1), "yaml"},
+		{"a meter that isn't a mapping", valid + "meters: [27]\n", "yaml"},
+		{"no gpio", strings.Replace(withMeter, "    gpio: 27\n", "", 1), "meters[0].gpio"},
+		{"gpio off the header", strings.Replace(withMeter, "gpio: 27", "gpio: 28", 1), "meters[0].gpio"},
+		{"negative gpio", strings.Replace(withMeter, "gpio: 27", "gpio: -1", 1), "meters[0].gpio"},
+		{"no litres per pulse", strings.Replace(withMeter, "    litres_per_pulse: 1\n", "", 1), "litres_per_pulse"},
+		{"negative litres per pulse", strings.Replace(withMeter, "litres_per_pulse: 1", "litres_per_pulse: -1", 1), "litres_per_pulse"},
+		{"bad device id", strings.Replace(withMeter, "hot_water_meter", "Hot Meter", 1), "meters[0].device_id"},
+		{"device id of a tank", strings.Replace(withMeter, "hot_water_meter", "hot-water-cylinder", 1), "used twice"},
+		{"empty chip", withMeter + "    chip: \"\"\n", "meters[0].chip"},
+		// The kernel debounce is what keeps the boiler's spikes out (G54).
+		{"no debounce", withMeter + "    debounce: 0s\n", "meters[0].debounce"},
+		{"debounce under 5ms", withMeter + "    debounce: 4ms\n", "at least 5ms"},
+		{"debounce not under min_interval", withMeter + "    debounce: 600ms\n", "meters[0].debounce"},
+		{"negative hold", withMeter + "    hold: -1ms\n", "meters[0].hold"},
+		{"hold not under min_interval", withMeter + "    hold: 600ms\n", "meters[0].hold"},
+		{"min_interval past the meter's maximum flow", withMeter + "    min_interval: 800ms\n", "meters[0].min_interval"},
+		{"two meters", two, "one meter"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Load([]byte(tt.yaml))
+			if err == nil {
+				t.Fatal("accepted")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("err = %v, want it to mention %q", err, tt.want)
+			}
+		})
+	}
+}
