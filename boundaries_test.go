@@ -27,6 +27,7 @@ var core = []string{
 	"internal/cadence",
 	"internal/config",
 	"internal/meter",
+	"internal/meter/metertest",
 	"internal/payload",
 	"internal/reading",
 	"internal/startup",
