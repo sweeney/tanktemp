@@ -26,6 +26,7 @@ const module = "github.com/sweeney/tanktemp"
 var core = []string{
 	"internal/cadence",
 	"internal/config",
+	"internal/meter",
 	"internal/payload",
 	"internal/reading",
 	"internal/startup",

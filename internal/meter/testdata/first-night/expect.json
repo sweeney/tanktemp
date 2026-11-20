@@ -1,0 +1,19 @@
+{
+  "description": "The meter's first night on the rig, 2026-11-19 17:29 to 2026-11-20 09:08 UTC: 277 raw edges from gpiomon v2.2.1 (both edges, bias pull-up, NO debounce, realtime clock) on GPIO 27, with the Pi's internal pull-up only. 15 edges, in 8 clusters, are microsecond spikes that report the level the line already had, most within a second of the boiler programmer switching CH or HW. Draws: a bath (35 L) and its top-up (23 L), a slow tap (9 L), three sinks (2 L each), a shower (56 L), and two lone pulses (18:03:29, 09:08:43). Counting every falling edge gives 140.",
+  "source": "real capture: gpiomon -c gpiochip0 -b pull-up -E realtime -F '%S %e' 27; lines are epoch_seconds.ns and the edge (1 rising = opens, 2 falling = closes)",
+  "synthetic": false,
+  "config": {"hold_ms": 20, "min_interval_ms": 600},
+  "initial_level": "open",
+  "want": {"count": 131, "opens": 131, "noise": 15, "short": 0, "glitches": 0, "lost": 0},
+  "want_debounced": {"count": 131, "opens": 131, "noise": 0},
+  "last_closed_ns_at_open": {
+    "1795109388.898318668": 452369636,
+    "1795111192.578881138": 26989119001,
+    "1795127396.271346172": 15986631273973,
+    "1795129364.673474145": 1940211327413
+  },
+  "last_interval_ns_at_pulse": {
+    "1795109390.277914691": 1831965659
+  },
+  "anchors_why": "452 ms: the first bath litre. 26.989 s: the slow tap's wheel paused mid-turn. 4 h 26 m 26.631 s: the pointer resting on the magnet from 18:03:29 (counted) to 22:29:56, through two spikes. 32 m 20.211 s: the sink's last litre, resting until 23:02:44. 1.832 s: the first bath interval."
+}

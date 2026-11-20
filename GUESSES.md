@@ -68,6 +68,22 @@ choices it left open, or that building it turned up:
 | G50 | **The hold can run one fast sweep longer than `hold`.** The cadence measures time between sweep starts, which lag their due times by a few ms, so a sweep due exactly at `hold` after the trigger can land a hair before it. | Harmless (one more fast sweep), and the alternative, measuring on tick times, would give the core a clock it doesn't have. | `cadence.Settings.at` |
 | G51 | **At the fast interval, the trigger is in practice a step count, so staying fast is easier than going fast.** Found on the rig (review on #4, a reheat at 1.0 °C/min): at a 10 s gap, 1.0 °C/min is 0.167 °C, three DS18B20 steps, and every hold-extending trigger was exactly 1.0 or 1.1. At the 30 s slow interval the same setting needs 0.5 °C, eight steps. Nothing changes for now; the rig stays at 1.0 to gather data. | There it was right: the changes were real and one-way (heating, then the top probe settling for 5 min after the boiler stopped), so a 15 min reheat got a 27 min fast spell, all of it worth sampling. On a noisier probe, three-step jitter could hold fast indefinitely. If that's seen: keep `trigger_c_per_min` at 1.5 or more with a 10 s fast interval (4 steps), or raise `MinChangeC` (G40), or make the minimum change scale with the gap. | `sweep.fast.trigger_c_per_min`, `cadence.MinChangeC` |
 
+## The water meter (2026-11-20)
+
+The meter's counting rules, made with washhouse (who reviews them) from one
+raw night on the rig (`internal/meter/testdata/first-night`) and the
+meter's datasheet. None is proven on the rig yet: the bucket test, with the
+boiler switched during it, is what would prove them (deferred).
+
+| # | Guess | Why | To change |
+|---|---|---|---|
+| G54 | **Kernel debounce `meter.debounce` 20 ms, required, at least 5 ms.** | The first night's spikes were microseconds wide (6 in 247 µs), and a real closing lasted at least 343 ms. 20 ms is far from both. **Not proven on BCM2835, kernel 6.18,** against those spikes: gpiolib-cdev's software debounce should report only a level that held, but nobody has watched it do so here. The 5 ms floor stops a typo (1 ms, 0) from leaving today's unfiltered wiring undefended. | config validation, `meter.debounce` |
+| G55 | **A user-space hold `meter.hold` of 20 ms**: a closing counts once it has stayed closed that long. | Belt and braces behind the kernel debounce, in case it doesn't hold on this kernel. Short against the shortest real closing (343 ms) and the fastest possible one (about 150 ms at Q4); it delays a `pulse` message by at most 20 ms + the 50 ms tick. | config, `meter.hold` |
+| G56 | **`meter.min_interval` 600 ms** between counted closings. | The datasheet's Q4 (5 m³/h, 83 L/min) is a litre every 0.72 s; the fastest seen was 1.40 s (a bath). Never 1 s: that would drop real litres at full flow. Vertical mounting (R40) doesn't change Q4. | config, `meter.min_interval` |
+| G57 | **The reed is closed for about 0.23 of each turn**, so `last_closed_ms` is a speedometer. | Measured on two draws only: the bath (0.40 s of 1.84 s) and a slow tap (3.1 s of 12.8 s). It depends on the magnet and the reed. tanktemp publishes the raw closed time and never uses the duty; washhouse learns it. | nothing in tanktemp; washhouse's flow model |
+| G58 | **Q1 is about 1.67 L/min**, not the label's 0.83. | The meter is fitted vertically (owner said), and the datasheet drops a vertical meter one accuracy class, R80 to R40, so Q1 ≈ Q3/40. Below it the meter may stall or count erratically. | washhouse's draw thresholds (36 s); docs |
+| G59 | **A tick every 50 ms** confirms a held closing, as well as every edge. | Bounds a `pulse` message to `meter.hold` + 50 ms after its closing (WIRE.md promises it) for almost no CPU. | the cmd wiring |
+
 ## The fuzz step's deadline, issue #5 (2026-11-12)
 
 The issue settled the fix: `-fuzztime 1000000x`, a count of inputs, not
