@@ -1,0 +1,1 @@
+{"device_id":"hot_water_meter","timestamp":"2026-11-20T07:12:58Z","clock_synced":true,"trigger":"open","seq":3671,"litres_per_pulse":1,"level":"open","counting_since":"2026-11-19T22:41:07Z","count":1833,"last_pulse_at":"2026-11-20T07:12:57.312Z","last_interval_ms":6699,"last_closed_ms":1541,"noise":15,"short":1,"glitches":2,"lost":3}

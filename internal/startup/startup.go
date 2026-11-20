@@ -16,11 +16,12 @@ import (
 
 // Problem codes. Part of the status payload.
 const (
-	CodeDiscoverFailed = "discover_failed"
-	CodeNotPresent     = "not_present"
-	CodeParasitePower  = "parasite_power"
-	CodeResolution     = "resolution"
-	CodeInspectFailed  = "inspect_failed"
+	CodeDiscoverFailed    = "discover_failed"
+	CodeNotPresent        = "not_present"
+	CodeParasitePower     = "parasite_power"
+	CodeResolution        = "resolution"
+	CodeInspectFailed     = "inspect_failed"
+	CodeGPIORequestFailed = "gpio_request_failed"
 )
 
 // WantResolution is the resolution tanktemp expects (12-bit, 0.0625 °C).

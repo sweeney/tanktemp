@@ -120,6 +120,7 @@ type StatusInput struct {
 	Ready    bool
 	Uptime   time.Duration
 	Tanks    []string
+	Meters   []string     // the configured meters' device IDs
 	Last     *sweep.Sweep // nil before the first complete sweep
 	Problems []startup.Problem
 	Reason   string // SHUTDOWN only
@@ -133,6 +134,7 @@ type status struct {
 	Ready           bool      `json:"ready"`
 	UptimeS         int64     `json:"uptime_s"`
 	Tanks           []string  `json:"tanks"`
+	Meters          []string  `json:"meters"`
 	SensorsOK       *int      `json:"sensors_ok"`
 	SensorsFailed   *int      `json:"sensors_failed"`
 	Unexpected      []string  `json:"unexpected"`
@@ -156,6 +158,7 @@ func Status(in StatusInput) []byte {
 		Ready:           in.Ready,
 		UptimeS:         int64(in.Uptime / time.Second),
 		Tanks:           append([]string{}, in.Tanks...),
+		Meters:          append([]string{}, in.Meters...),
 		StartupProblems: []problem{},
 	}
 	if in.Last != nil {
@@ -181,4 +184,84 @@ func mustMarshal(v any) []byte {
 		panic(err) // only plain structs of strings, numbers and bools: unreachable
 	}
 	return b
+}
+
+// MeterTopic is the water meter's topic: one per tanktemp.
+func MeterTopic(prefix string) string { return prefix + "/meter" }
+
+// Meter triggers.
+const (
+	TriggerPulse = "pulse"
+	TriggerOpen  = "open"
+	TriggerSweep = "sweep"
+)
+
+// MeterInput is everything a meter message reports, already on the wall clock.
+type MeterInput struct {
+	DeviceID                     string
+	Trigger                      string
+	At                           time.Time
+	ClockSynced                  bool
+	Seq                          uint64
+	LitresPerPulse               float64
+	Level                        string
+	CountingSince                time.Time
+	Count                        uint64
+	LastPulseAt                  *time.Time
+	LastInterval, LastClosed     *time.Duration
+	Noise, Short, Glitches, Lost uint64
+}
+
+type meterMsg struct {
+	DeviceID       string  `json:"device_id"`
+	Timestamp      string  `json:"timestamp"`
+	ClockSynced    bool    `json:"clock_synced"`
+	Trigger        string  `json:"trigger"`
+	Seq            uint64  `json:"seq"`
+	LitresPerPulse float64 `json:"litres_per_pulse"`
+	Level          string  `json:"level"`
+	CountingSince  string  `json:"counting_since"`
+	Count          uint64  `json:"count"`
+	LastPulseAt    *string `json:"last_pulse_at"`
+	LastIntervalMS *int64  `json:"last_interval_ms"`
+	LastClosedMS   *int64  `json:"last_closed_ms"`
+	Noise          uint64  `json:"noise"`
+	Short          uint64  `json:"short"`
+	Glitches       uint64  `json:"glitches"`
+	Lost           uint64  `json:"lost"`
+}
+
+func millis(d *time.Duration) *int64 {
+	if d == nil {
+		return nil
+	}
+	ms := d.Milliseconds()
+	return &ms
+}
+
+// Meter is a meter message. Times are to the second, but last_pulse_at to
+// the millisecond (WIRE.md, Meter); both truncate.
+func Meter(in MeterInput) []byte {
+	m := meterMsg{
+		DeviceID:       in.DeviceID,
+		Timestamp:      timestamp(in.At),
+		ClockSynced:    in.ClockSynced,
+		Trigger:        in.Trigger,
+		Seq:            in.Seq,
+		LitresPerPulse: in.LitresPerPulse,
+		Level:          in.Level,
+		CountingSince:  timestamp(in.CountingSince),
+		Count:          in.Count,
+		LastIntervalMS: millis(in.LastInterval),
+		LastClosedMS:   millis(in.LastClosed),
+		Noise:          in.Noise,
+		Short:          in.Short,
+		Glitches:       in.Glitches,
+		Lost:           in.Lost,
+	}
+	if in.LastPulseAt != nil {
+		p := in.LastPulseAt.UTC().Format("2006-01-02T15:04:05.000Z07:00")
+		m.LastPulseAt = &p
+	}
+	return mustMarshal(m)
 }

@@ -19,11 +19,15 @@ every key is always present (except `reason`, below).
 |---|---|---|---|
 | `{prefix}/{device_id}/state` | every sweep, one message per tank (how often: see Cadence) | 0 | yes |
 | `{prefix}/status` | STARTUP, the first HEARTBEAT (`ready`), each scheduled HEARTBEAT, a HEARTBEAT after every MQTT reconnect, SHUTDOWN; and the last will | 1 | yes |
+| `{prefix}/meter` | when a water meter is configured: each counted litre, the opening that ends it, and every sweep (see Meter) | 0 | yes |
 
 `device_id` is the tank's key in `devices_<site>`, so it is `[a-z0-9_-]+`
 and safe as a topic segment. There is one tanktemp per site: a second one
 would need its own prefix, because the status topic belongs to the daemon,
-not to a tank.
+not to a tank. The meter topic is one per tanktemp too, with the meter's
+`device_id` in the payload; a second meter would get `{prefix}/meter/{device_id}`,
+announced here first. `{prefix}/+/state` doesn't match `{prefix}/meter`, so a
+consumer of tank states never sees meter messages.
 
 ## State
 
@@ -69,7 +73,7 @@ reading. Its `timestamp` says how old it is.
 {
   "online": true, "event": "HEARTBEAT", "timestamp": "2026-11-02T21:15:00Z",
   "version": "4aba4d5", "ready": true, "uptime_s": 86400,
-  "tanks": ["hot-water-cylinder"],
+  "tanks": ["hot-water-cylinder"], "meters": ["hot_water_meter"],
   "sensors_ok": 9, "sensors_failed": 1,
   "unexpected": ["28-000011721aa5"],
   "startup_problems": [{"rom": "28-0000117287e6", "code": "parasite_power", "message": "…"}]
@@ -86,12 +90,82 @@ reading. Its `timestamp` says how old it is.
 | `tanks` | the configured device IDs, in config order |
 | `sensors_ok`, `sensors_failed` | from the last sweep; `null` before the first |
 | `unexpected` | thermometers seen on a bus but not configured (a swapped probe shows up here). `null` before the first sweep |
-| `startup_problems` | from the startup checks: `rom` (`null` for a bus-wide problem), `code` (`discover_failed`, `not_present`, `parasite_power`, `resolution`, `inspect_failed`), and a human `message` |
+| `meters` | the configured meters' device IDs, in config order; `[]` when there are none |
+| `startup_problems` | from the startup checks: `rom` (`null` for a bus-wide problem, and for a meter), `code` (`discover_failed`, `not_present`, `parasite_power`, `resolution`, `inspect_failed`, or for a meter `gpio_request_failed`: the line is busy, not permitted, or its chip wasn't found, so the meter isn't counting), and a human `message` naming what failed |
 | `reason` | SHUTDOWN only: the signal (`SIGTERM`, `SIGINT`) or `context` |
 
 The **last will** is exactly `{"online":false,"event":"LWT"}`, retained, QoS
 1. The broker publishes it if tanktemp vanishes without a SHUTDOWN. It
 carries no timestamp, because a will is fixed when tanktemp connects.
+
+## Meter
+
+A reed-switch water meter on a GPIO line: the meter's litre pointer
+carries a magnet that closes the reed once per turn. tanktemp publishes
+**raw facts only**: the count, when the last litre came, how long the reed
+stayed closed, and why edges were rejected. Flow, draws, circulation and
+what a rejected edge means are for consumers (washhouse).
+
+```json
+{
+  "device_id": "hot_water_meter",
+  "timestamp": "2026-11-20T07:12:58Z",
+  "clock_synced": true,
+  "trigger": "open",
+  "seq": 3671,
+  "litres_per_pulse": 1,
+  "level": "open",
+  "counting_since": "2026-11-19T22:41:07Z",
+  "count": 1833,
+  "last_pulse_at": "2026-11-20T07:12:57.312Z",
+  "last_interval_ms": 6699,
+  "last_closed_ms": 1541,
+  "noise": 0,
+  "short": 0,
+  "glitches": 0,
+  "lost": 0
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `device_id` | the meter: its key in `devices_<site>` |
+| `timestamp` | to the second. For `pulse`, the counted closing; for `open`, the opening (exactly: `last_pulse_at` + `last_closed_ms`; use that, not this rounded time, for flow); for `sweep`, the sweep's start, the same as that sweep's tank states. A `sweep` message is the meter **as of the sweep's start** (taken then, not after the sweep), so it and the tank states are a matched snapshot |
+| `clock_synced` | as for state |
+| `trigger` | `pulse`: a litre was counted, published within `meter.hold` + 50 ms of its closing (tanktemp checks a held closing at least every 50 ms, and at every edge). `open`: the opening that ends a counted litre, with its `last_closed_ms`. `sweep`: with every sweep, so the count is never older than a sweep |
+| `seq` | numbers this run's meter messages: 1, 2, 3… from `counting_since`. A retained replay repeats one; **de-duplicate on (`counting_since`, `seq`)** |
+| `litres_per_pulse` | from the config (the meter's K) |
+| `level` | the reed now, after debounce: `open` or `closed`. Closed for hours means the pointer is resting on the magnet. A new closing reads `closed` for up to `meter.hold` + 50 ms before its `pulse`, while it's being held; that is not a fault. Never unknown: tanktemp reads it when it requests the line, and a line it can't read is `gpio_request_failed` |
+| `counting_since` | when this count started: when tanktemp requested the line. A new value is a reset; anything between the two runs went unseen |
+| `count` | litres counted since `counting_since`, as pulses: litres = `count` × `litres_per_pulse`. A message lost in delivery loses nothing: the next one carries the total |
+| `last_pulse_at` | the last counted closing, **to the millisecond** (unlike other times). `null` before the first |
+| `last_interval_ms` | between the last two counted closings, on the monotonic clock. `null` before the second |
+| `last_closed_ms` | how long the reed stayed closed in the last counted litre that has ended, on the monotonic clock. The reed is closed for a roughly fixed share of each turn (about 0.23 on the rig), so this gives the flow within one litre; tanktemp doesn't interpret it. Minutes or hours means the pointer rested on the magnet (the rig's first night had 4 h 26 m): it is not a flow. `null` until one has |
+| `noise` | edges reporting the level the reed already had: a spike shorter than the kernel could read (or, should the kernel ever send one, an event out of order). They change nothing. Expected 0 with the kernel debounce on; a rise means it isn't holding |
+| `short` | closings that reopened within `meter.hold`: a spike that did flip the reading. Neither edge counts. Expected 0 |
+| `glitches` | held closings less than `meter.min_interval` after the last counted one. Not counted. The meter's maximum flow is a litre every 0.72 s, so expected 0 |
+| `lost` | edges the kernel dropped (its event buffer overflowed). After a loss tanktemp takes the line's level as it now is and counts nothing across the gap, nor a closing still being held when it came: a litre may be lost, never invented. **So with `lost` > 0, `count` is a lower bound, short by at most 2 × `lost`** (a loss of n edges can miss up to n/2 + 1 litres: those among the dropped edges, the held one, and the one in progress at the resync; and n/2 + 1 ≤ 2n). Expected 0 |
+
+`noise`, `short`, `glitches` and `lost` are totals since `counting_since`.
+
+**How a litre is counted**, so a consumer knows what the count means: one
+litre per change from open to closed, judged on the level read after each
+edge, never on the edge's label alone. The checks, in order: a gap in the
+kernel's event numbers (`lost`), an edge that doesn't change the level
+(`noise`), a closing that doesn't hold for `meter.hold` (`short`), and a
+closing too soon after the last counted one (`glitches`). The kernel
+debounces the line first (`meter.debounce`, required, at least 5 ms). On the rig's
+first night, with no debounce, 15 of 277 edges were spikes that came as the
+boiler's programmer switched; counting every falling edge gave 140 litres,
+these rules 131.
+
+**Volume.** One per sweep, about 2,880 a day at 30 s (the same as one tank's
+states), plus two per litre (`pulse`, `open`): roughly another 400–1,200 a
+day of real use.
+
+**Delivery** is as for state: QoS 0, retained, nothing queued while the
+broker is unreachable. A consumer that needs every litre's time uses
+`count` to see how many it missed between two messages.
 
 ## Cadence
 
@@ -138,6 +212,11 @@ What MQTT does and doesn't guarantee here:
   either way.
 
 ## Changes
+
+- **DRAFT, not yet released: the water meter.** New topic `{prefix}/meter`
+  (Meter, above); status gains `meters` (`[]` with none) and the
+  `startup_problems` code `gpio_request_failed`. Tank state is unchanged.
+  Consumers that decode status strictly must accept the new key.
 
 - **2026-11-20, BREAKING, topics only:** the production prefix moved from
   `energy/hot_water` to `water/hot/tanktemp`, so the topics are now

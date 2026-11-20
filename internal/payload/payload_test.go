@@ -77,9 +77,11 @@ func TestGoldenStatusStartup(t *testing.T) {
 		At:      time.Date(2026, 11, 2, 21, 0, 0, 0, time.UTC),
 		Version: "4aba4d5",
 		Tanks:   []string{"hot-water-cylinder", "second"},
+		Meters:  []string{"hot_water_meter"},
 		Problems: []startup.Problem{
 			{ROM: "28-0000117287e6", Code: startup.CodeParasitePower, Message: "28-0000117287e6 is in parasite-power mode; wire VDD to 3.3 V"},
 			{Code: startup.CodeDiscoverFailed, Message: "no 1-Wire bus masters"},
+			{Code: startup.CodeGPIORequestFailed, Message: "meter hot_water_meter: GPIO 27 on gpiochip0: permission denied"},
 		},
 	}))
 }
@@ -103,6 +105,7 @@ func TestGoldenStatusHeartbeat(t *testing.T) {
 		Ready:   true,
 		Uptime:  86400*time.Second + 700*time.Millisecond,
 		Tanks:   []string{"hot-water-cylinder"},
+		Meters:  []string{"hot_water_meter"},
 		Last:    lastSweep(9, 1, "28-000011721aa5"),
 	}))
 }
@@ -149,5 +152,50 @@ func TestEmptyTankHasAnEmptyArray(t *testing.T) {
 	_ = json.Unmarshal(b, &got)
 	if got.Sensors == nil {
 		t.Errorf("sensors must be [] not null: %s", b)
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
+
+// The meter message, one golden per trigger (docs/WIRE.md, Meter).
+func TestGoldenMeterPulse(t *testing.T) {
+	golden(t, "meter-pulse.golden", Meter(MeterInput{
+		DeviceID: "hot_water_meter", Trigger: TriggerPulse,
+		At: time.Date(2026, 11, 20, 7, 5, 4, 7e6, time.UTC), ClockSynced: true, Seq: 1,
+		LitresPerPulse: 1, Level: "closed",
+		CountingSince: time.Date(2026, 11, 20, 7, 0, 41, 300e6, time.UTC),
+		Count:         1,
+		LastPulseAt:   ptr(time.Date(2026, 11, 20, 7, 5, 4, 7_400_000, time.UTC)),
+	}))
+}
+
+func TestGoldenMeterOpen(t *testing.T) {
+	golden(t, "meter-open.golden", Meter(MeterInput{
+		DeviceID: "hot_water_meter", Trigger: TriggerOpen,
+		At: time.Date(2026, 11, 20, 7, 12, 58, 853e6, time.UTC), ClockSynced: true, Seq: 3671,
+		LitresPerPulse: 1, Level: "open",
+		CountingSince: time.Date(2026, 11, 19, 22, 41, 7, 0, time.UTC),
+		Count:         1833,
+		LastPulseAt:   ptr(time.Date(2026, 11, 20, 7, 12, 57, 312_900_000, time.UTC)),
+		LastInterval:  ptr(6699*time.Millisecond + 800*time.Microsecond),
+		LastClosed:    ptr(1541 * time.Millisecond),
+		Noise:         15, Short: 1, Glitches: 2, Lost: 3,
+	}))
+}
+
+// Before the first litre: every "last" is null, the count 0. K = 10 is
+// another meter's litres per pulse; the clock not yet synced.
+func TestGoldenMeterSweepNone(t *testing.T) {
+	golden(t, "meter-sweep-none.golden", Meter(MeterInput{
+		DeviceID: "hot_water_meter", Trigger: TriggerSweep,
+		At: time.Date(2026, 11, 20, 1, 30, 0, 0, time.UTC), Seq: 7,
+		LitresPerPulse: 10, Level: "closed",
+		CountingSince: time.Date(2026, 11, 20, 1, 27, 0, 0, time.UTC),
+	}))
+}
+
+func TestMeterTopic(t *testing.T) {
+	if got := MeterTopic("water/hot/tanktemp"); got != "water/hot/tanktemp/meter" {
+		t.Errorf("MeterTopic = %s", got)
 	}
 }
