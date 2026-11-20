@@ -1,0 +1,1983 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hot-water meter</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --surface-2: #f2f1ed;
+  --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --ring: rgba(11,11,11,0.10);
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4;
+  --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
+  --accent: #2a78d6; --code: #f2f1ed;
+  --hw: rgba(235,104,52,0.22); --ch: rgba(98,80,214,0.18);
+  --hot: #c4452f; --cold: #2a78d6; --meter: #b8322a; --brass: #b08d3c;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --surface-2: #232321;
+    --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181;
+    --accent: #3987e5; --code: #232321;
+    --hw: rgba(217,89,38,0.28); --ch: rgba(144,133,233,0.22);
+    --hot: #e0664f; --cold: #3987e5; --meter: #d0483e; --brass: #c9a24c;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --surface-2: #232321;
+  --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181;
+  --accent: #3987e5; --code: #232321;
+  --hw: rgba(217,89,38,0.28); --ch: rgba(144,133,233,0.22);
+  --hot: #e0664f; --cold: #3987e5; --meter: #d0483e; --brass: #c9a24c;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--page); color: var(--ink); font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 1180px; margin: 0 auto; padding: 24px 16px 80px; }
+h1 { font-size: 34px; line-height: 1.15; margin: 8px 0 6px; letter-spacing: -0.01em; }
+h2 { font-size: 22px; margin: 0 0 4px; }
+h3 { font-size: 16px; margin: 0 0 6px; }
+p { margin: 6px 0 10px; color: var(--ink-2); max-width: 78ch; }
+a { color: var(--accent); }
+code, pre { font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+code { background: var(--code); padding: 1px 4px; border-radius: 4px; }
+section { margin-top: 44px; }
+.eyebrow { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.lede { font-size: 17px; color: var(--ink-2); max-width: 80ch; }
+.card { background: var(--surface); border: 1px solid var(--ring); border-radius: 12px; padding: 16px; }
+.grid2 { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 16px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 16px; }
+.tiles { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; margin-top: 18px; }
+.tile { background: var(--surface); border: 1px solid var(--ring); border-radius: 12px; padding: 12px 14px; }
+.tile .k { font-size: 12px; color: var(--muted); }
+.tile .v { font-size: 26px; font-weight: 650; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.tile .s { font-size: 12px; color: var(--ink-2); }
+.chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--ring); background: var(--surface-2); color: var(--ink); white-space: nowrap; }
+.chip .dot { width: 8px; height: 8px; border-radius: 50%; }
+.muted { color: var(--muted); }
+.small { font-size: 12.5px; }
+.conf { font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--ring); color: var(--ink-2); white-space: nowrap; }
+.sim { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 16px; margin-top: 14px; }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 14px 0 6px; }
+button, select { font: inherit; font-size: 13px; color: var(--ink); background: var(--surface); border: 1px solid var(--ring); border-radius: 8px; padding: 5px 10px; cursor: pointer; }
+button:hover, select:hover { background: var(--surface-2); }
+button.primary { background: var(--accent); color: #fff; border-color: transparent; min-width: 74px; }
+button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
+input[type=range] { accent-color: var(--accent); }
+#scrub { width: 100%; margin: 4px 0 0; }
+.clock { font-variant-numeric: tabular-nums; font-size: 22px; font-weight: 650; min-width: 92px; }
+.jumps { display: flex; flex-wrap: wrap; gap: 6px; }
+.jumps button { font-size: 12px; padding: 3px 8px; }
+.whatif { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12.5px; color: var(--ink-2); margin: 6px 0; }
+.whatif button { font-size: 12px; padding: 3px 9px; }
+svg text { fill: var(--ink-2); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+.log { max-height: 300px; overflow: auto; font-size: 12.5px; border-top: 1px solid var(--grid); margin-top: 8px; }
+.log .row { display: grid; grid-template-columns: 62px 1fr; gap: 8px; padding: 6px 2px; border-bottom: 1px solid var(--grid); cursor: pointer; }
+.log .row.future { opacity: .35; }
+.log .row.now { background: var(--surface-2); }
+.log .t { font-variant-numeric: tabular-nums; color: var(--muted); }
+.log .sh { color: var(--ink-2); font-size: 12px; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 13px; }
+.kv dt { color: var(--muted); } .kv dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
+pre.json { background: var(--code); border-radius: 10px; padding: 12px; overflow: auto; max-height: 420px; margin: 0; color: var(--ink); white-space: pre-wrap; word-break: break-word; }
+#sim pre.json { font-size: 11.5px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; font-size: 12px; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+tr.click { cursor: pointer; } tr.click:hover td { background: var(--surface-2); }
+.tablewrap { overflow-x: auto; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12.5px; color: var(--ink-2); margin: 4px 0 2px; }
+.legend .sw { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+.legend .box { display: inline-block; width: 12px; height: 10px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+.chart { width: 100%; display: block; }
+.sim > *, .grid2 > *, .grid3 > *, .tiles > * { min-width: 0; }
+#tip { position: fixed; pointer-events: none; z-index: 10; background: var(--surface); color: var(--ink); border: 1px solid var(--ring); border-radius: 8px; padding: 8px 10px; font-size: 12.5px; box-shadow: 0 6px 24px rgba(0,0,0,.18); max-width: 300px; display: none; }
+#tip b { font-weight: 650; }
+.out { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; margin-top: 10px; }
+.out .tile .v { font-size: 20px; }
+.phase { display: grid; grid-template-columns: 34px 1fr; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--grid); }
+.phase .n { width: 28px; height: 28px; border-radius: 50%; background: var(--surface-2); border: 1px solid var(--ring); display: grid; place-items: center; font-weight: 650; font-size: 13px; }
+ul.tight { margin: 4px 0; padding-left: 18px; color: var(--ink-2); } ul.tight li { margin: 3px 0; }
+.callout { border-left: 3px solid var(--warning); background: var(--surface); padding: 10px 14px; border-radius: 0 10px 10px 0; margin: 12px 0; }
+.callout.info { border-left-color: var(--accent); }
+.themebtn { position: absolute; top: 16px; right: 16px; }
+.toc { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; margin-top: 14px; }
+.toc a { color: var(--ink-2); text-decoration: none; border-bottom: 1px solid var(--grid); }
+.state-ok { color: var(--good); } .state-bad { color: var(--critical); } .state-warn { color: var(--serious); }
+@media (max-width: 900px) {
+  .sim, .grid2, .grid3 { grid-template-columns: minmax(0, 1fr); }
+  .tiles { grid-template-columns: repeat(2, minmax(0,1fr)); }
+}
+@media (max-width: 520px) {
+  h1 { font-size: 28px; }
+  .themebtn { position: static; margin-bottom: 8px; }
+}
+</style>
+</head>
+<body>
+<div id="tip" role="tooltip"></div>
+<main>
+<header style="position:relative">
+  <button class="themebtn" id="themeBtn" title="Toggle light/dark">◐ Theme</button>
+  <div class="eyebrow">tanktemp · hot-water meter · design explainer (with washhouse)</div>
+  <h1>The hot-water meter</h1>
+  <p class="lede">A pulsed water meter on the pipe where the two cylinders' hot outlets join. It ticks once per litre. <b>tanktemp</b> counts the ticks and publishes them, and <b>washhouse</b> turns them into draws that are <b>measured, not estimated</b>. The probes keep the jobs only they can do: which tank gave the water, how hot it was, and how much is left.</p>
+  <div class="tiles" aria-live="polite">
+    <div class="tile"><div class="k">Flow through the meter</div><div class="v" id="tFlow">–</div><div class="s" id="tFlowS">L/min of hot water</div></div>
+    <div class="tile"><div class="k">Today so far</div><div class="v" id="tToday">–</div><div class="s" id="tTodayS">litres of hot water</div></div>
+    <div class="tile"><div class="k">Last draw</div><div class="v" id="tLast">–</div><div class="s" id="tLastS">&nbsp;</div></div>
+    <div class="tile"><div class="k">Meter</div><div class="v" id="tMeter">–</div><div class="s" id="tMeterS">&nbsp;</div></div>
+  </div>
+  <p class="small muted" style="margin-top:10px">This runs the same <b>simulated weekday</b> as the washhouse explainer (same tanks, probes, reheats and draws). A simulated meter is added on the combined outlet. The meter was installed on 19 Nov: <a href="#real">The first real night</a> replays its real recording, and the simulator now uses the noise seen there. Companion documents: <code>WATER-METER-PLAN.md</code> and <code>WATER-METER-WALKTHROUGH.md</code>, in this folder.</p>
+  <nav class="toc">
+    <a href="#meter">The meter</a><a href="#where">Where it goes</a><a href="#real">The first real night</a><a href="#sim">Simulator</a><a href="#timeline">Day timeline</a><a href="#draws">Draws: measured vs estimated</a><a href="#calib">Calibration</a><a href="#wire">On the wire</a><a href="#plan">Plan</a><a href="#open">Open questions</a>
+  </nav>
+</header>
+
+<!-- ============ THE METER ============ -->
+<section id="meter">
+  <div class="eyebrow">1 · The meter</div>
+  <h2>One pulse per litre</h2>
+  <p>A Watersavers WMP20H, K=1: a ¾" multi-jet meter with a hot-water body and a two-core pulse cable. Inside, a magnet on the 1-litre pointer closes a switch once per turn. That makes it simple to read, but coarse in time. At shower flows a pulse comes every 7–10 s, and a dribbling basin tap gives one every half minute.</p>
+  <div class="grid2">
+    <div class="card tablewrap">
+      <table>
+        <tr><th>What</th><th>Value</th><th></th></tr>
+        <tr><td>Pulse output</td><td><b>1 pulse per litre</b> (K=1), two-core cable, DIN connector</td><td><span class="conf">label</span></td></tr>
+        <tr><td>Size, rating</td><td>¾" BSP, 20 mm; T90 (90 °C), MAP16 (16 bar), ΔP63</td><td><span class="conf">label</span></td></tr>
+        <tr><td>Minimum flow (Q1)</td><td>0.050 m³/h = 0.83 L/min when horizontal. <b>Fitted vertically, so R40: about 1.67 L/min.</b> "At lower flows the meter will not be accurate"</td><td><span class="conf">label + owner said</span></td></tr>
+        <tr><td>Q2 (accuracy boundary)</td><td>1.6 × Q1 ≈ 2.7 L/min (vertical)</td><td><span class="conf">MID</span></td></tr>
+        <tr><td>Nominal (Q3) · max (Q4)</td><td>4 m³/h (67 L/min) · 5 m³/h (83 L/min, for 1–2 min only)</td><td><span class="conf">label</span></td></tr>
+        <tr><td>Accuracy</td><td>Class 2: <b>±3 %</b> above Q2 for water above 30 °C (±2 % when cold), and ±5 % between Q1 and Q2</td><td><span class="conf">label + MID</span></td></tr>
+        <tr><td>Mounting</td><td>Rated R80 horizontal. <b>Fitted vertically</b> on the combined outlet above the tanks, just after the manifold, which drops it one class to R40. 2 m cable.</td><td><span class="conf">label + owner said</span></td></tr>
+        <tr><td>Output type</td><td><b>Reed switch</b> (dry contact), closed for about 23 % of each turn, with no mechanical bounce. Whether it is isolated from the pipe still needs a multimeter test.</td><td><span class="conf">measured</span></td></tr>
+        <tr><td>Real flows (first night)</td><td>Bath 32–39 L/min (a pulse every 1.6–1.9 s), shower 7 L/min, sinks 4–5 L/min. Not bucket-checked yet.</td><td><span class="conf">measured</span></td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h3>Feel the pulses <span class="muted small">· drag the flow; the pointer turns in real time</span></h3>
+      <div style="display:grid;grid-template-columns:150px minmax(0,1fr);gap:14px;align-items:center">
+        <svg id="dial1" viewBox="0 0 150 150" style="width:150px;height:150px" role="img" aria-label="Meter dial"></svg>
+        <div>
+          <label class="small" for="flow1">Hot-water flow: <b id="flow1v">6.0</b> L/min</label>
+          <input type="range" id="flow1" min="0" max="1000" value="620" style="width:100%">
+          <div class="small muted" id="flow1use">&nbsp;</div>
+        </div>
+      </div>
+      <svg id="zones" class="chart" height="92" role="img" aria-label="Accuracy zones by flow"></svg>
+      <div class="out" id="flow1out"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ WHERE ============ -->
+<section id="where">
+  <div class="eyebrow">2 · Where it goes</div>
+  <h2>On the combined hot outlet</h2>
+  <p>The meter sits after the two B outlets merge, so it sees every litre that leaves the cylinders as hot water. It sees the tanks together, so washhouse splits each draw by tank using the probes. The right tank's secondary return is the unknown. The owner doesn't expect the loop to draw from these outlet pipes, and washhouse is built to <b>check that rather than assume it</b>.</p>
+  <div class="controls">
+    <button id="pDraw" aria-pressed="true">Tap open</button>
+    <span class="small muted">Loop:</span>
+    <button id="pLoopSep" aria-pressed="true">Separate (expected)</button>
+    <button id="pLoopShare" aria-pressed="false">What if it shares the outlet</button>
+  </div>
+  <div class="card" style="overflow-x:auto"><svg id="plumb" class="chart" viewBox="0 0 1100 500" style="min-width:640px" role="img" aria-label="Plumbing schematic with the meter"></svg></div>
+  <div class="grid2" style="margin-top:14px">
+    <div class="callout info small" style="margin:0"><b>Expected: the meter sees draws only.</b> Overnight it is silent, and every pulse belongs to a tap. Volumes are exact to a litre, plus 3 %. Thermal expansion doesn't pass through it either: on a reheat the extra volume goes back towards the expansion vessel on the cold side.</div>
+    <div class="callout small" style="margin:0"><b>The check, if the loop did share it.</b> A thermosiphon of about 0.3 L/min would tick the meter every 3–4 minutes, all night, with probe 1 flat (no cold water enters). washhouse would see that pattern, learn it as a baseline and subtract it. Then the meter becomes the first direct measurement of the loop. Try it with the "loop shares the outlet" switch in the simulator. If it happens, the cold feed is the fallback position for the meter.</div>
+  </div>
+</section>
+
+<!-- ============ THE FIRST REAL NIGHT ============ -->
+<section id="real">
+  <div class="eyebrow">Real data · the first night, 19–20 Nov 2026</div>
+  <h2>What the installed meter actually did</h2>
+  <p>The meter went in on 19 Nov. tanktemp's session recorded every raw edge at the pin for 15½ hours (gpiomon, no debounce, the Pi's internal pull-up only) alongside the boiler events. This section replays that recording, all 277 edges of it, through the counters and the draw rules. Nothing here is simulated. Times are UTC, which is UK time in November.</p>
+  <div class="grid2">
+    <div class="card small">
+      <h3>What it showed</h3>
+      <ul class="tight">
+        <li><b>The reed is clean.</b> Every real close and open is a single edge, with no mechanical bounce. The pointer rested on the magnet for 4.4 h with no chatter.</li>
+        <li><b>The noise is electrical.</b> 15 edges in 8 clusters are spikes of a few microseconds, most within a second of the programmer switching. The worst was 8 edges at HW off. Each one reports the level the line already had, so none changes the state.</li>
+        <li><b>Flows are faster than the simulation assumed.</b> The bath ran at 32–39 L/min, a pulse every 1.6–1.9 s. The shower ran at 7 L/min and the sinks at 4–5 L/min.</li>
+        <li><b>Silent overnight</b> from 23:02 to 07:37. That fits "no loop through the meter", but the meter's exact plumbing position hasn't been confirmed yet.</li>
+        <li><b>The closed time is a speedometer.</b> The reed stays closed for about 23 % of each turn. So when it opens, the flow is known about 2 s into a shower, without waiting for the second litre.</li>
+      </ul>
+    </div>
+    <div class="card small">
+      <h3>What it changes</h3>
+      <ul class="tight">
+        <li>tanktemp watches <b>both edges</b> and counts <b>real state changes</b>: open, then closed, is one litre. It never trusts the edge labels.</li>
+        <li><b>The 20 ms kernel debounce is mandatory</b>, and config refuses 0. The 600 ms minimum gap stays as a backstop. Without the debounce, the HW-off burst alone counts 2 phantom litres, which pass as a draw.</li>
+        <li>tanktemp publishes <code>noise</code> (rejected spikes) apart from <code>glitches</code>, plus <code>last_closed_ms</code>. washhouse ties the noise to boiler events, since tanktemp doesn't subscribe to them.</li>
+        <li><b>Kind by flow:</b> 20 L/min or more is a bath. Volume alone would call a 23 L bath top-up a tap.</li>
+        <li>An input board (10 kΩ pull-up, 10 kΩ series, 100 nF) is specified but not fitted. <b>Connect the meter leads only with the Pi off</b>: the last Pi died when they were pushed on live.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="controls" id="realCounters" style="margin-top:16px"><span class="small muted">Count with:</span></div>
+  <div class="tiles" id="realTiles" style="margin-top:6px"></div>
+  <div class="card" style="margin-top:12px">
+    <div class="jumps" id="realZooms" style="margin-bottom:8px"></div>
+    <div class="legend"><span><span class="box" style="background:var(--meter)"></span>counted litre</span><span><span style="color:var(--critical);font-weight:700;margin-right:4px">✕</span>phantom litre (noise counted as water)</span><span><span class="box" style="background:var(--warning)"></span>noise spike</span><span><span class="box" style="background:var(--muted);opacity:.45"></span>reed closed</span><span><span class="box" style="background:var(--s1);opacity:.5"></span>draw found</span><span><span class="box" style="background:var(--hw)"></span>HW</span><span><span class="box" style="background:var(--ch)"></span>CH</span></div>
+    <svg id="realChart" class="chart" height="256" role="img" aria-label="The recorded night: reed state, litres, noise, draws and boiler programme"></svg>
+    <p class="small muted" id="realNote" style="margin:6px 0 0"></p>
+  </div>
+  <div class="card tablewrap" style="margin-top:12px">
+    <h3>Draws the plan's rules find in the recording <span class="muted small">· click a row to zoom</span></h3>
+    <table id="realTable"></table>
+    <p class="small muted" style="margin:8px 0 0">These are counts, not bucket-checked litres: the bucket test is still to do. The flow from the closed time uses a duty of 0.23. That duty depends on the magnet and the reed, so washhouse should learn it from steady draws rather than fix it. "Flow known" is how long after the first close each method has a flow figure: the closed time needs the first open, and the gap needs the second close.</p>
+  </div>
+</section>
+
+<!-- ============ SIMULATOR ============ -->
+<section id="sim">
+  <div class="eyebrow">3 · Simulator</div>
+  <h2>A day of pulses</h2>
+  <p>The dial turns with the simulated hot-water flow. Each tick lights the pulse lamp and becomes a retained MQTT message from tanktemp. On the right is what washhouse publishes and what statehouse does with it. Use the switches to break things.</p>
+  <div class="controls">
+    <button class="primary" id="play">▶ Play</button>
+    <span class="clock" id="clock">00:00:00</span>
+    <label class="small muted">speed
+      <select id="speed"><option value="5">5 s/s</option><option value="20" selected>20 s/s</option><option value="60">1 min/s</option><option value="300">5 min/s</option><option value="900">15 min/s</option></select>
+    </label>
+    <div class="jumps" id="jumps"></div>
+  </div>
+  <input type="range" id="scrub" min="0" max="86399" step="1" value="0" aria-label="Time of day">
+  <div class="whatif"><span>What if:</span>
+    <button id="wLoop" aria-pressed="false">the loop shares the outlet (0.3 L/min)</button>
+    <button id="wUnplug" aria-pressed="false">the cable is knocked off at 15:00</button>
+    <button id="wSpikes" aria-pressed="true">noise spikes when the boiler switches (seen on the real rig)</button>
+    <button id="wNoDebounce" aria-pressed="false">no kernel debounce</button>
+  </div>
+  <div class="sim">
+    <div class="card">
+      <div style="display:grid;grid-template-columns:170px minmax(0,1fr);gap:14px;align-items:center">
+        <svg id="dial2" viewBox="0 0 150 150" style="width:170px;height:170px" role="img" aria-label="Meter dial at the simulator time"></svg>
+        <dl class="kv" id="simKv"></dl>
+      </div>
+      <h3 style="margin-top:12px">The last 10 minutes at the pin <span class="muted small">· one tick per counted litre</span></h3>
+      <svg id="raster" class="chart" height="96"></svg>
+      <div class="legend"><span><span class="box" style="background:var(--meter)"></span>counted pulse</span><span><span class="box" style="background:var(--warning)"></span>glitch (closer than 600 ms)</span><span><span class="box" style="background:var(--muted)"></span>noise spike (didn't hold 20 ms, rejected)</span><span><span class="box" style="background:var(--s1);opacity:.35"></span>washhouse draw</span></div>
+      <h3 style="margin-top:14px" id="drawKvTitle">Draw</h3>
+      <dl class="kv" id="drawKv"></dl>
+    </div>
+    <div style="min-width:0">
+      <div class="grid2" style="gap:10px">
+        <div style="min-width:0"><h3>tanktemp <span class="muted small">· <code>water/hot/tanktemp/meter</code></span></h3><pre class="json" id="jTank" style="max-height:290px"></pre></div>
+        <div style="min-width:0"><h3>washhouse <span class="muted small">· latest event</span></h3><pre class="json" id="jWash" style="max-height:290px"></pre></div>
+      </div>
+      <div class="card" style="margin-top:10px">
+        <h3>Event stream <span class="muted small">· washhouse events and what statehouse does with them. Click a row to jump there.</span></h3>
+        <div class="log" id="log"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ TIMELINE ============ -->
+<section id="timeline">
+  <div class="eyebrow">4 · Day timeline</div>
+  <h2>Flow, pulses and draws</h2>
+  <p>The grey area is the true hot-water flow through the meter. The line is the flow washhouse derives from the gaps between pulses. Below are the pulses, and two rows of draws: one found by the meter, one by the thermal detector. Zoom into a draw to see the individual litres. Hover to read values, and click to move the simulator there.</p>
+  <div class="card">
+    <div class="jumps" id="zooms" style="margin-bottom:8px"></div>
+    <div class="legend"><span><span class="box" style="background:var(--muted);opacity:.35"></span>true flow</span><span><span class="sw" style="background:var(--s1)"></span>washhouse's flow from pulses</span><span><span class="box" style="background:var(--meter)"></span>pulse</span><span><span class="box" style="background:var(--s1)"></span>metered draw</span><span><span class="box" style="background:var(--s4)"></span>thermal draw</span><span><span class="box" style="background:var(--hw)"></span>HW</span><span><span class="box" style="background:var(--ch)"></span>CH</span></div>
+    <svg id="chartFlow" class="chart" height="330"></svg>
+  </div>
+</section>
+
+<!-- ============ DRAWS ============ -->
+<section id="draws">
+  <div class="eyebrow">5 · Draws: measured vs estimated</div>
+  <h2>Every draw in the day, three ways</h2>
+  <p>The meter counts <b>hot</b> litres. A mixer shower takes only about 60–70 % of its flow from the cylinder, and the rest is cold. To compare with washhouse's heat balance, which counts in litres of 40 °C water, the metered litres are converted using the outlet temperature from the probes: L × (T<sub>out</sub> − 10) ÷ 30. Click a row to jump there.</p>
+  <div class="card tablewrap"><table id="drawTable"></table></div>
+  <p class="small muted">The detection speed is about even: the probes often trigger on the first sweep after a tap opens, and the meter needs its second litre. The meter's gain is <b>certainty and size</b>: every draw gets a measured volume, including the two that a reheat hides from the heat balance.</p>
+  <div class="card" style="margin-top:14px">
+    <h3>Error against the truth <span class="muted small">· litres of 40 °C water, per draw</span></h3>
+    <div class="legend"><span><span class="box" style="background:var(--s1)"></span>meter</span><span><span class="box" style="background:var(--s4)"></span>heat balance (thermal)</span><span>✕ heat balance has no number (masked by a reheat)</span></div>
+    <svg id="errChart" class="chart" height="260"></svg>
+  </div>
+</section>
+
+<!-- ============ CALIBRATION ============ -->
+<section id="calib">
+  <div class="eyebrow">6 · Calibration</div>
+  <h2>Every clean draw is a free test of the model</h2>
+  <div class="grid2">
+    <div class="card">
+      <h3>Heat balance against meter <span class="muted small">· clean draws only (no reheat), litres at 40 °C</span></h3>
+      <svg id="scatter" class="chart" height="320"></svg>
+    </div>
+    <div>
+      <p>washhouse's thermal model is built on guesses: the tank's inner diameter, the depth of its domes, and a straight line between probes. Until now nothing could check it. With the meter, every draw <b>not masked by a reheat</b> gives a pair: what the heat balance said and what actually came out. washhouse records each pair (<code>washhouse_calibration</code> in Influx) and shows the running median and spread on <code>/api/v1/model</code>.</p>
+      <p>The simulated day shows why that matters: the errors are <b>not one constant factor</b>. Small draws come out high, because the probes' straight-line profile can't see a thin cold layer. Big draws can be high or low, depending on how stratified the tank was. One geometry tweak won't fix that. The meter gives a fortnight of pairs to see which model change does, and in the meantime the published volumes are simply right.</p>
+      <div class="out" id="calOut"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ WIRE ============ -->
+<section id="wire">
+  <div class="eyebrow">7 · On the wire</div>
+  <h2>What tanktemp adds, and what washhouse adds</h2>
+  <p>tanktemp publishes <b>raw facts only</b>: a counter and when the last pulse came. Flow rates and draws belong downstream, as its WIRE.md already says. Topics (decided 20 Nov 2026): everything about hot water lives under <code>water/hot/</code>. tanktemp owns <code>water/hot/tanktemp/…</code>, its raw facts, having moved from <code>energy/hot_water</code>. washhouse owns the four named topics above it. The meter topic deliberately doesn't match <code>+/state</code>, which statehouse's tanktemp adapter subscribes to, so that adapter never mistakes it for a cylinder.</p>
+  <div class="card tablewrap">
+    <table>
+      <tr><th>Topic</th><th>Publisher</th><th>Retained</th><th>QoS</th><th>When / what</th></tr>
+      <tr><td><code>water/hot/tanktemp/meter</code></td><td>tanktemp</td><td>yes</td><td>0</td><td><b>New.</b> Published on every counted pulse (<code>trigger: pulse</code>) and with every probe sweep (<code>trigger: sweep</code>, with the sweep's timestamp, so the count and probes are a matched snapshot). Consumers de-duplicate on <code>counting_since</code> + <code>count</code> + <code>timestamp</code>. Also carries <code>last_closed_ms</code> (how long the reed stayed closed, a flow hint) and <code>noise</code> (spikes the debounce rejected), kept apart from <code>glitches</code> (the 600 ms backstop's rejects).</td></tr>
+      <tr><td><code>water/hot/tanktemp/status</code></td><td>tanktemp</td><td>yes</td><td>1</td><td>Adds <code>meters: ["hot_water_meter"]</code> and a <code>gpio_request_failed</code> startup problem. Additive; statehouse decodes it leniently.</td></tr>
+      <tr><td><code>water/hot/state</code></td><td>washhouse</td><td>yes</td><td>0</td><td>Gains a <code>meter</code> block: state, flow, today's litres, the circulation baseline if any.</td></tr>
+      <tr><td><code>water/hot/events</code></td><td>washhouse</td><td>no</td><td>1</td><td>Draw events gain <code>volume_source</code>, <code>volume_uncertainty_l</code>, <code>volume_l40</code>, <code>heat_balance_l40</code>, flow, <code>delivered_kwh</code> and a split per tank. New events: <code>meter_suspect</code> / <code>meter_ok</code>, <code>continuous_flow_started</code> / <code>_ended</code>, <code>circulation_detected</code>.</td></tr>
+    </table>
+  </div>
+  <div class="grid3" style="margin-top:14px">
+    <div style="min-width:0"><h3>tanktemp meter message</h3><pre class="json" id="wTank"></pre></div>
+    <div style="min-width:0"><h3>washhouse system state <span class="muted small">(meter part)</span></h3><pre class="json" id="wSys"></pre></div>
+    <div style="min-width:0"><h3>washhouse draw_ended</h3><pre class="json" id="wDraw"></pre></div>
+  </div>
+  <p class="small muted">The payloads follow the simulator's clock. Influx: <code>washhouse_draw</code> gains the metered fields. New measurements are <code>washhouse_flow</code> (one-minute litres, for daily-usage charts) and <code>washhouse_calibration</code> (one point per clean draw). Still nothing goes into greenhouse's climate-only measurement.</p>
+</section>
+
+<!-- ============ PLAN ============ -->
+<section id="plan">
+  <div class="eyebrow">8 · Plan</div>
+  <h2>How it gets built</h2>
+  <div class="grid2">
+    <div class="card">
+      <div class="phase"><div class="n">1</div><div><b>Fitted 19 Nov; finish the checks.</b> <span class="small muted">It's on GPIO 27 (pin 13) with the internal pull-up, and one night is recorded. Still to do: confirm where on the pipework it sits and where the loop's flow leg starts; multimeter the reed against the pipe; read the cable label and length; fit the input board. Only ever connect it with the Pi off.</span></div></div>
+      <div class="phase"><div class="n">2</div><div><b>tanktemp, in its own repo and under its rules.</b> <span class="small muted">WIRE.md and goldens first. Then a pure <code>internal/meter</code> counter (added to <code>boundaries_test.go</code>), and <code>internal/gpioedge</code> as the only <code>go-gpiocdev</code> code: both edges into a state machine (a litre is open then closed; labels are never trusted), a <b>mandatory</b> 20 ms kernel debounce, monotonic edge times, and <code>LineSeqno</code> gaps counted as <code>lost</code>. The unit needs <code>/dev/gpiochip0</code>: today <code>PrivateDevices=true</code> hides it, so either drop that or add <code>DeviceAllow</code> + the gpio group. That's a hardening trade-off for the owner (a separate meter daemon would avoid it). A fake and a contract test, config, health, and a <code>pulsewatch</code> rig tool. Counting runs on its own goroutine, because a probe sweep blocks for 4–8 s. Then, in a separate PR, the first pulse switches the probe sweeps to fast.</span></div></div>
+      <div class="phase"><div class="n">3</div><div><b>Fit it, then do a bucket test.</b> <span class="small muted">Fitted vertically on 19 Nov. The test is deferred by the owner. Draw 10 L into a measured bucket three times, and compare the pulses, the published count and the dial. Switch the boiler programme on and off during the run to prove the debounce live. Repeat per outlet, which also gives the flow rates the briefing lacks. A read-only script with <code>--check</code>, tested first.</span></div></div>
+      <div class="phase"><div class="n">4</div><div><b>Record a week</b> <span class="small muted">as the first metered fixtures, using the main plan's PII scrubbing.</span></div></div>
+      <div class="phase"><div class="n">5</div><div><b>devices_home entry</b> <span class="small muted"><code>hot_water_meter</code>, class <code>flow_meter</code> (not occupancy-relevant), with a <code>meter</code> block that includes <code>placement</code>. common/devices ignores unknown keys, so it's safe today.</span></div></div>
+      <div class="phase" style="border:0"><div class="n">6</div><div><b>washhouse.</b> <span class="small muted"><code>wire/tanktemp</code> Meter type; ingest; flow; the metered detector alongside the thermal one; energy, split by tank and calibration; the cross-checks; outputs. Since washhouse doesn't exist yet, this is designed in from the start.</span></div></div>
+    </div>
+    <div class="card">
+      <h3>Rules washhouse applies <span class="muted small">(starting values; all in config)</span></h3>
+      <table>
+        <tr><th>Step</th><th>Rule</th></tr>
+        <tr><td>Start</td><td class="small">The second pulse within 36 s (faster than the vertical Q1 of 1.67 L/min, and well under a third of any circulation interval). <code>started_at</code> = first pulse − ½ gap. A lone pulse is never a draw by itself.</td></tr>
+        <tr><td>End</td><td class="small">No pulse for 4 × the median gap, kept between 30 and 120 s. <code>ended_at</code> = last pulse + ½ gap.</td></tr>
+        <tr><td>Volume</td><td class="small">Pulses × 1 L (minus the circulation baseline, if one was ever detected). ±(1 L + 3 %).</td></tr>
+        <tr><td>Energy</td><td class="small">For each litre: (T<sub>out</sub> − T<sub>cold</sub>) × 4.186 kJ. T<sub>out</sub> is the hotter of P3 and P5 per tank, averaged over the two tanks.</td></tr>
+        <tr><td>Split</td><td class="small">Each tank's fall in stored heat after loss. During a reheat, the learnt split from clean draws.</td></tr>
+        <tr><td>Kind</td><td class="small">Flow first: 20 L/min or more is a bath (the real bath ran at 32–39 L/min, the shower at 7). Otherwise by hot litres: tap under 15 L; bath 80 L and over; shower in between when it lasts ≥ 3 min. A hint, tuned from real draws.</td></tr>
+        <tr><td>Flow early</td><td class="small">From <code>last_closed_ms</code>: flow ≈ 60 × duty ÷ closed seconds, with the duty (about 0.23) learnt from steady draws. A flow figure arrives about 1.5 s into a shower rather than at the second litre.</td></tr>
+        <tr><td>Cross-check</td><td class="small">The probes see a big draw (inlet drop ≥ 8 °C) with no pulses → <code>meter_suspect</code>, and volumes fall back to the heat balance.</td></tr>
+        <tr><td>statehouse</td><td class="small">No change. Metered draws come at 0.95 confidence, so the existing gate (≥ 0.7, ≥ 0.5 L) passes them, including the reheat-masked ones it used to drop.</td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="open">
+  <div class="eyebrow">9 · Open questions</div>
+  <h2>Things to settle</h2>
+  <div class="grid2">
+    <div class="card"><h3>For the owner</h3><ul class="tight small">
+      <li>Where does the secondary loop's flow leg start, and are any taps on the loop itself? The expectation is that it doesn't share the outlet; the overnight pulses will confirm it.</li>
+      <li>Exactly where on the pipework did the meter go: the combined outlet (A), after the loop tee (B), or the cold feed (C)?</li>
+      <li>Is the reed isolated from the pipe (multimeter), and how long is the cable? It's a reed switch on GPIO 27, confirmed.</li>
+      <li>A bucket test, to confirm 1 L per pulse. Also: what caused the three spikes between 07:48 and 07:54, with no boiler event nearby?</li>
+      <li>tanktemp's service hides GPIO (<code>PrivateDevices=true</code>). Relax that, or run a separate meter daemon?</li>
+      <li>Is it worth one more DS18B20 on the pipe at the meter? It would give the true delivered temperature, rather than inferring it from the heat-sunk P5.</li>
+    </ul></div>
+    <div class="card"><h3>For the design</h3><ul class="tight small">
+      <li>Is "count since tanktemp started" enough, or should tanktemp keep a register that follows the dial (saved at shutdown and every 10 min)?</li>
+      <li>Should <code>continuous_flow</code> (a tap left dribbling) go to notifications through statehouse?</li>
+      <li>Should the kind thresholds come from the bucket test per outlet, or be learnt from a few weeks of draws?</li>
+    </ul></div>
+  </div>
+</section>
+</main>
+<!-- ======================= CORE: the washhouse simulation (copied from washhouse-explainer.html; adds per-step flow) ======================= -->
+<script id="core">
+(function (root) {
+'use strict';
+const KWH_PER_LK = 4.186 / 3600;
+const HEIGHTS = [265, 400, 825, 945, 1215];
+const POS = ['bottom', 'lower', 'middle', 'upper', 'top'];
+const TANKS = ['hot_water_cylinder_left', 'hot_water_cylinder_right'];
+
+// ---- vessel (port of avail.py) ----
+function vessel(o) {
+  o = Object.assign({ capL: 200, innerD: 460, domeH: 60, z0: 150 }, o || {});
+  const A = o.innerD / 2, R = (A * A + o.domeH * o.domeH) / (2 * o.domeH);
+  const cap = y => Math.PI * (2 * R * y - y * y);
+  let domeL = 0; for (let y = 0; y < Math.floor(o.domeH); y++) domeL += cap(y + 0.5) / 1e6;
+  const cylA = Math.PI * A * A;
+  const lCyl = (o.capL - 2 * domeL) * 1e6 / cylA;
+  const zc0 = o.z0 + o.domeH, zc1 = zc0 + lCyl, zTop = zc1 + o.domeH;
+  const area = z => (z < o.z0 || z > zTop) ? 0 : z < zc0 ? cap(z - o.z0) : z <= zc1 ? cylA : cap(zTop - z);
+  const slices = [];
+  for (let z = Math.floor(o.z0); z <= Math.floor(zTop); z++) slices.push([z + 0.5, area(z + 0.5) / 1e6]);
+  return Object.assign({}, o, { domeL, lCyl, zTop, litresPerCm: cylA / 1e5, slices, area });
+}
+
+function profile(temps, heights, strat) {
+  let pts = [];
+  heights.forEach((h, i) => { if (temps[i] != null && isFinite(temps[i])) pts.push([h, temps[i]]); });
+  if (pts.length < 2) return null;
+  if (strat) { let m = -1e9; pts = pts.map(([h, t]) => { m = Math.max(m, t); return [h, m]; }); }
+  return z => {
+    if (z <= pts[0][0]) return pts[0][1];
+    if (z >= pts[pts.length - 1][0]) return pts[pts.length - 1][1];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const [h0, t0] = pts[i], [h1, t1] = pts[i + 1];
+      if (h0 <= z && z <= h1) return t0 + (t1 - t0) * (z - h0) / (h1 - h0);
+    }
+  };
+}
+
+function assess(v, temps, o) {
+  o = Object.assign({ heights: HEIGHTS, strat: true, tCold: 10, tMin: 40, tMix: 40 }, o || {});
+  const T = profile(temps, o.heights, o.strat);
+  if (!T) return null;
+  let kwh = 0, hot = 0, mix = 0, mean = 0;
+  for (const [z, dl] of v.slices) {
+    const t = T(z); mean += t * dl;
+    kwh += dl * (t - o.tCold) * KWH_PER_LK;
+    if (t >= o.tMin) { hot += dl; mix += dl * (t - o.tCold) / (o.tMix - o.tCold); }
+  }
+  return { kwh, hot_l: hot, mix40: mix, mean: mean / v.capL, top: T(v.zTop), T };
+}
+
+// ---- equal-volume layers for the physical simulation ----
+function layers(v, litres) {
+  const out = []; let acc = 0, zs = 0, lo = v.slices[0][0] - 0.5;
+  for (const [z, dl] of v.slices) {
+    if (dl <= 0) continue;
+    acc += dl; zs += z * dl;
+    if (acc >= litres) { out.push({ vol: acc, z: zs / acc, lo, hi: z + 0.5 }); lo = z + 0.5; acc = 0; zs = 0; }
+  }
+  if (acc > 0) out.push({ vol: acc, z: zs / acc, lo, hi: v.zTop });
+  return out;
+}
+
+function stabilise(T, V) { // pool-adjacent-violators: non-decreasing upward
+  const bt = [], bv = [], bn = [];
+  for (let i = 0; i < T.length; i++) {
+    bt.push(T[i]); bv.push(V[i]); bn.push(1);
+    while (bt.length > 1 && bt[bt.length - 2] > bt[bt.length - 1] + 1e-9) {
+      const t2 = bt.pop(), v2 = bv.pop(), n2 = bn.pop();
+      const k = bt.length - 1;
+      bt[k] = (bt[k] * bv[k] + t2 * v2) / (bv[k] + v2); bv[k] += v2; bn[k] += n2;
+    }
+  }
+  let i = 0;
+  for (let b = 0; b < bt.length; b++) for (let j = 0; j < bn[b]; j++) T[i++] = bt[b];
+}
+
+function advect(T, V, vol, tIn) { // plug flow: vol litres leave the top, cold enters bottom
+  const minV = Math.min.apply(null, V);
+  const n = Math.max(1, Math.ceil(vol / (0.7 * minV)));
+  const dv = vol / n;
+  for (let s = 0; s < n; s++) {
+    for (let i = T.length - 1; i > 0; i--) T[i] += (dv / V[i]) * (T[i - 1] - T[i]);
+    T[0] += (dv / V[0]) * (tIn - T[0]);
+  }
+}
+
+const hm = s => { const [h, m] = s.split(':').map(Number); return h * 3600 + m * 60; };
+const fmt = sec => { sec = ((Math.round(sec) % 86400) + 86400) % 86400; const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60); return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0'); };
+
+const SCENARIO = {
+  date: '2026-11-09',
+  draws: [
+    { at: '02:15', min: 6, lpm: 2.5, label: 'The nightly 02:15 draw', kind: 'tap' },
+    { at: '05:50', min: 9, lpm: 9, label: 'Shower, boiler idle', kind: 'shower' },
+    { at: '07:05', min: 8, lpm: 9, label: 'Shower during reheat', kind: 'shower' },
+    { at: '07:40', min: 1.5, lpm: 5, label: 'Kitchen tap', kind: 'tap' },
+    { at: '12:40', min: 1, lpm: 4, label: 'Hand wash', kind: 'tap' },
+    { at: '17:50', min: 12, lpm: 10, label: 'Bath during HW + CH', kind: 'bath' },
+    { at: '21:40', min: 7, lpm: 9, label: 'Shower', kind: 'shower' },
+    { at: '22:30', min: 2, lpm: 4, label: 'Kitchen tap', kind: 'tap' },
+  ],
+  hw: [['06:15', '07:15'], ['17:00', '18:15']],
+  ch: [['06:30', '07:15'], ['17:30', '21:00']],
+};
+
+function onAt(spans, t) { for (const [a, b] of spans) if (t >= hm(a) && t < hm(b)) return true; return false; }
+
+function rng(seed) { return () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }; }
+
+// ---- physical simulation (the "truth" behind the probes) ----
+function simulate(opt) {
+  opt = opt || {};
+  const v = vessel();
+  const L = layers(v, 2.0);
+  const V = L.map(l => l.vol);
+  const nL = L.length;
+  const idxAt = z => { for (let i = 0; i < nL; i++) if (z < L[i].hi) return i; return nL - 1; };
+  const coil = L.map(l => l.z >= 241 && l.z <= 781);
+  const coilV = L.reduce((s, l, i) => s + (coil[i] ? l.vol : 0), 0);
+  const upper = L.map(l => l.z >= 800);
+  const upperV = L.reduce((s, l, i) => s + (upper[i] ? l.vol : 0), 0);
+  const tanks = [0, 1].map(k => ({
+    T: new Float64Array(nL).fill(k ? 40 : 48),
+    ua: 4.5, uaLoop: k ? 11 : 0, calling: true,
+    f1: 30, f5: 45, pipe: 30,
+  }));
+  const rnd = rng(42);
+  const dt = 10, days = 2, N = days * 8640;
+  const hotS = new Float32Array(N), toutS = new Float32Array(N);
+  const frames = []; const sweeps = []; const truth = [];
+  let lastSweep = -1e9, fastUntil = -1, lastProbe = null;
+  const drawAt = t => { for (const d of SCENARIO.draws) { const a = hm(d.at); if (t >= a && t < a + d.min * 60) return d; } return null; };
+  for (let n = 0; n < N; n++) {
+    const tAbs = n * dt, t = tAbs % 86400, day = Math.floor(tAbs / 86400);
+    const hw = onAt(SCENARIO.hw, t), ch = onAt(SCENARIO.ch, t);
+    const firing = hw || ch;
+    const amb = 21 + (firing ? 1.2 : 0);
+    // stats (sensing at 600 mm), hysteresis 57/63
+    tanks.forEach(tk => { const ts = tk.T[idxAt(600)]; if (ts >= 63) tk.calling = false; else if (ts <= 57) tk.calling = true; });
+    // coil demand
+    const zone = tk => { let s = 0; for (let i = 0; i < nL; i++) if (coil[i]) s += tk.T[i] * V[i]; return s / coilV; };
+    const P = [0, 0];
+    const flow = 80, kCoil = 520;
+    const dem = tanks.map(tk => Math.max(0, kCoil * (flow - zone(tk))));
+    if (hw) {
+      const avail = ch ? 5300 : 12100;
+      const open = [0, 1].filter(k => tanks[k].calling);
+      const sum = open.reduce((s, k) => s + dem[k], 0);
+      open.forEach(k => { P[k] = sum <= avail ? dem[k] : avail * dem[k] / sum; });
+    } else if (ch && tanks[1].calling) {
+      P[1] = Math.min(dem[1], 2500); // right valve opens on CH calls (measured; cause inferred)
+    }
+    // draw
+    const d = drawAt(t);
+    const tops = tanks.map(tk => tk.T[nL - 1]);
+    const tOut = (tops[0] + tops[1]) / 2;
+    const mixLpm = d ? d.lpm : 0;
+    const hotLpm = d ? (tOut > 40 ? mixLpm * 30 / (tOut - 10) : mixLpm) : 0;
+    const perTank = hotLpm / 2;
+    hotS[n] = hotLpm; toutS[n] = tOut;
+    tanks.forEach((tk, k) => {
+      const T = tk.T;
+      for (let i = 0; i < nL; i++) {
+        let q = -tk.ua * (V[i] / 200) * (T[i] - amb);
+        if (upper[i]) q -= tk.uaLoop * (V[i] / upperV) * (T[i] - amb);
+        if (coil[i]) q += P[k] * V[i] / coilV;
+        T[i] += q * dt / (4186 * V[i]);
+      }
+      if (perTank > 0) advect(T, V, perTank * dt / 60, 10);
+      if (P[k] > 0) { // convection stirs the coil zone while the coil is hot
+        let s = 0; for (let i = 0; i < nL; i++) if (coil[i]) s += T[i] * V[i];
+        const m = s / coilV; for (let i = 0; i < nL; i++) if (coil[i]) T[i] += (m - T[i]) * 0.08;
+      }
+      for (let i = 1; i < nL - 1; i++) T[i] += 0.004 * (T[i + 1] - 2 * T[i] + T[i - 1]); // wall conduction slowly blurs layers
+      stabilise(T, V);
+      // fittings
+      const heating = P[k] > 300;
+      const l265 = T[idxAt(265)], l1215 = T[idxAt(1215)];
+      let f1Target = l265;
+      if (perTank > 0) { let drop = Math.min(1, perTank / 3.2) * 0.85; if (heating) drop *= 0.22; f1Target = l265 - (l265 - 10) * drop; }
+      tk.f1 += (f1Target - tk.f1) * (1 - Math.exp(-dt / 40));
+      if (perTank > 0) { tk.pipe = T[nL - 1]; tk.f5 += (T[nL - 1] - tk.f5) * (1 - Math.exp(-dt / 18)); }
+      else { tk.pipe += (amb - tk.pipe) * (1 - Math.exp(-dt / 300)); tk.f5 += ((0.8 * l1215 + 0.2 * tk.pipe) - tk.f5) * (1 - Math.exp(-dt / 55)); }
+      tk.P = P[k];
+    });
+    // probes
+    const q16 = x => Math.round(x * 16) / 16;
+    const probes = tanks.map((tk, k) => {
+      const T = tk.T;
+      const p4 = T[idxAt(945)] - (k ? 0.17 * (T[idxAt(945)] - amb) : 0); // right P4 on the secondary return
+      return [tk.f1, T[idxAt(400)], T[idxAt(825)], p4, tk.f5].map(x => q16(x + (rnd() - 0.5) * 0.08));
+    });
+    // tanktemp cadence: 30 s, 10 s while a probe moves >=1.5 C/min, held 2 min
+    const interval = tAbs < fastUntil ? 10 : 30;
+    if (tAbs - lastSweep >= interval) {
+      if (lastProbe) {
+        const mins = (tAbs - lastSweep) / 60;
+        let fast = false;
+        for (let k = 0; k < 2; k++) for (let i = 0; i < 5; i++) if (Math.abs(probes[k][i] - lastProbe[k][i]) / mins >= 1.5) fast = true;
+        if (fast) fastUntil = tAbs + 120;
+      }
+      if (day === days - 1) sweeps.push({ t, probes, hw, ch, amb, fast: tAbs < fastUntil, interval: tAbs - lastSweep });
+      else if (opt.warmSweeps) opt.warmSweeps.push({ t: t - 86400, probes, hw, ch, amb });
+      lastSweep = tAbs; lastProbe = probes;
+    }
+    if (day === days - 1) {
+      if (n % 3 === 0) frames.push({ t, T: tanks.map(tk => Float32Array.from(tk.T)), P: tanks.map(tk => tk.P), hw, ch, amb, draw: d, hotLpm, probes });
+      if (n % 6 === 0) {
+        const tr = tanks.map(tk => { let mix = 0, kwh = 0; for (let i = 0; i < nL; i++) { kwh += V[i] * (tk.T[i] - 10) * KWH_PER_LK; if (tk.T[i] >= 40) mix += V[i] * (tk.T[i] - 10) / 30; } return { mix, kwh }; });
+        truth.push({ t, mix: tr[0].mix + tr[1].mix, kwh: tr[0].kwh + tr[1].kwh, tanks: tr });
+      }
+    }
+  }
+  return { v, L, frames, sweeps, truth, warm: opt.warmSweeps, hotS, toutS, dt, N };
+}
+
+// ---- washhouse engine: runs on sweeps only (what the service would see) ----
+function engine(sweeps, opt) {
+  opt = Object.assign({ ua: [4, 15], warm: [] }, opt || {});
+  const v = opt.vessel || vessel();
+  const LPK = 30 * KWH_PER_LK; // kWh per litre of 40 C water mixed from 10 C
+  const all = opt.warm.concat(sweeps);
+  const hist = [[], []];
+  const snaps = [], events = [];
+  let draw = null, lastDraw = null, seq = 0, lastHW = null, lastCH = null;
+  const heat = [{ on: false }, { on: false }];
+  let prev = null;
+  const evt = (t, type, body) => { if (t >= 0) events.push(Object.assign({ t, type }, body)); };
+  for (const sw of all) {
+    const t = sw.t;
+    if (lastHW !== null && sw.hw !== lastHW) evt(t, sw.hw ? 'HW_ON' : 'HW_OFF', { source: 'boiler' });
+    if (lastCH !== null && sw.ch !== lastCH) evt(t, sw.ch ? 'CH_ON' : 'CH_OFF', { source: 'boiler' });
+    lastHW = sw.hw; lastCH = sw.ch;
+    const est = sw.probes.map(p => assess(v, p));
+    const tanks = est.map((e, k) => {
+      const h = hist[k];
+      h.push({ t, E: e.kwh, mix: e.mix40, p: sw.probes[k] });
+      while (h.length && t - h[0].t > 400) h.shift();
+      let ref = h[0]; for (const x of h) if (t - x.t >= 180) ref = x;
+      const dtH = (t - ref.t) / 3600;
+      const power = dtH > 0.02 ? (e.kwh - ref.E) / dtH : 0;
+      const pr = prev ? prev.probes[k] : sw.probes[k];
+      const mins = prev ? (t - prev.t) / 60 : 1;
+      const r1 = (sw.probes[k][0] - pr[0]) / mins, r5 = (sw.probes[k][4] - pr[4]) / mins;
+      const loss = opt.ua[k] * (e.mean - sw.amb) / 1000;
+      return { e, power, net: power + loss, r1, r5, trig: r1 <= -1.5 || r5 >= 2.0, loss };
+    });
+    // heating spells per tank (gain beyond expected loss)
+    tanks.forEach((tk, k) => {
+      const hs = heat[k];
+      const src = sw.hw ? 'hw' : sw.ch ? 'ch' : null; // no immersion modelled: heat needs a programmer call
+            if (draw || tk.trig) return; // a draw distorts the balance; hold the heating state through it
+      if (!hs.on && src && tk.net > 0.8) { hs.on = true; hs.start = t; hs.E0 = tk.e.kwh; hs.src = src; evt(t, 'heating_started', { tank: k, heat_source: src }); }
+      else if (hs.on && (tk.net < 0.25 || !src)) { hs.on = false; evt(t, 'heating_ended', { tank: k, heat_source: hs.src, energy_added_kwh: Math.max(0, tk.e.kwh - hs.E0), duration_s: t - hs.start }); }
+    });
+    // draw state machine (system level: the outlets merge)
+    const trig = tanks.map(x => x.trig);
+    if (!draw && (trig[0] || trig[1])) {
+      seq++;
+      const startedAt = prev ? prev.t : t;
+      const masked = heat[0].on || heat[1].on || (prev && prev.hw);
+      const drop1 = Math.min(tanks[0].r1, tanks[1].r1);
+      let conf = 0.45 + (drop1 <= -1.5 ? 0.25 : 0) + (trig[0] && trig[1] ? 0.15 : 0) + ((tanks[0].r5 >= 2 || tanks[1].r5 >= 2) ? 0.1 : 0);
+      if (masked) conf -= 0.1;
+      draw = { p5start: prev ? prev.probes.map(p => p[4]) : sw.probes.map(p => p[4]), id: 'dr-' + SCENARIO.date.replace(/-/g, '') + '-' + fmt(startedAt).replace(':', '') + '-' + seq, startedAt, detectedAt: t, last: t, tanks: new Set(), E0: prev ? prev.E : est.map(e => e.kwh), masked: !!masked, conf: Math.min(0.95, conf), p1min: [99, 99], p1start: prev ? prev.probes.map(p => p[0]) : sw.probes.map(p => p[0]), p5max: [0, 0], updated: t, lossKwh: 0 };
+      trig.forEach((x, k) => x && draw.tanks.add(k));
+      evt(t, 'draw_started', { draw: draw.id, started_at: startedAt, tanks: [...draw.tanks], confidence: draw.conf, masked: draw.masked });
+    }
+    if (draw) {
+      trig.forEach((x, k) => { if (x) { draw.tanks.add(k); draw.last = t; } });
+      // still flowing: the outlet probe holds near its draw peak (at rest it decays fast, heat-sunk by the pipe)
+      sw.probes.forEach((p, k) => { if (draw.p5max[k] >= draw.p5start[k] + 1.5 && tanks[k].r5 > -0.3 && p[4] >= draw.p5max[k] - 1) draw.last = t; });
+      if (heat[0].on || heat[1].on || sw.hw) draw.masked = true;
+      sw.probes.forEach((p, k) => { draw.p1min[k] = Math.min(draw.p1min[k], p[0]); draw.p5max[k] = Math.max(draw.p5max[k], p[4]); });
+      draw.lossKwh += prev ? (tanks[0].loss + tanks[1].loss) * (t - prev.t) / 3600 : 0;
+      const removed = draw.E0[0] + draw.E0[1] - est[0].kwh - est[1].kwh - draw.lossKwh;
+      draw.vol = draw.masked ? null : Math.max(0, removed / LPK);
+      const inletDrop = Math.max(draw.p1start[0] - draw.p1min[0], draw.p1start[1] - draw.p1min[1]);
+      if (inletDrop >= 8 && !draw.masked) draw.conf = Math.max(draw.conf, 0.9);
+      if (t - draw.updated >= 60 && t - draw.last < 120) { draw.updated = t; evt(t, 'draw_updated', { draw: draw.id, volume_l40: draw.vol, confidence: draw.conf }); }
+      if (t - draw.last >= 120) {
+        const dur = draw.last - draw.startedAt + 30;
+        const vol = draw.vol;
+        const kind = vol == null ? 'unknown' : vol < 20 ? 'tap' : vol < 110 ? (dur >= 240 ? 'shower' : 'tap') : 'bath';
+        lastDraw = { id: draw.id, started_at: draw.startedAt, ended_at: draw.startedAt + dur, duration_s: dur, volume_l40: vol, masked: draw.masked, kind, confidence: draw.conf, tanks: [...draw.tanks], inlet_drop_c: inletDrop, outlet_peak_c: Math.max(draw.p5max[0], draw.p5max[1]) };
+        evt(t, 'draw_ended', Object.assign({ draw: draw.id }, lastDraw));
+        draw = null;
+      }
+    }
+    prev = { t, probes: sw.probes, E: est.map(e => e.kwh), hw: sw.hw };
+    if (t >= 0) snaps.push({
+      t, hw: sw.hw, ch: sw.ch, amb: sw.amb, fast: sw.fast,
+      tanks: tanks.map((x, k) => ({ usable: x.e.mix40, low: x.e.mix40 * 0.85, hot: x.e.hot_l, kwh: x.e.kwh, mean: x.e.mean, top: x.e.top, power: x.power,
+        state: draw && draw.tanks.has(k) ? 'drawing' : heat[k].on ? 'heating' : 'cooling', src: heat[k].on ? (sw.hw ? 'hw' : sw.ch ? 'ch' : heat[k].src) : null })),
+      draw: draw ? { id: draw.id, started_at: draw.startedAt, detected_at: draw.detectedAt, vol: draw.vol, conf: draw.conf, masked: draw.masked, tanks: [...draw.tanks] } : null,
+      lastDraw,
+    });
+  }
+  return { snaps, events };
+}
+
+root.WH = { KWH_PER_LK, HEIGHTS, POS, TANKS, vessel, profile, assess, layers, stabilise, advect, simulate, engine, SCENARIO, hm, fmt, onAt };
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+<!-- ======================= METER CORE (pure; tested in node) ======================= -->
+<script id="meter-core">
+(function (root) {
+'use strict';
+const { KWH_PER_LK, SCENARIO, hm } = root.WH;
+// WMP20H K=1 (label): 1 L/pulse; Q1 50 L/h, Q2 = 1.6 Q1, Q3 4 m3/h, Q4 5 m3/h.
+const METER = { lpp: 1, q1: 100 / 60, q2: 160 / 60, // fitted vertically: R40, not R80
+  q3: 4000 / 60, q4: 5000 / 60, debounce: 0.02, minInterval: 0.6 };
+
+function rng(seed) { return () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }; }
+const median = a => { if (!a.length) return null; const s = a.slice().sort((x, y) => x - y); return s[s.length >> 1]; };
+
+// A what-if thermosiphon through the meter: a little faster when the tanks are hotter (evening) than at dawn.
+const circAt = (t, c) => c ? c * (1 + 0.25 * Math.cos(2 * Math.PI * (((t % 86400) + 86400) % 86400 - hm('19:00')) / 86400)) : 0;
+
+// Edges at the GPIO pin. Times are in the day-2 frame: 0 = the scenario day's midnight, day 1 is negative.
+function edges(sim, o) {
+  o = Object.assign({ phase: 0.37, circ: 0, unplugAt: null, spikes: false }, o || {});
+  const out = [];
+  let acc = o.phase;
+  for (let n = 0; n < sim.N; n++) {
+    const t0 = n * sim.dt - 86400;
+    const circ = circAt(t0, o.circ);
+    const perS = (sim.hotS[n] + circ) / 60;
+    if (perS <= 0) continue;
+    let left = sim.dt, tt = t0;
+    while (acc + perS * left >= 1) { const need = (1 - acc) / perS; tt += need; left -= need; acc = 0; out.push(tt); }
+    acc += perS * left;
+  }
+  const ed = o.unplugAt != null ? out.filter(t => t < o.unplugAt) : out;
+  // Noise as recorded on the real rig (19-20 Nov): microsecond spikes that return to the old level,
+  // picked up when the programmer switches. HW_OFF: a burst of 6 in 247 us, then 2 more ~0.8 s later.
+  // CH_ON: one spike ~0.3-0.5 s after. CH_OFF: one ~2 min later (pump run-on?). HW_ON: none.
+  const sp = [];
+  if (o.spikes) for (const day of [-86400, 0]) {
+    for (const [on, off] of SCENARIO.hw) { const t = day + hm(off) + 0.2726; [0, 73e-6, 85e-6, 167e-6, 199e-6, 247e-6, 0.782, 0.797].forEach(d => sp.push(t + d)); }
+    for (const [on, off] of SCENARIO.ch) { sp.push(day + hm(on) + 0.29); sp.push(day + hm(off) + 124.6); }
+  }
+  ed.spikes = sp.filter(t => o.unplugAt == null || t < o.unplugAt).sort((a, b) => a - b);
+  return ed;
+}
+
+// tanktemp's counter: both edges into a state machine behind the kernel's debounce, then the min-interval backstop.
+// A spike never holds its level for the debounce period, so with debounce on it is rejected as noise.
+// With debounce off (falling edges only, as a naive counter would), every spike's falling flank looks like a litre.
+function count(ed, o) {
+  o = Object.assign({ debounce: METER.debounce, minInterval: METER.minInterval }, o || {});
+  const pulses = [], glitches = [], bounced = [];
+  const all = ed.map(t => [t, false]).concat((ed.spikes || []).map(t => [t, true])).sort((a, b) => a[0] - b[0]);
+  let lastCount = -1e12;
+  for (const [t, spike] of all) {
+    if (spike && o.debounce > 0) { bounced.push(t); continue; }
+    if (t - lastCount < o.minInterval) { glitches.push(t); continue; }
+    pulses.push(t); lastCount = t;
+  }
+  return { pulses, glitches, bounced, noise: bounced };
+}
+
+// washhouse's metered draw detector (plan §6.3-6.6).
+function detect(pulses, sim, eng, o) {
+  o = Object.assign({ shortMax: 36, idleMin: 30, idleMax: 120, idleK: 4, baseAfter: 6, ua: [4, 15] }, o || {});
+  const sweeps = (sim.warm || []).concat(sim.sweeps);
+  const swAt = t => { let lo = 0, hi = sweeps.length - 1; if (t < sweeps[0].t) return sweeps[0]; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (sweeps[m].t <= t) lo = m; else hi = m - 1; } return sweeps[lo]; };
+  const snaps = eng.snaps;
+  const snapAt = t => { let lo = 0, hi = snaps.length - 1; if (t <= snaps[0].t) return snaps[0]; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (snaps[m].t <= t) lo = m; else hi = m - 1; } return snaps[lo]; };
+  const thermal = eng.events.filter(e => e.type === 'draw_ended');
+  const draws = [], events = [];
+  const base = { lpm: 0, n: 0, active: false, at: null, samples: [] };
+  let open = null, prev = null, prevInDraw = false, seq = 0, learnt = [0.5, 0.5], learntN = 0;
+  const idleOf = d => Math.min(o.idleMax, Math.max(o.idleMin, o.idleK * median(d.iv)));
+
+  function close(d, declared) {
+    const n = d.pulses.length, m = median(d.iv);
+    d.ended_at = d.last + m / 2; d.declared = declared;
+    d.duration = d.ended_at - d.started_at;
+    d.raw = n * METER.lpp;
+    d.volume = Math.max(0, d.raw - d.base * d.duration / 60);
+    d.unc = 1 + 0.03 * d.volume;
+    const span = (d.last - d.pulses[0]) / 60;
+    d.mean = span > 0 ? (n - 1) / span - d.base : null;
+    d.peak = Math.max.apply(null, d.iv.filter(isFinite).map(x => 60 / x)) - d.base;
+    // delivered temperature: per tank the hotter of P3 and P5 at the latest sweep (P5 lags ~18 s and is heat-sunk at rest); the outlets merge, so average the tanks
+    let kwh = 0, l40 = 0, tsum = 0;
+    for (const p of d.pulses) { const s = swAt(p); const T = (Math.max(s.probes[0][2], s.probes[0][4]) + Math.max(s.probes[1][2], s.probes[1][4])) / 2; kwh += (T - 10) * KWH_PER_LK; l40 += (T - 10) / 30; tsum += T; }
+    const f = d.raw ? d.volume / d.raw : 0;
+    d.kwh = kwh * f; d.l40 = l40 * f; d.tout = tsum / n;
+    d.masked = false;
+    for (const s of sweeps) if (s.t >= d.started_at - 30 && s.t <= d.ended_at && s.hw) { d.masked = true; break; }
+    const th = thermal.find(e => e.started_at <= d.ended_at + 60 && e.ended_at >= d.started_at - 60);
+    d.thermal = th || null;
+    d.hb_l40 = th ? th.volume_l40 : null;
+    if (th && th.masked) d.masked = true;
+    // which tank gave it: each tank's fall in stored heat, corrected for standing loss
+    d.share = null; d.shareSource = null;
+    if (d.started_at >= 0) {
+      const a = snapAt(d.started_at - 15), b = snapAt(d.ended_at + 90);
+      const hrs = (b.t - a.t) / 3600;
+      const dE = [0, 1].map(k => (a.tanks[k].kwh - b.tanks[k].kwh) - o.ua[k] * (a.tanks[k].mean - a.amb) / 1000 * hrs);
+      const tot = dE[0] + dE[1];
+      d.dE = dE;
+      if (!d.masked && tot > 0.15 && dE[0] >= 0 && dE[1] >= 0) {
+        d.share = dE.map(x => x / tot); d.shareSource = 'heat_balance';
+        learntN++; learnt = learnt.map((x, k) => learntN === 1 ? d.share[k] : 0.7 * x + 0.3 * d.share[k]);
+      } else { d.share = learnt.slice(); d.shareSource = 'learnt'; }
+    }
+    d.kind = (d.mean != null && d.mean >= 20) || d.volume >= 80 ? 'bath' : d.volume < 15 ? 'tap' : d.duration >= 180 ? 'shower' : 'tap';
+    d.conf = 0.95; d.source = 'metered';
+    d.statehouse = d.conf >= 0.7 && d.volume >= 0.5 ? 'signal' : 'activity';
+    draws.push(d);
+    events.push({ t: declared, type: 'draw_ended', d });
+  }
+
+  for (const p of pulses) {
+    if (open && p - open.last > idleOf(open)) { close(open, open.last + idleOf(open)); open = null; prevInDraw = true; }
+    const iv = prev == null ? Infinity : p - prev;
+    const shortT = Math.min(o.shortMax, base.active ? (60 / base.lpm) / 3 : Infinity);
+    if (open) { open.pulses.push(p); open.iv.push(iv); open.last = p; }
+    else if (iv < shortT && !prevInDraw) {
+      seq++;
+      const st = prev - iv / 2;
+      open = { id: 'd-' + (st < 0 ? '20261108' : SCENARIO.date.replace(/-/g, '')) + 'T' + root.WH.fmt(st).replace(':', '') + 'Z', first: prev, started_at: prev - iv / 2, detected_at: p, pulses: [prev, p], iv: [iv], last: p, base: base.active ? base.lpm : 0 };
+      events.push({ t: p, type: 'draw_started', d: open });
+    } else if (prev != null && iv > o.shortMax && iv < 1200) {
+      base.lpm = base.n ? 0.8 * base.lpm + 0.2 * 60 / iv : 60 / iv; base.n++;
+      base.samples.push({ t: p, lpm: base.lpm });
+      if (!base.active && base.n >= o.baseAfter) { base.active = true; base.at = p; events.push({ t: p, type: 'circulation_detected', lpm: base.lpm }); }
+    }
+    if (!open) prevInDraw = false; // p itself is in no draw, so the next pulse may start one
+    prev = p;
+  }
+  if (open) close(open, open.last + idleOf(open));
+
+  // cross-check against the thermal detector: a big draw the probes saw but the meter didn't
+  let suspect = false;
+  const fallback = [];
+  for (const th of thermal) {
+    const hit = draws.find(d => d.started_at <= th.ended_at + 60 && d.ended_at >= th.started_at - 60);
+    if (hit) { if (suspect) { suspect = false; events.push({ t: hit.declared, type: 'meter_ok' }); } continue; }
+    if (th.inlet_drop_c >= 8) {
+      const t = events.find(e => e.type === 'draw_ended' && e.d.thermal === th);
+      if (!suspect) { suspect = true; events.push({ t: th.ended_at + 120, type: 'meter_suspect', th }); }
+      fallback.push({ id: th.id, started_at: th.started_at, ended_at: th.ended_at, source: 'heat_balance', hb_l40: th.volume_l40, masked: th.masked, conf: th.confidence, kind: th.kind, thermal: th });
+    }
+  }
+  events.sort((a, b) => a.t - b.t);
+  return { draws, events, base, fallback };
+}
+
+function truthDraws(sim) {
+  return SCENARIO.draws.map(d => {
+    const a = hm(d.at), b = a + d.min * 60;
+    let hot = 0, tsum = 0, n = 0;
+    for (let i = 0; i < sim.N; i++) { const t = i * sim.dt - 86400; if (t >= a && t < b) { hot += sim.hotS[i] * sim.dt / 60; tsum += sim.toutS[i]; n++; } }
+    return Object.assign({}, d, { start: a, end: b, hot, l40: d.lpm * d.min, tout: tsum / n, hotLpm: hot / d.min });
+  });
+}
+
+root.MT = { METER, circAt, edges, count, detect, truthDraws, median };
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+<script>
+(function () {
+'use strict';
+const { simulate, engine, SCENARIO, hm, fmt, onAt } = WH;
+const { METER, circAt, edges, count, detect, truthDraws } = MT;
+const $ = s => document.querySelector(s);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const NS = 'http://www.w3.org/2000/svg';
+const el = (tag, attrs, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
+const txt = (parent, x, y, s, attrs) => { const t = el('text', Object.assign({ x, y }, attrs || {}), parent); t.textContent = s; return t; };
+const r1 = x => x == null ? null : Math.round(x * 10) / 10;
+const r2 = x => x == null ? null : Math.round(x * 100) / 100;
+const pad = n => String(Math.floor(n)).padStart(2, '0');
+const wrap = t => ((t % 86400) + 86400) % 86400;
+const hms = t => { t = Math.floor(wrap(t)); return pad(t / 3600) + ':' + pad((t % 3600) / 60) + ':' + pad(t % 60); };
+const iso = (t, ms) => {
+  const date = t < 0 ? '2026-11-08' : SCENARIO.date;
+  let s = date + 'T' + hms(t);
+  if (ms) s += '.' + String(Math.floor((wrap(t) % 1) * 1000)).padStart(3, '0');
+  return s + 'Z';
+};
+const COUNTING_SINCE = iso(-86400 + 7);
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+const json = o => esc(JSON.stringify(o, null, 2));
+
+// ---------- theme ----------
+let forced = null;
+try { forced = localStorage.getItem('wm-theme'); } catch (e) {}
+if (forced) document.documentElement.setAttribute('data-theme', forced);
+const isDark = () => { const a = document.documentElement.getAttribute('data-theme'); return a ? a === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches; };
+$('#themeBtn').onclick = () => {
+  const next = isDark() ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  try { localStorage.setItem('wm-theme', next); } catch (e) {}
+  redrawAll();
+};
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => redrawAll());
+
+// ---------- tooltip ----------
+const tip = $('#tip');
+function showTip(html, x, y) { tip.innerHTML = html; tip.style.display = 'block'; const w = tip.offsetWidth, h = tip.offsetHeight; tip.style.left = Math.max(8, Math.min(innerWidth - w - 8, x + 14)) + 'px'; tip.style.top = Math.max(8, Math.min(innerHeight - h - 8, y + 14)) + 'px'; }
+function hideTip() { tip.style.display = 'none'; }
+function hover(node, html) { node.addEventListener('mousemove', e => showTip(typeof html === 'function' ? html() : html, e.clientX, e.clientY)); node.addEventListener('mouseleave', hideTip); }
+
+// ---------- the model ----------
+const warm = [];
+const SIM = simulate({ warmSweeps: warm });
+const ENG = engine(SIM.sweeps, { warm });
+const TRUTH = truthDraws(SIM);
+const THERMAL = ENG.events.filter(e => e.type === 'draw_ended');
+const THSTART = {}; ENG.events.filter(e => e.type === 'draw_started').forEach(e => { THSTART[e.draw] = e.t; });
+const W = { loop: false, unplug: false, spikes: true, nodebounce: false };
+let M = null;
+
+function lowerCount(arr, t) { let lo = 0, hi = arr.length; while (lo < hi) { const m = (lo + hi) >> 1; if (arr[m] <= t) lo = m + 1; else hi = m; } return lo; } // number of items <= t
+
+function runMeter() {
+  const circ = W.loop ? 0.3 : 0;
+  const ed = edges(SIM, { circ, unplugAt: W.unplug ? hm('15:00') : null, spikes: W.spikes });
+  const c = count(ed, { debounce: W.nodebounce ? 0 : METER.debounce });
+  const det = detect(c.pulses, SIM, ENG);
+  // cumulative litres through the meter (with the pointer's starting phase), for the dial
+  const cum = new Float64Array(SIM.N + 1); cum[0] = 0.37;
+  for (let n = 0; n < SIM.N; n++) cum[n + 1] = cum[n] + (SIM.hotS[n] + circAt(n * SIM.dt - 86400, circ)) / 60 * SIM.dt;
+  const rows = [];
+  for (const e of det.events) {
+    if (e.t < 0 && e.type !== 'circulation_detected') continue;
+    rows.push(e);
+  }
+  for (const fb of det.fallback) rows.push({ t: fb.ended_at + 120, type: 'fallback_ended', fb });
+  for (const e of ENG.events) if (/^(HW|CH)_/.test(e.type)) rows.push({ t: e.t, type: e.type });
+  rows.sort((a, b) => a.t - b.t);
+  M = { circ, edges: ed, pulses: c.pulses, glitches: c.glitches, bounced: c.bounced, det, cum, rows };
+}
+
+const sweepAt = t => { const s = SIM.sweeps; let lo = 0, hi = s.length - 1; if (t < s[0].t) return s[0]; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (s[m].t <= t) lo = m; else hi = m - 1; } return s[lo]; };
+const trueFlow = t => { const n = Math.floor((t + 86400) / SIM.dt); return n < 0 || n >= SIM.N ? 0 : SIM.hotS[n] + circAt(t, M.circ); };
+const litresAt = t => { const x = (t + 86400) / SIM.dt; const n = Math.max(0, Math.min(SIM.N - 1, Math.floor(x))); return M.cum[n] + (M.cum[n + 1] - M.cum[n]) * (x - n); };
+function flowAt(t) { // washhouse's flow from pulse gaps: 60/gap, decaying while no pulse comes, 0 after the idle limit
+  const P = M.pulses, k = lowerCount(P, t);
+  if (k < 2) return 0;
+  const iv = P[k - 1] - P[k - 2], gap = t - P[k - 1];
+  if (gap > Math.min(120, Math.max(30, 4 * iv))) return 0;
+  return 60 / Math.max(iv, gap);
+}
+const drawAtT = t => M.det.draws.find(d => d.detected_at <= t && d.declared > t) || null;
+const lastDrawBy = t => { let x = null; for (const d of M.det.draws) if (d.declared <= t) x = d; return x; };
+function meterState(t) {
+  let st = 'ok';
+  for (const e of M.det.events) { if (e.t > t) break; if (e.type === 'meter_suspect') st = 'suspect'; if (e.type === 'meter_ok') st = 'ok'; }
+  return st;
+}
+const circActive = t => M.det.base.active && M.det.base.at <= t;
+
+// ---------- payloads ----------
+function tanktempMsg(t) {
+  const k = lowerCount(M.pulses, t), last = k ? M.pulses[k - 1] : null, prevP = k > 1 ? M.pulses[k - 2] : null;
+  const sw = sweepAt(t);
+  const byPulse = last != null && last > sw.t && t >= 0;
+  return {
+    device_id: 'hot_water_meter',
+    timestamp: iso(byPulse ? Math.floor(last) : sw.t),
+    clock_synced: true,
+    trigger: byPulse ? 'pulse' : 'sweep',
+    litres_per_pulse: 1,
+    counting_since: COUNTING_SINCE,
+    count: k,
+    last_pulse_at: last == null ? null : iso(last, true),
+    last_interval_ms: prevP == null ? null : Math.round((last - prevP) * 1000),
+    last_closed_ms: last == null || prevP == null ? null : Math.round((last - prevP) * 230), // the reed is closed ~23 % of a turn (measured): a speedometer, see "The first real night"
+    noise: lowerCount(M.bounced, t),
+    glitches: lowerCount(M.glitches, t),
+    lost: 0,
+  };
+}
+const TANKID = ['hot_water_cylinder_left', 'hot_water_cylinder_right'];
+function drawEndedMsg(d) {
+  return {
+    schema: 'net.swee.washhouse.event.v1', event: 'draw_ended', draw_id: d.id, timestamp: iso(d.declared),
+    started_at: iso(d.started_at), ended_at: iso(d.ended_at), duration_s: Math.round(d.duration),
+    volume_l: Math.round(d.volume), volume_uncertainty_l: r1(d.unc), volume_source: 'metered',
+    volume_l40: Math.round(d.l40), heat_balance_l40: d.hb_l40 == null ? null : Math.round(d.hb_l40),
+    flow_lpm_mean: r1(d.mean), flow_lpm_peak: r1(d.peak), delivered_kwh: r2(d.kwh), outlet_c: r1(d.tout), cold_c: 10,
+    tanks: d.share ? TANKID.map((id, k) => ({ device_id: id, volume_l: Math.round(d.volume * d.share[k]), share: r2(d.share[k]), share_source: d.shareSource })) : null,
+    masked_by_reheat: d.masked, kind: d.kind, confidence: d.conf,
+    assumptions: { kind_bath_min_lpm: 20, kind_bath_min_l: 80, kind_tap_max_l: 15, kind_shower_min_s: 180, cold_c: 10 },
+  };
+}
+function eventMsg(e) {
+  if (!e) return { note: 'no washhouse events yet today' };
+  if (e.type === 'draw_started') {
+    const d = e.d;
+    return { schema: 'net.swee.washhouse.event.v1', event: 'draw_started', draw_id: d.id, timestamp: iso(d.detected_at), started_at: iso(d.started_at), detected_at: iso(d.detected_at), volume_source: 'metered', volume_l: 2, flow_lpm: r1(60 / d.iv[0]), masked_by_reheat: !!sweepAt(d.detected_at).hw, confidence: 0.95, kind: null };
+  }
+  if (e.type === 'draw_ended') return drawEndedMsg(e.d);
+  if (e.type === 'meter_suspect') return { schema: 'net.swee.washhouse.event.v1', event: 'meter_suspect', timestamp: iso(e.t), reason: 'thermal_draw_without_pulses', thermal_draw_id: e.th.draw, inlet_drop_c: r1(e.th.inlet_drop_c), last_pulse_at: M.pulses.length ? iso(M.pulses[lowerCount(M.pulses, e.t) - 1], true) : null, fallback: 'heat_balance' };
+  if (e.type === 'meter_ok') return { schema: 'net.swee.washhouse.event.v1', event: 'meter_ok', timestamp: iso(e.t) };
+  if (e.type === 'circulation_detected') return { schema: 'net.swee.washhouse.event.v1', event: 'circulation_detected', timestamp: iso(e.t), circulation_lpm: r2(e.lpm), evidence: 'slow steady pulses with no thermal draw signature', note: 'subtracted from draw volumes from now on' };
+  if (e.type === 'fallback_ended') return { schema: 'net.swee.washhouse.event.v1', event: 'draw_ended', draw_id: e.fb.id, timestamp: iso(e.t), started_at: iso(e.fb.started_at), ended_at: iso(e.fb.ended_at), volume_source: 'heat_balance', volume_l40: e.fb.hb_l40 == null ? null : Math.round(e.fb.hb_l40), masked_by_reheat: e.fb.masked, kind: e.fb.kind, confidence: e.fb.conf, meter_state: 'suspect' };
+  return { event: e.type, timestamp: iso(e.t) };
+}
+function systemMsg(t) {
+  const d = drawAtT(t), mk = lowerCount(M.pulses, t), m0 = lowerCount(M.pulses, 0);
+  const st = meterState(t);
+  const k = lowerCount(M.pulses, t);
+  return {
+    schema: 'net.swee.washhouse.system.v1', timestamp: iso(sweepAt(t).t), '…': '(tank totals, boiler, last_draw: as before)',
+    meter: {
+      state: st, placement: 'hot_outlet', flow_lpm: r1(flowAt(t)),
+      draw_flow_lpm: d ? r1(Math.max(0, flowAt(t) - (d.base || 0))) : 0,
+      circulation_lpm: circActive(t) ? r2(M.det.base.lpm) : null,
+      today_l: mk - m0, counting_since: COUNTING_SINCE,
+      last_pulse_at: k ? iso(M.pulses[k - 1], true) : null,
+    },
+    active_draw: d ? { draw_id: d.id, started_at: iso(d.started_at), volume_l: lowerCount(M.pulses, t) - lowerCount(M.pulses, d.pulses[0] - 1e-6), volume_source: 'metered', confidence: 0.95 } : null,
+  };
+}
+
+// ---------- dial ----------
+function drawDial(svg, frac, lit, label, frozen) {
+  svg.innerHTML = '';
+  const brass = css('--brass'), ink = css('--ink'), meter = css('--meter'), muted = css('--muted');
+  el('circle', { cx: 75, cy: 75, r: 70, fill: brass }, svg);
+  el('circle', { cx: 75, cy: 75, r: 60, fill: isDark() ? '#e9e7e1' : '#fbfaf6', stroke: 'rgba(0,0,0,.25)' }, svg);
+  for (let i = 0; i < 10; i++) {
+    const a = i / 10 * 2 * Math.PI - Math.PI / 2;
+    el('line', { x1: 75 + 50 * Math.cos(a), y1: 75 + 50 * Math.sin(a), x2: 75 + 57 * Math.cos(a), y2: 75 + 57 * Math.sin(a), stroke: '#333', 'stroke-width': i === 0 ? 2.5 : 1.2 }, svg);
+    const tx = txt(svg, 75 + 42 * Math.cos(a), 75 + 42 * Math.sin(a) + 3.5, String(i), { 'text-anchor': 'middle', 'font-size': 9 }); tx.style.fill = '#333';
+  }
+  const odo = txt(svg, 75, 108, label, { 'text-anchor': 'middle', 'font-size': 11, 'font-family': 'ui-monospace, Menlo, monospace' }); odo.style.fill = '#222';
+  const cap = txt(svg, 75, 60, '× 1 L', { 'text-anchor': 'middle', 'font-size': 8 }); cap.style.fill = '#555';
+  const a = frac * 2 * Math.PI - Math.PI / 2;
+  el('line', { x1: 75 - 10 * Math.cos(a), y1: 75 - 10 * Math.sin(a), x2: 75 + 48 * Math.cos(a), y2: 75 + 48 * Math.sin(a), stroke: '#c0261f', 'stroke-width': 3, 'stroke-linecap': 'round' }, svg);
+  el('circle', { cx: 75, cy: 75, r: 5, fill: '#c0261f' }, svg);
+  // the magnet passes the reed at 12 o'clock: the pulse lamp
+  el('circle', { cx: 128, cy: 22, r: 9, fill: lit ? '#ffb020' : (frozen ? muted : '#5b4a2a'), stroke: lit ? '#ffdd88' : 'rgba(0,0,0,.3)', 'stroke-width': lit ? 4 : 1 }, svg);
+  if (frozen) { const f = txt(svg, 75, 124, 'cable off', { 'text-anchor': 'middle', 'font-size': 10, 'font-weight': 700 }); f.style.fill = meter; }
+}
+
+// ---------- §1 feel the pulses ----------
+const f1 = { frac: 0.2, count: 0, litT: 0, last: performance.now() };
+const lpmOf = v => 0.2 * Math.pow(300, v / 1000);
+function useOf(l) {
+  if (l < METER.q1) return 'Below Q1: a dribble. The meter may not turn at all, or reads low.';
+  if (l < METER.q2) return 'Between Q1 and Q2: counted, to ±5 %.';
+  if (l < 3) return 'A basin or kitchen tap, partly open.';
+  if (l < 9) return 'A shower\'s hot share (a mixer takes about 60–70 % from the cylinder), or a kitchen tap fully open.';
+  if (l < 16) return 'Bath taps fully open on mains pressure.';
+  if (l < METER.q3) return 'More than the house\'s pipework is likely to deliver.';
+  return 'Beyond Q3. At Q4 the meter should run only 1–2 minutes.';
+}
+function zoneOf(l) { return l < METER.q1 ? ['not accurate', 'state-bad'] : l < METER.q2 ? ['±5 %', 'state-warn'] : l <= METER.q4 ? ['±3 % (hot)', 'state-ok'] : ['over Q4', 'state-bad']; }
+function updateFlow1() {
+  const l = lpmOf(+$('#flow1').value);
+  $('#flow1v').textContent = l < 10 ? l.toFixed(2) : l.toFixed(1);
+  $('#flow1use').textContent = useOf(l);
+  const gap = 60 / l, z = zoneOf(l);
+  const idle = Math.min(120, Math.max(30, 4 * gap));
+  const tiles = [
+    ['A pulse every', gap < 100 ? gap.toFixed(1) + ' s' : (gap / 60).toFixed(1) + ' min', 'one per litre'],
+    ['Accuracy', '<span class="' + z[1] + '">' + z[0] + '</span>', 'class 2, hot water'],
+    ['draw_started after', gap > 36 ? 'never' : '≤ ' + (2 * gap).toFixed(0) + ' s', gap > 36 ? 'gaps over 36 s are slower than the vertical Q1' : 'the second pulse; ~' + (1.5 * gap).toFixed(0) + ' s typical'],
+    ['draw_ended declared', gap > 72 ? '–' : idle.toFixed(0) + ' s after', '4 × the gap, kept to 30–120 s'],
+  ];
+  $('#flow1out').innerHTML = tiles.map(([k, v, s]) => '<div class="tile"><div class="k">' + k + '</div><div class="v">' + v + '</div><div class="s">' + s + '</div></div>').join('');
+  drawZones(l);
+}
+function animFlow1(now) {
+  const dt = Math.min(0.2, (now - f1.last) / 1000); f1.last = now;
+  const l = lpmOf(+$('#flow1').value);
+  const eff = l < 0.25 ? 0 : l; // below starting flow the rotor stalls
+  f1.frac += eff / 60 * dt;
+  if (f1.frac >= 1) { f1.frac -= Math.floor(f1.frac); f1.count++; f1.litT = now; }
+  drawDial($('#dial1'), f1.frac, now - f1.litT < 160, String(f1.count).padStart(5, '0'));
+  requestAnimationFrame(animFlow1);
+}
+function drawZones(l) {
+  const svg = $('#zones'); svg.innerHTML = '';
+  const W = svg.clientWidth || 500, H = 92, x0 = 6, x1 = W - 6;
+  const lx = v => x0 + (Math.log10(v) - Math.log10(0.1)) / (Math.log10(100) - Math.log10(0.1)) * (x1 - x0);
+  const surf = css('--surface-2'), grid = css('--grid'), acc = css('--accent'), ink = css('--ink');
+  const bands = [[0.1, METER.q1, 'not accurate', 0.08], [METER.q1, METER.q2, '±5 %', 0.18], [METER.q2, METER.q4, '±3 % (hot)', 0.3], [METER.q4, 100, 'over', 0.08]];
+  for (const [a, b, lab, op] of bands) {
+    const r = el('rect', { x: lx(a), y: 18, width: lx(b) - lx(a) - 2, height: 26, rx: 4, fill: acc, 'fill-opacity': op }, svg);
+    hover(r, '<b>' + lab + '</b><br>' + a.toFixed(2) + '–' + b.toFixed(1) + ' L/min');
+    if (lx(b) - lx(a) > 50) txt(svg, (lx(a) + lx(b)) / 2, 35, lab, { 'text-anchor': 'middle', 'font-size': 11 });
+  }
+  for (const v of [0.1, 0.3, 1, 3, 10, 30, 100]) txt(svg, lx(v), 58, String(v), { 'text-anchor': v === 0.1 ? 'start' : v === 100 ? 'end' : 'middle', 'font-size': 10 });
+  const uses = [[0.5, 'dribble'], [2, 'basin'], [5.5, 'shower'], [12, 'bath']];
+  for (const [v, lab] of uses) { el('line', { x1: lx(v), x2: lx(v), y1: 64, y2: 70, stroke: css('--muted') }, svg); txt(svg, lx(v), 82, lab, { 'text-anchor': 'middle', 'font-size': 10 }); }
+  const m = el('path', { d: `M${lx(l)},8 l-6,-7 h12 z M${lx(l)},8 V44`, fill: ink, stroke: ink, 'stroke-width': 2 }, svg);
+  txt(svg, 0, 12, 'L/min, log scale', { 'font-size': 10, x: x1, 'text-anchor': 'end' });
+}
+
+// ---------- §2 plumbing ----------
+const P2 = { draw: true, share: false };
+function drawPlumb() {
+  const svg = $('#plumb'); svg.innerHTML = '';
+  const hot = css('--hot'), cold = css('--cold'), axis = css('--axis'), ink = css('--ink'), ink2 = css('--ink-2'), muted = css('--muted'), surf = css('--surface-2'), meter = css('--meter'), brass = css('--brass');
+  const pipe = (d, color, w, dash) => el('path', { d, fill: 'none', stroke: color, 'stroke-width': w || 6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-dasharray': dash || '' }, svg);
+  const dots = (d, color, dur, n) => { for (let i = 0; i < n; i++) { const c = el('circle', { r: 3.5, fill: color }, svg); el('animateMotion', { dur: dur + 's', begin: (-dur * i / n) + 's', repeatCount: 'indefinite', path: d }, c); } };
+  const label = (x, y, s, a) => txt(svg, x, y, s, Object.assign({ 'font-size': 12 }, a || {}));
+  // tanks
+  const tanks = [[170, 'hot_water_cylinder_left'], [380, 'hot_water_cylinder_right']];
+  for (const [x, id] of tanks) {
+    const g = el('g', {}, svg);
+    el('rect', { x, y: 120, width: 120, height: 290, rx: 38, fill: surf, stroke: axis, 'stroke-width': 2 }, g);
+    const grad = el('rect', { x: x + 8, y: 128, width: 104, height: 274, rx: 32, fill: 'url(#tg)' }, g);
+    label(x + 60, 432, id.replace('hot_water_cylinder_', '') + ' tank', { 'text-anchor': 'middle', 'font-weight': 600 });
+    hover(g, '<b>' + id + '</b><br>200 L Ariston STI 210. Hot outlet B at 1237 mm, cold inlet G at 281 mm.' + (x > 300 ? ' Secondary return A at 956 mm.' : ''));
+  }
+  const defs = el('defs', {}, svg);
+  const lg = el('linearGradient', { id: 'tg', x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
+  el('stop', { offset: '0%', 'stop-color': hot, 'stop-opacity': 0.55 }, lg);
+  el('stop', { offset: '65%', 'stop-color': hot, 'stop-opacity': 0.25 }, lg);
+  el('stop', { offset: '100%', 'stop-color': cold, 'stop-opacity': 0.45 }, lg);
+  // hot outlets B (top) merging, the left one running up and over
+  const hotL = 'M230,128 V70 H560', hotR = 'M440,128 V70 H560', hotC = 'M560,70 H1040';
+  pipe(hotL, hot); pipe(hotR, hot); pipe(hotC, hot);
+  label(236, 100, 'B', { 'font-weight': 700 }); label(446, 100, 'B', { 'font-weight': 700 });
+  // taps
+  const taps = [[760, 'shower'], [860, 'bath'], [960, 'basin']];
+  for (const [x, n] of taps) { pipe(`M${x},70 V140`, hot, 5); el('rect', { x: x - 16, y: 140, width: 32, height: 10, rx: 3, fill: axis }, svg); label(x, 170, n, { 'text-anchor': 'middle' }); }
+  label(1040, 58, 'to the hot taps →', { 'text-anchor': 'end' });
+  // cold feed: mains → inlet group → expansion vessel tee → both G inlets
+  pipe('M20,452 H560', cold); pipe('M180,452 V378 H170', cold, 5); pipe('M390,452 V378 H380', cold, 5);
+  label(178, 372, 'G', { 'font-weight': 700, 'text-anchor': 'end' }); label(388, 372, 'G', { 'font-weight': 700, 'text-anchor': 'end' });
+  const ig = el('g', {}, svg);
+  el('rect', { x: 26, y: 440, width: 66, height: 24, rx: 6, fill: surf, stroke: axis }, ig);
+  txt(ig, 59, 456, 'inlet group', { 'text-anchor': 'middle', 'font-size': 10 });
+  hover(ig, '<b>Inlet group</b><br>Pressure-reducing valve, the balanced-cold take-off, a check valve and the expansion relief. Usual layout for an unvented cylinder (inferred).');
+  const ev = el('g', {}, svg);
+  el('line', { x1: 145, y1: 452, x2: 145, y2: 418, stroke: cold, 'stroke-width': 4 }, ev);
+  el('ellipse', { cx: 145, cy: 404, rx: 14, ry: 16, fill: surf, stroke: axis }, ev);
+  txt(ev, 145, 380, 'expansion', { 'text-anchor': 'middle', 'font-size': 10 });
+  hover(ev, '<b>Expansion vessel</b><br>On a reheat, about 3 L of expanded water (up to 7 L from cold) goes back here, on the cold side. A meter on the hot outlet never sees it.');
+  label(14, 430, 'cold mains', { 'font-size': 11 });
+  // placement C ghost
+  const cg = el('g', {}, svg);
+  el('circle', { cx: 112, cy: 452, r: 12, fill: 'none', stroke: muted, 'stroke-dasharray': '3 3', 'stroke-width': 1.5 }, cg);
+  txt(cg, 112, 484, 'C: cold-feed fallback', { 'text-anchor': 'middle', 'font-size': 10.5 });
+  hover(cg, '<b>Placement C (fallback)</b><br>Between the inlet group and the expansion-vessel tee. It sees every litre that leaves as hot, with no loop and no expansion water, and the water there is under 30 °C, so ±2 %. Use it if the overnight pulses show the loop sharing the outlet.');
+  // secondary loop (return to the right tank at A)
+  const A = 'M500,205 H1060 V100';
+  if (P2.share) {
+    const loop = 'M640,70 H1060 V205 H500';
+    pipe('M1040,70 H1060 V205 H500', hot, 4, '8 5');
+    label(780, 222, 'secondary return → A (what-if: fed through the meter)', {});
+    dots('M560,70 H1060 V205 H500', hot, 14, 6);
+  } else {
+    pipe('M1060,120 V205 H500', axis, 4, '8 5');
+    const q = el('g', {}, svg);
+    el('circle', { cx: 1060, cy: 108, r: 13, fill: surf, stroke: axis }, q);
+    txt(q, 1060, 113, '?', { 'text-anchor': 'middle', 'font-size': 15, 'font-weight': 700 });
+    hover(q, '<b>Where the loop is fed from is unknown.</b><br>The owner would be very surprised if it draws from the tanks\' hot outlet pipes. washhouse checks: a loop through the meter would tick all night with probe 1 flat.');
+    label(780, 222, 'secondary return → A (fed from elsewhere, expected)', {});
+  }
+  el('circle', { cx: 500, cy: 205, r: 4, fill: ink2 }, svg); label(508, 196, 'A', { 'font-weight': 700 });
+  // the meter
+  const mg = el('g', { tabindex: 0 }, svg);
+  el('rect', { x: 600, y: 56, width: 70, height: 28, rx: 10, fill: meter }, mg);
+  el('circle', { cx: 635, cy: 50, r: 20, fill: brass, stroke: 'rgba(0,0,0,.25)' }, mg);
+  el('circle', { cx: 635, cy: 50, r: 14, fill: '#fbfaf6' }, mg);
+  const needle = el('line', { x1: 635, y1: 50, x2: 635, y2: 39, stroke: '#c0261f', 'stroke-width': 2.5, 'stroke-linecap': 'round' }, mg);
+  if (P2.draw || P2.share) el('animateTransform', { attributeName: 'transform', type: 'rotate', from: '0 635 50', to: '360 635 50', dur: P2.draw ? '1.6s' : '12s', repeatCount: 'indefinite' }, needle);
+  const lamp = el('circle', { cx: 660, cy: 28, r: 5, fill: '#ffb020' }, mg);
+  if (P2.draw || P2.share) el('animate', { attributeName: 'opacity', values: '1;0.1;0.1;0.1', dur: P2.draw ? '1.6s' : '12s', repeatCount: 'indefinite' }, lamp); else lamp.setAttribute('opacity', 0.15);
+  txt(mg, 635, 104, 'WMP20H · 1 pulse/L', { 'text-anchor': 'middle', 'font-size': 11.5, 'font-weight': 650 });
+  hover(mg, '<b>The meter, on the combined hot outlet</b><br>After both B outlets merge, before any tap. Fitted vertically on the pipe above the tanks, just after the manifold. The pulse cable runs to a GPIO on the tanktemp Pi.');
+  // signal cable to the Pi
+  pipe('M652,84 V282', css('--muted'), 1.5, '4 4');
+  const pi = el('g', {}, svg);
+  el('rect', { x: 548, y: 282, width: 210, height: 60, rx: 10, fill: surf, stroke: axis }, pi);
+  txt(pi, 653, 306, 'tanktemp Pi', { 'text-anchor': 'middle', 'font-size': 13, 'font-weight': 650 });
+  txt(pi, 653, 326, '10 × DS18B20 + GPIO 27 (pulses)', { 'text-anchor': 'middle', 'font-size': 11 });
+  hover(pi, '<b>tanktemp</b><br>Counts pulses from kernel GPIO edge events, on their own goroutine (a probe sweep blocks for 4–8 s). Publishes <code>water/hot/tanktemp/meter</code> on each pulse and with each sweep.');
+  const mq = el('g', {}, svg);
+  pipe('M758,312 H830', css('--muted'), 1.5, '4 4');
+  el('rect', { x: 830, y: 296, width: 170, height: 32, rx: 8, fill: surf, stroke: axis }, mq);
+  txt(mq, 915, 317, 'MQTT → washhouse', { 'text-anchor': 'middle', 'font-size': 12 });
+  if (P2.draw) {
+    dots(hotL + ' H760 V140', hot, 5, 5); dots(hotR + ' H760 V140', hot, 4.4, 4);
+    dots('M20,452 H180 V378 H170', cold, 4, 4); dots('M20,452 H390 V378 H380', cold, 5, 5);
+    dots('M652,84 V282', css('--accent'), 1.6, 1);
+  }
+}
+
+// ---------- §3 simulator ----------
+let cursor = hm('07:04') + 40;
+let playing = false, lastFrame = 0;
+const JUMPS = TRUTH.map(d => [d.at + ' ' + d.kind, d.start - 20]);
+function setupJumps() {
+  $('#jumps').innerHTML = '';
+  JUMPS.concat(W.unplug ? [['15:00 cable off', hm('15:00') - 10]] : []).forEach(([lab, t]) => { const b = document.createElement('button'); b.textContent = lab; b.onclick = () => setCursor(t); $('#jumps').appendChild(b); });
+}
+function rowTitle(e) {
+  const d = e.d;
+  switch (e.type) {
+    case 'draw_started': return ['<b>draw_started</b> · metered · ' + r1(60 / d.iv[0]) + ' L/min · started ' + hms(d.started_at), 'statehouse: <code>IngestSignal</code> hot_water_draw, Since ' + hms(d.started_at).slice(0, 8) + ', 30 min TTL; <code>RecordActivity</code>'];
+    case 'draw_ended': return ['<b>draw_ended</b> · <b>' + Math.round(d.volume) + ' L</b> hot (' + Math.round(d.l40) + ' L at 40 °C) · ' + d.kind + (d.masked ? ' · during a reheat' : '') + (d.hb_l40 != null ? ' · heat balance said ' + Math.round(d.hb_l40) : d.masked ? ' · heat balance: none (masked)' : ''), 'statehouse: <code>ClearSignal</code>; <code>UpdateActivity</code> ' + Math.round(d.volume) + ' L, ' + d.kind];
+    case 'meter_suspect': return ['<b>meter_suspect</b> · probes saw a draw (inlet −' + r1(e.th.inlet_drop_c) + ' °C) with no pulses', '/healthz degraded; draws fall back to the heat balance'];
+    case 'meter_ok': return ['<b>meter_ok</b> · a metered draw matched the probes again', ''];
+    case 'circulation_detected': return ['<b>circulation_detected</b> · ' + r2(e.lpm) + ' L/min of slow pulses with no thermal signature', 'The loop shares the outlet after all. Subtracted from draws from now on; revisit the cold-feed placement.'];
+    case 'fallback_ended': return ['<b>draw_ended</b> · heat balance · ' + (e.fb.hb_l40 == null ? 'no volume (masked)' : Math.round(e.fb.hb_l40) + ' L at 40 °C') + ' · confidence ' + e.fb.conf, e.fb.hb_l40 == null || e.fb.conf < 0.7 ? 'statehouse: below the gate, <code>RecordActivity</code> only' : 'statehouse: <code>IngestSignal</code> (thermal confidence)'];
+    default: return ['<span class="muted">boiler-sensor</span> ' + e.type, ''];
+  }
+}
+let logRows = [], lastNowRow = undefined;
+function buildLog() {
+  const log = $('#log'); log.innerHTML = ''; logRows = [];
+  for (const e of M.rows) {
+    if (e.type === 'draw_started' && e.d.started_at < -60) continue;
+    const [a, b] = rowTitle(e);
+    const r = document.createElement('div'); r.className = 'row';
+    r.innerHTML = '<span class="t">' + (e.t < 0 ? 'yesterday ' : '') + hms(e.t) + '</span><div>' + a + (b ? '<div class="sh">' + b + '</div>' : '') + '</div>';
+    r.onclick = () => setCursor(e.t);
+    log.appendChild(r); logRows.push([e.t, r, e]);
+  }
+}
+function latestEvent(t) { let x = null; for (const [tt, , e] of logRows) { if (tt > t) break; if (!/^(HW|CH)_/.test(e.type)) x = e; } return x; }
+
+function drawRaster() {
+  const svg = $('#raster'); svg.innerHTML = '';
+  const W = svg.clientWidth || 400, H = 96, x0 = 4, x1 = W - 4;
+  const a = cursor - 600, b = cursor;
+  const sx = t => x0 + (t - a) / (b - a) * (x1 - x0);
+  const meter = css('--meter'), warn = css('--warning'), muted = css('--muted'), grid = css('--grid'), acc = css('--accent');
+  for (const d of M.det.draws) {
+    if (d.detected_at > cursor || d.ended_at < a) continue;
+    const e = Math.min(cursor, d.declared > cursor ? cursor : d.ended_at);
+    el('rect', { x: sx(Math.max(a, d.started_at)), y: 6, width: Math.max(1, sx(e) - sx(Math.max(a, d.started_at))), height: 54, fill: acc, 'fill-opacity': 0.18, rx: 3 }, svg);
+  }
+  el('line', { x1: x0, x2: x1, y1: 60, y2: 60, stroke: grid }, svg);
+  for (const t of M.pulses.slice(lowerCount(M.pulses, a), lowerCount(M.pulses, b))) el('rect', { x: sx(t) - 1, y: 18, width: 2, height: 42, fill: meter, rx: 1 }, svg);
+  for (const t of M.glitches.slice(lowerCount(M.glitches, a), lowerCount(M.glitches, b))) el('rect', { x: sx(t) - 1, y: 36, width: 2, height: 24, fill: warn, rx: 1 }, svg);
+  for (const t of M.bounced.slice(lowerCount(M.bounced, a), lowerCount(M.bounced, b))) el('rect', { x: sx(t) + 1, y: 48, width: 1.5, height: 12, fill: muted }, svg);
+  for (let m = 0; m <= 10; m += 2) txt(svg, sx(a + m * 60), 78, m === 10 ? 'now' : '−' + (10 - m) + ' min', { 'text-anchor': m === 0 ? 'start' : m === 10 ? 'end' : 'middle', 'font-size': 10.5 });
+  const n = lowerCount(M.pulses, b) - lowerCount(M.pulses, a);
+  txt(svg, x1, 92, n + ' litres counted in the window', { 'text-anchor': 'end', 'font-size': 10.5 });
+}
+
+function updateSim() {
+  $('#clock').textContent = hms(cursor);
+  $('#scrub').value = Math.floor(cursor);
+  const k = lowerCount(M.pulses, cursor);
+  const win = playing ? Math.max(0.35, +$('#speed').value * 0.06) : 0.35;
+  const lit = k > 0 && cursor - M.pulses[k - 1] < win;
+  const frozen = W.unplug && cursor >= hm('15:00');
+  drawDial($('#dial2'), litresAt(cursor) % 1, lit, String(k).padStart(5, '0'), frozen);
+  const d = drawAtT(cursor), st = meterState(cursor), tf = trueFlow(cursor), wf = flowAt(cursor);
+  const today = k - lowerCount(M.pulses, 0);
+  const kv = [
+    ['True hot flow', r1(tf) + ' L/min'],
+    ['washhouse flow', r1(wf) + ' L/min'],
+    ['tanktemp count', k + (M.glitches.length ? ' · ' + lowerCount(M.glitches, cursor) + ' glitches' : '') + (M.bounced.length ? ' · ' + lowerCount(M.bounced, cursor) + ' noise' : '')],
+    ['Active draw', d ? (lowerCount(M.pulses, cursor) - lowerCount(M.pulses, d.pulses[0] - 1e-6)) + ' L so far, from ' + hms(d.started_at).slice(0, 8) : 'none'],
+    ['Meter state', st === 'ok' ? '<span class="state-ok">ok</span>' : '<span class="state-bad">suspect</span>'],
+    ['Loop baseline', circActive(cursor) ? r2(M.det.base.lpm) + ' L/min' : (W.loop ? 'learning…' : 'none seen')],
+  ];
+  $('#simKv').innerHTML = kv.map(([a, b]) => '<dt>' + a + '</dt><dd>' + b + '</dd>').join('');
+  drawRaster();
+  const dk = d || lastDrawBy(cursor);
+  $('#drawKvTitle').innerHTML = d ? 'Draw in progress <span class="muted small">· ' + d.id + '</span>' : dk ? 'Last draw <span class="muted small">· ' + dk.id + '</span>' : 'No draw yet today';
+  if (d) {
+    const sofar = lowerCount(M.pulses, cursor) - lowerCount(M.pulses, d.pulses[0] - 1e-6);
+    $('#drawKv').innerHTML = [['Started (estimated)', hms(d.started_at)], ['Detected', hms(d.detected_at) + ' · ' + Math.round(d.detected_at - d.started_at) + ' s later'], ['Litres so far', sofar + ' L hot'], ['Flow now', r1(flowAt(cursor)) + ' L/min'], ['During a reheat', sweepAt(cursor).hw ? 'yes: the heat balance can\'t size this one' : 'no']].map(([x, y]) => '<dt>' + x + '</dt><dd>' + y + '</dd>').join('');
+  } else if (dk) {
+    $('#drawKv').innerHTML = [['When', hms(dk.started_at) + ' → ' + hms(dk.ended_at)], ['Volume', Math.round(dk.volume) + ' ± ' + r1(dk.unc) + ' L hot'], ['At 40 °C', Math.round(dk.l40) + ' L (heat balance: ' + (dk.hb_l40 == null ? 'none, masked' : Math.round(dk.hb_l40) + ' L') + ')'], ['Flow', r1(dk.mean) + ' L/min mean · outlet ' + r1(dk.tout) + ' °C'], ['Split left / right', dk.share ? Math.round(dk.share[0] * 100) + ' / ' + Math.round(dk.share[1] * 100) + ' % (' + dk.shareSource.replace('_', ' ') + ')' : '–'], ['Kind', dk.kind]].map(([x, y]) => '<dt>' + x + '</dt><dd>' + y + '</dd>').join('');
+  } else $('#drawKv').innerHTML = '';
+  $('#jTank').innerHTML = json(tanktempMsg(cursor));
+  $('#jWash').innerHTML = json(eventMsg(latestEvent(cursor)));
+  let nowSet = false, nowRow = null;
+  for (let i = logRows.length - 1; i >= 0; i--) { const [t, r] = logRows[i]; r.classList.toggle('future', t > cursor); const isNow = !nowSet && t <= cursor; r.classList.toggle('now', isNow); if (isNow) { nowSet = true; nowRow = r; } }
+  if (nowRow !== lastNowRow) { lastNowRow = nowRow; const lg = $('#log'); lg.scrollTop = nowRow ? Math.max(0, nowRow.offsetTop - lg.offsetTop - 60) : 0; }
+  // tiles
+  $('#tFlow').textContent = r1(wf).toFixed(1);
+  $('#tFlowS').textContent = d ? 'L/min · drawing since ' + hms(d.started_at).slice(0, 5) : 'L/min of hot water';
+  $('#tToday').textContent = today + ' L';
+  $('#tTodayS').textContent = 'hot water since midnight' + (circActive(cursor) ? ', incl. loop' : '');
+  const ld = lastDrawBy(cursor);
+  $('#tLast').textContent = ld ? Math.round(ld.volume) + ' L' : '–';
+  $('#tLastS').textContent = ld ? hms(ld.started_at).slice(0, 5) + ' ' + ld.kind + ' · ' + Math.round(ld.l40) + ' L at 40 °C' : 'none yet today';
+  $('#tMeter').innerHTML = st === 'ok' ? '<span class="state-ok">ok</span>' : '<span class="state-bad">suspect</span>';
+  $('#tMeterS').textContent = st === 'ok' ? (frozen ? 'cable off, not noticed yet' : circActive(cursor) ? 'loop baseline ' + r2(M.det.base.lpm) + ' L/min' : 'pulses match the probes') : 'probes saw a draw, no pulses';
+  // wire panes
+  $('#wTank').innerHTML = json(tanktempMsg(cursor));
+  $('#wSys').innerHTML = json(systemMsg(cursor));
+  const wd = lastDrawBy(cursor) || M.det.draws.find(x => x.started_at >= 0);
+  $('#wDraw').innerHTML = wd ? json(drawEndedMsg(wd)) : '';
+  moveChartCursor();
+}
+function setCursor(t) { cursor = Math.max(0, Math.min(86399, t)); updateSim(); }
+$('#scrub').addEventListener('input', e => setCursor(+e.target.value));
+$('#play').onclick = () => { playing = !playing; $('#play').textContent = playing ? '❚❚ Pause' : '▶ Play'; lastFrame = performance.now(); if (playing) requestAnimationFrame(tick); };
+function tick(now) {
+  if (!playing) return;
+  const dt = Math.min(0.1, (now - lastFrame) / 1000); lastFrame = now;
+  cursor += dt * +$('#speed').value;
+  if (cursor >= 86399) { cursor = 86399; playing = false; $('#play').textContent = '▶ Play'; }
+  updateSim();
+  if (playing) requestAnimationFrame(tick);
+}
+
+// ---------- §4 timeline ----------
+let view = [0, 86400], chartScale = null;
+function setupZooms() {
+  const z = $('#zooms'); z.innerHTML = '';
+  const add = (lab, a, b) => { const bt = document.createElement('button'); bt.textContent = lab; bt.setAttribute('aria-pressed', view[0] === a && view[1] === b ? 'true' : 'false'); bt.onclick = () => { view = [a, b]; setupZooms(); drawFlowChart(); }; z.appendChild(bt); };
+  add('Whole day', 0, 86400);
+  TRUTH.forEach(d => add(d.at + ' ' + d.kind, d.start - 240, d.end + 300));
+}
+function drawFlowChart() {
+  const svg = $('#chartFlow'); svg.innerHTML = '';
+  const W = svg.clientWidth || 900, H = 330, ml = 54, mr = 10, mt = 10;
+  const plotB = 190, lanes = { pulse: 206, met: 232, th: 254, hw: 278, ch: 296 };
+  const [a, b] = view;
+  const sx = t => ml + (t - a) / (b - a) * (W - ml - mr);
+  const ymax = 12;
+  const sy = v => plotB - Math.min(v, ymax) / ymax * (plotB - mt);
+  chartScale = { sx, a, b, ml, W, mr };
+  const grid = css('--grid'), axis = css('--axis'), muted = css('--muted'), acc = css('--accent'), meter = css('--meter'), amber = css('--s4'), ink = css('--ink');
+  for (const v of [0, 3, 6, 9, 12]) { el('line', { x1: ml, x2: W - mr, y1: sy(v), y2: sy(v), stroke: v ? grid : axis }, svg); txt(svg, ml - 6, sy(v) + 4, String(v), { 'text-anchor': 'end', 'font-size': 10.5 }); }
+  txt(svg, 4, sy(10.5), 'L/min', { 'font-size': 10.5 });
+  // HW / CH lanes
+  for (const [key, spans, fill, y] of [['HW', SCENARIO.hw, css('--hw'), lanes.hw], ['CH', SCENARIO.ch, css('--ch'), lanes.ch]]) {
+    txt(svg, ml - 6, y + 10, key, { 'text-anchor': 'end', 'font-size': 10 });
+    for (const [s, e] of spans) { const x0 = sx(Math.max(a, hm(s))), x1 = sx(Math.min(b, hm(e))); if (x1 > x0) el('rect', { x: x0, y, width: x1 - x0, height: 13, fill, rx: 2 }, svg); }
+  }
+  // true flow area
+  const step = Math.max(1, (b - a) / 2400);
+  let d = `M${sx(a)},${sy(0)}`;
+  for (let t = a; t <= b; t += step) d += ` L${sx(t).toFixed(1)},${sy(trueFlow(t)).toFixed(1)}`;
+  d += ` L${sx(b)},${sy(0)} Z`;
+  el('path', { d, fill: muted, 'fill-opacity': 0.3, stroke: 'none' }, svg);
+  // washhouse's flow
+  let p = '';
+  for (let t = a; t <= b; t += step) p += (p ? ' L' : 'M') + sx(t).toFixed(1) + ',' + sy(flowAt(t)).toFixed(1);
+  el('path', { d: p, fill: 'none', stroke: acc, 'stroke-width': 2, 'stroke-linejoin': 'round' }, svg);
+  // pulses
+  txt(svg, ml - 6, lanes.pulse + 12, 'pulses', { 'text-anchor': 'end', 'font-size': 10 });
+  const ps = M.pulses.slice(lowerCount(M.pulses, a), lowerCount(M.pulses, b));
+  const pw = (b - a) > 7200 ? 1 : 2;
+  for (const t of ps) el('rect', { x: sx(t) - pw / 2, y: lanes.pulse, width: pw, height: 16, fill: meter }, svg);
+  // draws
+  txt(svg, ml - 6, lanes.met + 11, 'meter', { 'text-anchor': 'end', 'font-size': 10 });
+  txt(svg, ml - 6, lanes.th + 11, 'thermal', { 'text-anchor': 'end', 'font-size': 10 });
+  for (const dr of M.det.draws) {
+    if (dr.ended_at < a || dr.started_at > b) continue;
+    const x0 = sx(Math.max(a, dr.started_at)), x1 = sx(Math.min(b, dr.ended_at));
+    const r = el('rect', { x: x0, y: lanes.met, width: Math.max(3, x1 - x0), height: 15, rx: 3, fill: acc }, svg);
+    hover(r, '<b>Metered draw ' + hms(dr.started_at).slice(0, 8) + '</b><br>' + Math.round(dr.volume) + ' L hot · ' + Math.round(dr.l40) + ' L at 40 °C · ' + dr.kind + '<br>found ' + Math.round(dr.detected_at - dr.started_at) + ' s after it started');
+  }
+  for (const th of THERMAL) {
+    if (th.ended_at < a || th.started_at > b) continue;
+    const x0 = sx(Math.max(a, th.started_at)), x1 = sx(Math.min(b, th.ended_at));
+    const r = el('rect', { x: x0, y: lanes.th, width: Math.max(3, x1 - x0), height: 15, rx: 3, fill: amber, 'fill-opacity': th.masked ? 0.45 : 1 }, svg);
+    hover(r, '<b>Thermal draw ' + fmt(th.started_at) + '</b><br>' + (th.volume_l40 == null ? 'no volume: masked by a reheat' : Math.round(th.volume_l40) + ' L at 40 °C (heat balance)') + '<br>confidence ' + th.confidence);
+  }
+  // x axis
+  const span = b - a, tickS = span > 40000 ? 3 * 3600 : span > 7200 ? 1800 : span > 1200 ? 120 : 60;
+  for (let t = Math.ceil(a / tickS) * tickS; t <= b; t += tickS) { el('line', { x1: sx(t), x2: sx(t), y1: plotB, y2: plotB + 4, stroke: axis }, svg); txt(svg, sx(t), H - 6, span > 7200 ? fmt(t) : hms(t).slice(0, 5), { 'text-anchor': 'middle', 'font-size': 10.5 }); }
+  // cursor + hover layer
+  el('line', { id: 'fcur', x1: 0, x2: 0, y1: mt, y2: lanes.ch + 14, stroke: ink, 'stroke-width': 1.5, 'stroke-dasharray': '3 3' }, svg);
+  const hl = el('line', { x1: 0, x2: 0, y1: mt, y2: plotB, stroke: muted, 'stroke-width': 1, opacity: 0 }, svg);
+  const hit = el('rect', { x: ml, y: 0, width: W - ml - mr, height: plotB + 22, fill: 'transparent' }, svg);
+  hit.addEventListener('mousemove', e => {
+    const r = svg.getBoundingClientRect(), x = e.clientX - r.left;
+    const t = a + (x - ml) / (W - ml - mr) * (b - a);
+    hl.setAttribute('x1', x); hl.setAttribute('x2', x); hl.setAttribute('opacity', 1);
+    const dd = M.det.draws.find(q => q.started_at <= t && q.ended_at >= t);
+    showTip('<b>' + hms(t) + '</b><br>true flow ' + r1(trueFlow(t)) + ' L/min<br>washhouse ' + r1(flowAt(t)) + ' L/min<br>count since midnight ' + (lowerCount(M.pulses, t) - lowerCount(M.pulses, 0)) + (dd ? '<br>in draw: ' + dd.kind + ', ' + Math.round(dd.volume) + ' L' : ''), e.clientX, e.clientY);
+  });
+  hit.addEventListener('mouseleave', () => { hl.setAttribute('opacity', 0); hideTip(); });
+  hit.addEventListener('click', e => { const r = svg.getBoundingClientRect(); setCursor(a + (e.clientX - r.left - ml) / (W - ml - mr) * (b - a)); });
+  moveChartCursor();
+}
+function moveChartCursor() {
+  const c = document.getElementById('fcur'); if (!c || !chartScale) return;
+  const vis = cursor >= chartScale.a && cursor <= chartScale.b;
+  c.setAttribute('opacity', vis ? 1 : 0);
+  const x = chartScale.sx(cursor); c.setAttribute('x1', x); c.setAttribute('x2', x);
+}
+
+// ---------- §5 draws ----------
+function matchRows() {
+  return TRUTH.map(tr => {
+    const md = M.det.draws.find(d => d.started_at <= tr.end + 60 && d.ended_at >= tr.start - 60);
+    const th = THERMAL.find(e => e.started_at <= tr.end + 60 && e.ended_at >= tr.start - 60);
+    const fb = M.det.fallback.find(f => th && f.id === th.id);
+    return { tr, md, th, fb };
+  });
+}
+function drawTable() {
+  const rows = matchRows();
+  const lat = s => s == null ? '–' : Math.max(0, Math.round(s)) + ' s';
+  let h = '<thead><tr><th>Time</th><th>What</th><th class="num">Hot L<br>true</th><th class="num">Hot L<br>metered</th><th class="num">40 °C L<br>true</th><th class="num">40 °C L<br>from meter</th><th class="num">40 °C L<br>heat balance</th><th class="num">Found after<br>meter</th><th class="num">Found after<br>thermal</th><th>Kind</th><th>statehouse</th></tr></thead><tbody>';
+  for (const { tr, md, th, fb } of rows) {
+    const hb = th ? (th.volume_l40 == null ? '<span class="muted">masked</span>' : Math.round(th.volume_l40)) : '<span class="muted">missed</span>';
+    const sh = md ? 'signal, 0.95' : fb ? (fb.hb_l40 == null || fb.conf < 0.7 ? 'activity only' : 'signal, ' + fb.conf) : th ? (th.volume_l40 == null ? 'activity only (no volume)' : th.confidence >= 0.7 ? 'signal, ' + th.confidence : 'activity only') : '–';
+    h += '<tr class="click" data-t="' + (tr.start - 20) + '"><td>' + tr.at + '</td><td>' + tr.label + '</td>' +
+      '<td class="num">' + r1(tr.hot) + '</td><td class="num">' + (md ? Math.round(md.volume) + ' <span class="muted">±' + r1(md.unc) + '</span>' : '<span class="state-bad">none</span>') + '</td>' +
+      '<td class="num">' + r1(tr.l40) + '</td><td class="num">' + (md ? Math.round(md.l40) : '–') + '</td><td class="num">' + hb + '</td>' +
+      '<td class="num">' + (md ? lat(md.detected_at - tr.start) : '–') + '</td><td class="num">' + (th && THSTART[th.draw] != null ? lat(THSTART[th.draw] - tr.start) : '–') + '</td>' +
+      '<td>' + (md ? md.kind : th ? th.kind : '–') + (md && md.kind !== tr.kind ? ' <span class="muted">(was ' + tr.kind + ')</span>' : '') + '</td><td class="small">' + sh + '</td></tr>';
+  }
+  $('#drawTable').innerHTML = h + '</tbody>';
+  document.querySelectorAll('#drawTable tr.click').forEach(r => r.onclick = () => { setCursor(+r.dataset.t); document.getElementById('sim').scrollIntoView({ behavior: 'smooth' }); });
+}
+function drawErr() {
+  const svg = $('#errChart'); svg.innerHTML = '';
+  const rows = matchRows();
+  const W = svg.clientWidth || 800, H = 260, ml = 44, mr = 10, mt = 14, mb = 42;
+  const vals = []; rows.forEach(({ tr, md, th }) => { if (md) vals.push(md.l40 - tr.l40); if (th && th.volume_l40 != null) vals.push(th.volume_l40 - tr.l40); });
+  const lim = Math.max(10, Math.ceil(Math.max.apply(null, vals.map(Math.abs).concat([1])) / 5) * 5);
+  const sy = v => mt + (lim - v) / (2 * lim) * (H - mt - mb);
+  const bw = (W - ml - mr) / rows.length;
+  const grid = css('--grid'), axis = css('--axis'), acc = css('--accent'), amber = css('--s4'), muted = css('--muted'), surf = css('--surface');
+  for (let v = -lim; v <= lim; v += lim / 2) { el('line', { x1: ml, x2: W - mr, y1: sy(v), y2: sy(v), stroke: v === 0 ? axis : grid, 'stroke-width': v === 0 ? 1.5 : 1 }, svg); txt(svg, ml - 6, sy(v) + 4, (v > 0 ? '+' : '') + v, { 'text-anchor': 'end', 'font-size': 10.5 }); }
+  txt(svg, 4, 10, 'L error', { 'font-size': 10.5 });
+  rows.forEach(({ tr, md, th }, i) => {
+    const cx = ml + bw * (i + 0.5);
+    txt(svg, cx, H - mb + 16, tr.at, { 'text-anchor': 'middle', 'font-size': 10.5 });
+    txt(svg, cx, H - mb + 30, tr.kind, { 'text-anchor': 'middle', 'font-size': 10 });
+    if (md) { const v = md.l40 - tr.l40; const c = el('circle', { cx: cx - 7, cy: sy(v), r: 6, fill: acc, stroke: surf, 'stroke-width': 2 }, svg); hover(c, '<b>' + tr.at + ' meter</b><br>' + Math.round(md.l40) + ' L vs true ' + r1(tr.l40) + ' (' + (v >= 0 ? '+' : '') + r1(v) + ' L)'); }
+    if (th && th.volume_l40 != null) { const v = th.volume_l40 - tr.l40; const c = el('circle', { cx: cx + 7, cy: sy(Math.max(-lim, Math.min(lim, v))), r: 6, fill: amber, stroke: surf, 'stroke-width': 2 }, svg); hover(c, '<b>' + tr.at + ' heat balance</b><br>' + Math.round(th.volume_l40) + ' L vs true ' + r1(tr.l40) + ' (' + (v >= 0 ? '+' : '') + r1(v) + ' L)'); }
+    else { const g = el('g', {}, svg); txt(g, cx + 7, sy(0) + 4, '✕', { 'text-anchor': 'middle', 'font-size': 13, 'font-weight': 700 }).style.fill = amber; hover(g, '<b>' + tr.at + ' heat balance</b><br>' + (th ? 'no volume: masked by a reheat' : 'not detected')); }
+  });
+}
+
+// ---------- §6 calibration ----------
+function drawCal() {
+  const svg = $('#scatter'); svg.innerHTML = '';
+  const pts = M.det.draws.filter(d => d.started_at >= 0 && !d.masked && d.hb_l40 != null).map(d => ({ x: d.l40, y: d.hb_l40, d }));
+  const W = svg.clientWidth || 500, H = 320, ml = 44, mr = 14, mt = 12, mb = 36;
+  const max = Math.max(20, Math.ceil(Math.max.apply(null, pts.map(p => Math.max(p.x, p.y)).concat([10])) / 20) * 20);
+  const sx = v => ml + v / max * (W - ml - mr), sy = v => H - mb - v / max * (H - mt - mb);
+  const grid = css('--grid'), axis = css('--axis'), acc = css('--accent'), amber = css('--s4'), muted = css('--muted'), surf = css('--surface');
+  for (let v = 0; v <= max; v += max / 4) { el('line', { x1: sx(0), x2: sx(max), y1: sy(v), y2: sy(v), stroke: grid }, svg); txt(svg, ml - 6, sy(v) + 4, String(v), { 'text-anchor': 'end', 'font-size': 10.5 }); txt(svg, sx(v), H - mb + 16, String(v), { 'text-anchor': 'middle', 'font-size': 10.5 }); }
+  el('path', { d: `M${sx(0)},${sy(0)} L${sx(max)},${sy(max * 1.2)} L${sx(max)},${sy(max * 0.8)} Z`, fill: acc, 'fill-opacity': 0.08 }, svg);
+  el('line', { x1: sx(0), y1: sy(0), x2: sx(max), y2: sy(max), stroke: axis, 'stroke-dasharray': '5 4', 'stroke-width': 1.5 }, svg);
+  txt(svg, sx(max) - 4, sy(max) + 14, 'equal', { 'text-anchor': 'end', 'font-size': 10.5 });
+  txt(svg, sx(max) - 4, sy(max * 0.8) + 14, '±20 %', { 'text-anchor': 'end', 'font-size': 10.5 });
+  txt(svg, sx(max / 2), H - 4, 'meter (litres at 40 °C)', { 'text-anchor': 'middle', 'font-size': 11 });
+  const yl = txt(svg, 12, sy(max / 2), 'heat balance', { 'text-anchor': 'middle', 'font-size': 11, transform: `rotate(-90 12 ${sy(max / 2)})` });
+  for (const p of pts) {
+    const c = el('circle', { cx: sx(p.x), cy: sy(p.y), r: 7, fill: amber, stroke: surf, 'stroke-width': 2 }, svg);
+    if (p.x >= 20) txt(svg, sx(p.x) + 10, sy(p.y) + 4, hms(p.d.started_at).slice(0, 5), { 'font-size': 10.5 });
+    hover(c, '<b>' + hms(p.d.started_at).slice(0, 5) + ' ' + p.d.kind + '</b><br>meter ' + Math.round(p.x) + ' L · heat balance ' + Math.round(p.y) + ' L<br>ratio ' + r2(p.y / p.x));
+  }
+  const rs = pts.map(p => p.y / p.x).sort((x, y) => x - y);
+  const big = pts.filter(p => p.x >= 20).map(p => p.y / p.x);
+  const masked = M.det.draws.filter(d => d.started_at >= 0 && d.masked).length;
+  const tiles = [
+    ['Clean draws today', String(pts.length), 'not masked by a reheat'],
+    ['Median heat balance ÷ meter', rs.length ? r2(MT.median(rs)).toFixed(2) : '–', 'running value on /api/v1/model'],
+    ['Range', rs.length ? r2(rs[0]).toFixed(2) + '–' + r2(rs[rs.length - 1]).toFixed(2) : '–', 'small draws read high; big ones vary'],
+    ['Reheat-masked draws now sized', String(masked), 'the heat balance gave these no volume'],
+  ];
+  $('#calOut').innerHTML = tiles.map(([k, v, s]) => '<div class="tile"><div class="k">' + k + '</div><div class="v">' + v + '</div><div class="s">' + s + '</div></div>').join('');
+}
+
+// ---------- wiring ----------
+function press(id, on) { $(id).setAttribute('aria-pressed', on ? 'true' : 'false'); }
+$('#pDraw').onclick = () => { P2.draw = !P2.draw; press('#pDraw', P2.draw); drawPlumb(); };
+$('#pLoopSep').onclick = () => { P2.share = false; press('#pLoopSep', true); press('#pLoopShare', false); drawPlumb(); };
+$('#pLoopShare').onclick = () => { P2.share = true; press('#pLoopSep', false); press('#pLoopShare', true); drawPlumb(); };
+function toggleW(key, id) { W[key] = !W[key]; press(id, W[key]); runMeter(); setupJumps(); buildLog(); drawFlowChart(); drawTable(); drawErr(); drawCal(); updateSim(); }
+$('#wLoop').onclick = () => toggleW('loop', '#wLoop');
+$('#wUnplug').onclick = () => toggleW('unplug', '#wUnplug');
+$('#wSpikes').onclick = () => toggleW('spikes', '#wSpikes');
+$('#wNoDebounce').onclick = () => toggleW('nodebounce', '#wNoDebounce');
+$('#flow1').addEventListener('input', updateFlow1);
+
+function redrawAll() { updateFlow1(); drawPlumb(); drawFlowChart(); drawErr(); drawCal(); updateSim(); }
+let rt = null; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(redrawAll, 150); });
+
+(function fromHash() { // #t=07:06:30&w=loop,unplug,nodebounce (for sharing a moment; spikes are on by default, -spikes turns them off)
+  const q = new URLSearchParams(location.hash.slice(1));
+  const t = q.get('t'); if (t) { const [hh, mm, ss] = t.split(':').map(Number); cursor = hh * 3600 + mm * 60 + (ss || 0); }
+  const ids = { loop: '#wLoop', unplug: '#wUnplug', spikes: '#wSpikes', nodebounce: '#wNoDebounce' };
+  (q.get('w') || '').split(',').forEach(k => { const off = k[0] === '-'; k = k.replace(/^-/, ''); if (k in W) { W[k] = !off; press(ids[k], !off); } });
+})();
+runMeter(); setupJumps(); setupZooms(); buildLog(); drawTable();
+redrawAll();
+requestAnimationFrame(animFlow1);
+window.__WM = { M, SIM, ENG, TRUTH, setCursor };
+})();
+</script>
+<!-- ============ REAL NIGHT: the raw recording (tanktemp rig, 19-20 Nov 2026) and its replay ============ -->
+<script type="text/plain" id="realEdges">
+# GPIO27 (pin 13) reed edges, raw (no debounce), bias pull-up, gpiomon v2.2.1, event clock realtime
+# columns: epoch_seconds.ns edge (1 = rising = reed opens, 2 = falling = reed closes); about 1 L per pulse
+1795109388.445949032 2
+1795109388.898318668 1
+1795109390.277914691 2
+1795109390.729758520 1
+1795109392.099689467 2
+1795109392.548555610 1
+1795109393.914397220 2
+1795109394.366816324 1
+1795109395.747503631 2
+1795109396.203129698 1
+1795109397.594635912 2
+1795109398.050479099 1
+1795109399.433967169 2
+1795109399.896870161 1
+1795109400.287977768 1
+1795109401.287076323 2
+1795109401.745991667 1
+1795109403.137512167 2
+1795109403.597284621 1
+1795109404.989178524 2
+1795109405.444477340 1
+1795109406.836678647 2
+1795109407.292211566 1
+1795109408.680325489 2
+1795109409.141702247 1
+1795109410.533126428 2
+1795109410.991900442 1
+1795109412.381088127 2
+1795109412.838539345 1
+1795109414.226740462 2
+1795109414.683506852 1
+1795109416.065800611 2
+1795109416.517563373 1
+1795109417.906225218 2
+1795109418.361181939 1
+1795109419.749249196 2
+1795109420.206737914 1
+1795109421.591889679 2
+1795109422.044036754 1
+1795109423.433757675 2
+1795109423.888367761 1
+1795109425.275654150 2
+1795109425.731864288 1
+1795109427.121191924 2
+1795109427.576708219 1
+1795109428.961716386 2
+1795109429.417165791 1
+1795109430.806993099 2
+1795109431.264669513 1
+1795109432.666689616 2
+1795109433.122782192 1
+1795109434.521560791 2
+1795109434.977683481 1
+1795109436.373400530 2
+1795109436.828653374 1
+1795109438.222692829 2
+1795109438.683852528 1
+1795109440.078745255 2
+1795109440.539403090 1
+1795109441.930043325 2
+1795109442.387920373 1
+1795109443.775166074 2
+1795109444.231415292 1
+1795109445.622252152 2
+1795109446.079356418 1
+1795109447.475167364 2
+1795109447.932580722 1
+1795109449.332040798 2
+1795109449.859234282 1
+1795109451.719410103 2
+1795109452.991501160 1
+1795110601.863944934 2
+1795110602.420413075 1
+1795110603.581320413 2
+1795110603.923984721 1
+1795110604.978410121 2
+1795110605.337769096 1
+1795110606.462035113 2
+1795110606.821709077 1
+1795110607.928101427 2
+1795110608.288302375 1
+1795110609.382414946 2
+1795110609.738713965 1
+1795110610.836253452 2
+1795110611.200635307 1
+1795110612.316927409 2
+1795110612.677235338 1
+1795110613.795594382 2
+1795110614.157061284 1
+1795110615.289267038 2
+1795110615.655395841 1
+1795110616.787576578 2
+1795110617.153555379 1
+1795110618.304591726 2
+1795110618.677729380 1
+1795110619.843359422 2
+1795110620.226769867 1
+1795110621.406426614 2
+1795110621.795777936 1
+1795110622.984448487 2
+1795110623.373361810 1
+1795110624.579687992 2
+1795110624.977086144 1
+1795110626.239534197 2
+1795110626.676785552 1
+1795110628.004318297 2
+1795110628.437809718 1
+1795110629.782915091 2
+1795110630.225965317 1
+1795110631.611555863 2
+1795110632.058669001 1
+1795110633.433752730 2
+1795110633.879108894 1
+1795110635.280765071 2
+1795110635.841414937 1
+1795110638.309691883 2
+1795110640.943858469 1
+1795111076.035107055 2
+1795111079.085773160 1
+1795111088.397614902 2
+1795111091.456257988 1
+1795111101.032108866 2
+1795111104.104405889 1
+1795111113.722213461 2
+1795111116.838619190 1
+1795111126.548912077 2
+1795111129.672040806 1
+1795111139.553135351 2
+1795111142.722925750 1
+1795111152.607039327 2
+1795111155.752606001 1
+1795111165.589762137 2
+1795111192.578881138 1
+1795111202.548454314 2
+1795111205.680135796 1
+1795111409.640072199 2
+1795112100.272521109 2
+1795112100.272594108 2
+1795112100.272606108 2
+1795112100.272688106 2
+1795112100.272720105 2
+1795112100.272768105 2
+1795112101.054920814 2
+1795112101.070167535 2
+1795120326.607191151 2
+1795127396.271346172 1
+1795127407.880682902 2
+1795127411.855654710 1
+1795127424.462146732 2
+1795129364.673474145 1
+1795156200.498070709 1
+1795156493.704310418 1
+1795160272.567806795 2
+1795160275.948169261 1
+1795160286.640841410 2
+1795160290.219822389 1
+1795160532.577613857 2
+1795160535.339491643 1
+1795160544.447846772 2
+1795160547.936542555 1
+1795160922.197262559 1
+1795161038.031074323 1
+1795161277.499120524 1
+1795164627.716328151 2
+1795164629.095815912 1
+1795164633.252031971 2
+1795164634.662638341 1
+1795164639.038778643 2
+1795164640.471623732 1
+1795164644.957931649 2
+1795164646.599774123 1
+1795164651.510596723 2
+1795164653.113769677 1
+1795164658.074698641 2
+1795164659.705008252 1
+1795164664.673972105 2
+1795164666.278897031 1
+1795164671.187010635 2
+1795164672.768042857 1
+1795164677.596156453 2
+1795164679.161613866 1
+1795164684.600121814 2
+1795164686.605270722 1
+1795164693.000779681 2
+1795164695.162935619 1
+1795164701.969016422 2
+1795164704.238185015 1
+1795164711.277113885 2
+1795164713.588437944 1
+1795164720.757991161 2
+1795164723.125974504 1
+1795164730.366059819 2
+1795164732.737700110 1
+1795164740.005691056 2
+1795164742.389047195 1
+1795164749.607734741 2
+1795164751.926969677 1
+1795164760.482915444 2
+1795164763.243658839 1
+1795164771.624194782 2
+1795164774.345087669 1
+1795164782.349524305 2
+1795164784.878967586 1
+1795164792.590925869 2
+1795164795.187147307 1
+1795164802.861200047 2
+1795164805.393730277 1
+1795164812.368555773 2
+1795164814.464576474 1
+1795164821.031527074 2
+1795164823.171163224 1
+1795164829.765650465 2
+1795164831.933980251 1
+1795164838.571457940 2
+1795164840.713566051 1
+1795164847.286180541 2
+1795164849.436099550 1
+1795164856.027746790 2
+1795164858.195829567 1
+1795164864.821253370 2
+1795164866.969807388 1
+1795164873.636708659 2
+1795164875.802650455 1
+1795164882.425554266 2
+1795164884.582961166 1
+1795164891.207135950 2
+1795164893.354281974 1
+1795164899.968728869 2
+1795164902.107015001 1
+1795164908.718263925 2
+1795164910.876468804 1
+1795164917.489474695 2
+1795164919.659730419 1
+1795164926.292741048 2
+1795164928.475848606 1
+1795164935.167052493 2
+1795164937.328835316 1
+1795164944.006627361 2
+1795164946.183522991 1
+1795164952.855291101 2
+1795164955.006387052 1
+1795164961.666693296 2
+1795164963.839213974 1
+1795164970.461111692 2
+1795164972.617145574 1
+1795164979.259969018 2
+1795164981.415796900 1
+1795164988.070568185 2
+1795164990.227033056 1
+1795164996.826060032 2
+1795164998.990553799 1
+1795165005.627436290 2
+1795165007.801853929 1
+1795165014.443352353 2
+1795165016.588272360 1
+1795165023.237617677 2
+1795165025.405277395 1
+1795165032.039370894 2
+1795165034.192268795 1
+1795165040.796312665 2
+1795165042.935518735 1
+1795165049.521589823 2
+1795165051.654345972 1
+1795165058.273863630 2
+1795165060.416479652 1
+1795165067.042255223 2
+1795165069.203225012 1
+1795165075.818346709 2
+1795165077.982057460 1
+1795165084.651217469 2
+1795165086.826019079 1
+1795165093.559159274 2
+1795165095.758350573 1
+1795165102.455272217 2
+1795165104.622469917 1
+1795165723.058584462 2
+1795165725.792432898 1
+</script>
+<script>
+(function () {
+'use strict';
+// ---------- the recording ----------
+const RAW = document.getElementById('realEdges').textContent;
+const EV = RAW.split('\n').filter(l => l.trim() && l[0] !== '#').map(l => { const [a, b] = l.trim().split(/\s+/); return { t: +a, lab: +b, raw: a }; });
+const day = Date.UTC(2026, 10, 19) / 1000; // 2026-11-19 00:00Z; times below are seconds after it
+EV.forEach(e => { e.s = e.t - day; });
+const hm = s => { const [h, m, x] = s.split(':').map(Number); return h * 3600 + m * 60 + (x || 0); };
+const nx = s => hm(s) + 86400; // a time on 20 Nov
+const BOILER = [['CH_ON', hm('17:30:00')], ['HW_OFF', hm('18:15:00')], ['CH_OFF', hm('20:30:02')], ['HW_ON', nx('06:15:01')], ['CH_ON', nx('06:30:00')], ['CH_OFF', nx('07:15:01')], ['HW_OFF', nx('07:15:01')]];
+const START = EV[0].s - 30, END = EV[EV.length - 1].s + 60;
+const HW = [[START, hm('18:15:00')], [nx('06:15:01'), nx('07:15:01')]], CH = [[hm('17:30:00'), hm('20:30:02')], [nx('06:30:00'), nx('07:15:01')]];
+const DB = 0.020, MIN = 0.6, DUTY = 0.23;
+
+// ---------- three counters ----------
+// planned: both edges, 20 ms debounce (a level must hold), a state machine, then the 600 ms backstop.
+const truth = (() => {
+  let level = 1; // the counter reads the line when it requests it: open at 17:29:48 for this recording
+  const closes = [], opens = [], noise = [];
+  for (let i = 0; i < EV.length;) {
+    let j = i; while (j + 1 < EV.length && EV[j + 1].s - EV[j].s < DB) j++;
+    const fin = EV[j].lab;
+    if (fin !== level) { (fin === 2 ? closes : opens).push(EV[i].s); level = fin; }
+    else for (let k = i; k <= j; k++) noise.push(EV[k]);
+    i = j + 1;
+  }
+  return { closes, opens, noise };
+})();
+const backstop = ts => { const out = []; let last = -1e12; for (const t of ts) if (t - last >= MIN) { out.push(t); last = t; } return out; };
+const COUNTERS = [
+  { key: 'planned', label: 'Both edges, 20 ms debounce, state changes (planned)', pulses: backstop(truth.closes),
+    note: 'The planned counter. Every spike is rejected, because none holds its level for 20 ms, and every litre is a real open-to-closed change.' },
+  { key: 'falling', label: 'Falling edges + 600 ms, no debounce', pulses: backstop(truth.closes.concat(truth.noise.map(e => e.s)).sort((a, b) => a - b)),
+    note: 'Falling edges only, with the 600 ms backstop but no debounce. Every spike has a falling flank, whichever state the reed is in. The backstop absorbs most of the HW-off burst, but not the two edges 0.8 s later. Those make a 2 L phantom “draw” at 18:15, and every lone spike adds a litre.' },
+  { key: 'labels', label: 'Every “closes” line in the log', pulses: EV.filter(e => e.lab === 2).map(e => e.s),
+    note: 'Trusting the edge labels with no filtering at all. Spikes during a closed rest are labelled “closes” and each one counts.' },
+];
+const isReal = t => truth.closes.some(c => Math.abs(c - t) < 1e-3);
+const closedFor = t => { const o = truth.opens.find(x => x > t); return o == null ? null : o - t; };
+
+function draws(P) {
+  const med = a => { const s = a.slice().sort((x, y) => x - y); return s[s.length >> 1]; };
+  const ds = []; let cur = null, prev = null, prevIn = false;
+  for (const t of P) {
+    if (cur && t - cur.p[cur.p.length - 1] > Math.min(120, Math.max(30, 4 * med(cur.iv)))) { ds.push(cur); cur = null; prevIn = true; }
+    const iv = prev == null ? null : t - prev;
+    if (cur) { cur.p.push(t); cur.iv.push(iv); }
+    else if (iv != null && iv < 36 && !prevIn) cur = { p: [prev, t], iv: [iv] };
+    if (!cur) prevIn = false;
+    prev = t;
+  }
+  if (cur) ds.push(cur);
+  return ds.map(d => {
+    const m = med(d.iv), n = d.p.length, span = (d.p[n - 1] - d.p[0]) / 60;
+    const cl = d.p.map(closedFor).filter(x => x != null && x < 20);
+    const cm = cl.length ? med(cl) : null;
+    const mean = span > 0 ? (n - 1) / span : null;
+    const dur = d.p[n - 1] - d.p[0] + m;
+    const phantom = d.p.filter(t => !isReal(t)).length;
+    const kind = (mean != null && mean >= 20) || n >= 80 ? 'bath' : n < 15 ? 'tap' : dur >= 180 ? 'shower' : 'tap';
+    const fo = truth.opens.find(x => x > d.p[0]);
+    return { a: d.p[0] - m / 2, b: d.p[n - 1] + m / 2, n, med: m, mean, closedFlow: cm ? 60 * DUTY / cm : null, kind, phantom,
+      knownClosed: isReal(d.p[0]) && fo != null && fo - d.p[0] < 20 ? fo - d.p[0] : null, knownGap: d.p[1] - d.p[0] };
+  });
+}
+COUNTERS.forEach(c => { c.draws = draws(c.pulses); c.phantoms = c.pulses.filter(t => !isReal(t)); });
+
+// ---------- helpers ----------
+const $ = s => document.querySelector(s);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const NS = 'http://www.w3.org/2000/svg';
+const el = (tag, at, p) => { const e = document.createElementNS(NS, tag); for (const k in at) e.setAttribute(k, at[k]); if (p) p.appendChild(e); return e; };
+const txt = (p, x, y, s, at) => { const t = el('text', Object.assign({ x, y }, at || {}), p); t.textContent = s; return t; };
+const pad = n => String(Math.floor(n)).padStart(2, '0');
+const clock = (s, prec) => { const d = ((s % 86400) + 86400) % 86400; let o = pad(d / 3600) + ':' + pad((d % 3600) / 60); if (prec >= 1) o += ':' + pad(d % 60); if (prec >= 2) o += '.' + String(Math.floor((d % 1) * 1000)).padStart(3, '0'); if (prec >= 3) o += String(Math.floor((d % 1) * 1e6) % 1000).padStart(3, '0'); return o; };
+const tip = $('#tip');
+const showTip = (h, x, y) => { tip.innerHTML = h; tip.style.display = 'block'; const w = tip.offsetWidth, hh = tip.offsetHeight; tip.style.left = Math.max(8, Math.min(innerWidth - w - 8, x + 14)) + 'px'; tip.style.top = Math.max(8, Math.min(innerHeight - hh - 8, y + 14)) + 'px'; };
+const hover = (n, h) => { n.addEventListener('mousemove', e => showTip(typeof h === 'function' ? h() : h, e.clientX, e.clientY)); n.addEventListener('mouseleave', () => { tip.style.display = 'none'; }); };
+const nearestBoiler = t => { let best = null; for (const [ev, bt] of BOILER) if (bt <= t + 1 && (!best || bt > best[1])) best = [ev, bt]; return best; };
+const r1 = x => Math.round(x * 10) / 10;
+
+// ---------- state ----------
+let counter = COUNTERS[0];
+const ZOOMS = [['Whole night', START, END], ['17:29 bath', hm('17:29:30'), hm('17:31:15')], ['17:50 bath top-up', hm('17:49:45'), hm('17:51:00')],
+  ['17:57 slow tap + 18:03', hm('17:57:20'), hm('18:04:30')], ['18:15 HW off: spikes', hm('18:14:59.5'), hm('18:15:01.5')],
+  ['07:30–08:00 sinks + spikes', nx('07:35:00'), nx('07:56:00')], ['08:50 shower', nx('08:49:50'), nx('08:59:00')]];
+let view = [START, END];
+
+function setup() {
+  const c = $('#realCounters'); c.querySelectorAll('button').forEach(b => b.remove());
+  COUNTERS.forEach(k => { const b = document.createElement('button'); b.textContent = k.label; b.setAttribute('aria-pressed', k === counter ? 'true' : 'false'); b.onclick = () => { counter = k; setup(); draw(); }; c.appendChild(b); });
+  const z = $('#realZooms'); z.innerHTML = '';
+  ZOOMS.forEach(([l, a, b]) => { const bt = document.createElement('button'); bt.textContent = l; bt.setAttribute('aria-pressed', view[0] === a && view[1] === b ? 'true' : 'false'); bt.onclick = () => { view = [a, b]; setup(); drawChart(); }; z.appendChild(bt); });
+}
+
+function draw() { drawTiles(); drawChart(); drawTable(); }
+
+function drawTiles() {
+  const c = counter, pd = c.draws.filter(d => d.phantom === d.n).length;
+  const tiles = [
+    ['Litres counted', String(c.pulses.length), 'from 277 raw edges'],
+    ['Phantom litres', String(c.phantoms.length), c.phantoms.length ? 'noise counted as water' : 'none'],
+    ['Noise spikes', String(truth.noise.length), c.key === 'planned' ? 'all rejected by the debounce' : 'reaching the counter'],
+    ['Draws found', String(c.draws.length), pd ? pd + ' of them made of noise' : 'all real water'],
+  ];
+  $('#realTiles').innerHTML = tiles.map(([k, v, s], i) => '<div class="tile"><div class="k">' + k + '</div><div class="v' + (i === 1 && c.phantoms.length ? ' state-bad' : '') + '">' + v + '</div><div class="s">' + s + '</div></div>').join('');
+  $('#realNote').textContent = c.note;
+}
+
+function drawChart() {
+  const svg = $('#realChart'); svg.innerHTML = '';
+  const W = svg.clientWidth || 900, ml = 54, mr = 10;
+  const [a, b] = view, span = b - a;
+  const sx = t => ml + (t - a) / span * (W - ml - mr);
+  const inV = t => t >= a && t <= b;
+  const L = { hw: [6, 12], ch: [20, 12], reed: [42, 14], lit: [64, 52], noise: [124, 20], draw: [152, 22], axis: 196 };
+  const grid = css('--grid'), muted = css('--muted'), meter = css('--meter'), crit = css('--critical'), warn = css('--warning'), acc = css('--accent'), surf = css('--surface');
+  // lane labels
+  [['HW', L.hw], ['CH', L.ch], ['reed', L.reed], ['litres', L.lit], ['noise', L.noise], ['draws', L.draw]].forEach(([s, [y, h]]) => txt(svg, ml - 6, y + h / 2 + 4, s, { 'text-anchor': 'end', 'font-size': 10.5 }));
+  // boiler programme
+  for (const [spans, fill, [y, h]] of [[HW, css('--hw'), L.hw], [CH, css('--ch'), L.ch]]) {
+    el('rect', { x: ml, y, width: W - ml - mr, height: h, fill: grid, 'fill-opacity': 0.35, rx: 3 }, svg);
+    for (const [s0, s1] of spans) { const x0 = sx(Math.max(a, s0)), x1 = sx(Math.min(b, s1)); if (x1 > x0) el('rect', { x: x0, y, width: x1 - x0, height: h, fill, rx: 3 }, svg); }
+  }
+  for (const [ev, t] of BOILER) if (inV(t)) { const x = sx(t); el('line', { x1: x, x2: x, y1: 4, y2: L.draw[0] + L.draw[1], stroke: muted, 'stroke-dasharray': '2 3', 'stroke-width': 1 }, svg); }
+  // reed closed spans
+  el('line', { x1: ml, x2: W - mr, y1: L.reed[0] + L.reed[1], y2: L.reed[0] + L.reed[1], stroke: grid }, svg);
+  truth.closes.forEach(c0 => {
+    const o = truth.opens.find(x => x > c0); const c1 = o == null ? END : o;
+    if (c1 < a || c0 > b) return;
+    const x0 = sx(Math.max(a, c0)), x1 = sx(Math.min(b, c1));
+    const r = el('rect', { x: x0, y: L.reed[0], width: Math.max(1, x1 - x0), height: L.reed[1], fill: muted, 'fill-opacity': 0.45, rx: 2 }, svg);
+    hover(r, '<b>Reed closed</b> ' + clock(c0, 2) + ' → ' + (o == null ? 'end of recording' : clock(c1, 2)) + '<br>for ' + (c1 - c0 < 60 ? r1(c1 - c0) + ' s' : r1((c1 - c0) / 3600) + ' h'));
+  });
+  // draws
+  for (const d of counter.draws) {
+    if (d.b < a || d.a > b) continue;
+    const x0 = sx(Math.max(a, d.a)), x1 = sx(Math.min(b, d.b)), ph = d.phantom === d.n;
+    const r = el('rect', { x: x0, y: L.draw[0], width: Math.max(3, x1 - x0), height: L.draw[1], fill: ph ? crit : acc, 'fill-opacity': 0.5, rx: 3 }, svg);
+    if (x1 - x0 > 26 || span < 4000) txt(svg, Math.max(x0, ml) + 3, L.draw[0] + 15, d.n + ' L', { 'font-size': 10.5, fill: css('--ink') });
+    hover(r, '<b>' + (ph ? 'Phantom draw' : d.kind) + '</b> ' + clock(d.a, 1) + '–' + clock(d.b, 1) + '<br>' + d.n + ' L' + (d.mean ? ' · ' + r1(d.mean) + ' L/min' : ''));
+  }
+  // litres
+  el('line', { x1: ml, x2: W - mr, y1: L.lit[0] + L.lit[1], y2: L.lit[0] + L.lit[1], stroke: grid }, svg);
+  const tickW = span < 60 ? 3 : 2;
+  counter.pulses.forEach((t, i) => {
+    if (!inV(t)) return;
+    const real = isReal(t), x = sx(t), prev = i ? counter.pulses[i - 1] : null, cf = real ? closedFor(t) : null;
+    el('rect', { x: x - tickW / 2, y: L.lit[0] + 10, width: tickW, height: L.lit[1] - 10, fill: real ? meter : crit, rx: 1 }, svg);
+    if (!real) txt(svg, x, L.lit[0] + 7, '✕', { 'text-anchor': 'middle', 'font-size': 11, 'font-weight': 700, fill: crit });
+    const hit = el('rect', { x: x - 4, y: L.lit[0], width: 8, height: L.lit[1], fill: 'transparent' }, svg);
+    hover(hit, () => '<b>' + (real ? 'Litre' : 'Phantom litre') + '</b> ' + clock(t, 2) + (prev != null ? '<br>gap ' + (t - prev < 600 ? r1(t - prev) + ' s' + (t - prev < 36 ? ' → ' + r1(60 / (t - prev)) + ' L/min' : '') : Math.round((t - prev) / 60) + ' min') : '') +
+      (cf != null ? '<br>reed closed ' + (cf < 60 ? r1(cf) + ' s' + (cf < 20 ? ' → ' + r1(60 * DUTY / cf) + ' L/min from the closed time' : '') : r1(cf / 3600) + ' h (pointer resting on the magnet)') : '') +
+      (real ? '' : '<br>noise: ' + (nearestBoiler(t) ? nearestBoiler(t)[0] + ' +' + r1(t - nearestBoiler(t)[1]) + ' s' : 'no boiler event near')));
+  });
+  // noise: cluster spikes so the hover can describe each cluster
+  const cl = []; truth.noise.forEach(e => { const c = cl[cl.length - 1]; if (c && e.s - c[c.length - 1].s < 2) c.push(e); else cl.push([e]); });
+  for (const c of cl) {
+    if (c[c.length - 1].s < a || c[0].s > b) continue;
+    c.forEach(e => { if (inV(e.s)) el('rect', { x: sx(e.s) - 1, y: L.noise[0], width: 2, height: L.noise[1], fill: warn, rx: 1 }, svg); });
+    const x0 = sx(Math.max(a, c[0].s)), x1 = sx(Math.min(b, c[c.length - 1].s));
+    const nb = nearestBoiler(c[0].s);
+    const hit = el('rect', { x: x0 - 5, y: L.noise[0] - 2, width: x1 - x0 + 10, height: L.noise[1] + 4, fill: 'transparent' }, svg);
+    hover(hit, '<b>' + c.length + ' noise edge' + (c.length > 1 ? 's' : '') + '</b> from ' + clock(c[0].s, 3) +
+      '<br>reed ' + (c[0].lab === 2 ? 'closed' : 'open') + ', and each spike reports “' + (c[0].lab === 2 ? 'closes' : 'opens') + '”: the level it already had' +
+      (c.length > 1 ? '<br>' + c.map(e => '+' + Math.round((e.s - c[0].s) * 1e6).toLocaleString() + ' µs').join(', ') : '') +
+      '<br>' + (nb && c[0].s - nb[1] < 200 ? nb[0] + ' was ' + r1(c[0].s - nb[1]) + ' s before' : 'no boiler event nearby (cause unknown)'));
+  }
+  // axis
+  el('line', { x1: ml, x2: W - mr, y1: L.axis, y2: L.axis, stroke: css('--axis') }, svg);
+  const steps = [0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800];
+  const st = steps.find(s => span / s <= Math.max(4, (W - ml) / 110)) || 10800;
+  const prec = st < 1 ? 2 : st < 60 ? 1 : 0;
+  for (let t = Math.ceil(a / st) * st; t <= b; t += st) { const x = sx(t); el('line', { x1: x, x2: x, y1: L.axis, y2: L.axis + 4, stroke: css('--axis') }, svg); txt(svg, x, L.axis + 16, clock(t, prec), { 'text-anchor': 'middle', 'font-size': 10.5 }); }
+  const blab = []; for (const [ev, t] of BOILER) { if (!inV(t)) continue; const l = blab.find(x => x.t === t); if (l) l.s += ' + ' + ev; else blab.push({ t, s: ev }); }
+  let lastX = -1e9, row = 0;
+  for (const l of blab) { const x = sx(l.t); row = x - lastX < 90 ? 1 - row : 0; lastX = x; txt(svg, Math.min(W - mr - 2, x + 3), L.axis + 30 + row * 12, l.s, { 'font-size': 10, 'text-anchor': x > W - 90 ? 'end' : 'start' }); }
+  if (a <= hm('23:30') && b >= nx('07:00')) txt(svg, (sx(hm('23:02:44')) + sx(nx('07:37:52'))) / 2, L.lit[0] + 30, '8½ h with no water through the meter', { 'text-anchor': 'middle', 'font-size': 11 });
+  void surf;
+}
+
+function drawTable() {
+  const rows = counter.draws.map(d => {
+    const ph = d.phantom === d.n;
+    return '<tr class="click" data-a="' + d.a + '" data-b="' + d.b + '"><td>' + clock(d.a, 1) + '</td><td>' + clock(d.b, 1) + '</td><td class="num">' + d.n + (d.phantom && !ph ? ' <span class="state-bad">(' + d.phantom + ' phantom)</span>' : '') + '</td>' +
+      '<td class="num">' + (d.mean ? r1(d.mean) : '–') + '</td><td class="num">' + (d.closedFlow ? r1(d.closedFlow) : '–') + '</td>' +
+      '<td class="num">' + (d.knownClosed != null ? r1(d.knownClosed) + ' s' : '–') + ' / ' + r1(d.knownGap) + ' s</td><td>' + (ph ? '<span class="state-bad">phantom: noise</span>' : d.kind) + '</td></tr>';
+  });
+  const lone = counter.pulses.filter(t => !counter.draws.some(d => t >= d.a - 1 && t <= d.b + 1));
+  $('#realTable').innerHTML = '<tr><th>Start</th><th>End</th><th class="num">Litres</th><th class="num">L/min (gaps)</th><th class="num">L/min (closed time)</th><th class="num">Flow known: closed / gap</th><th>Kind</th></tr>' + rows.join('') +
+    '<tr><td colspan="7" class="small muted">Lone litres that start no draw: ' + (lone.map(t => clock(t, 1) + (isReal(t) ? '' : ' (phantom)')).join(', ') || 'none') +
+    '. 18:03:29 came 203 s after the reed opened: a speed of about 0.22 L/min, below Q1. It could be creep, or a tap being shut slowly. 09:08:43 is the start of a draw the recording cut off.</td></tr>';
+  $('#realTable').querySelectorAll('tr.click').forEach(tr => tr.onclick = () => { const a = +tr.dataset.a, b = +tr.dataset.b, pd = Math.max(15, (b - a) * 0.15); view = [a - pd, b + pd]; setup(); drawChart(); $('#realChart').scrollIntoView({ block: 'center', behavior: 'smooth' }); });
+}
+
+setup(); draw();
+new MutationObserver(drawChart).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', drawChart);
+let rt = null; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(drawChart, 150); });
+window.__REAL = { COUNTERS, truth };
+})();
+</script>
+</body>
+</html>
