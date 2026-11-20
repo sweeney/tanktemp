@@ -78,4 +78,3 @@ func TestFakeDropsWhenFull(t *testing.T) {
 		t.Errorf("%d edges delivered, want %d", n, Capacity)
 	}
 }
-

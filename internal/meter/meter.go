@@ -82,10 +82,14 @@ const (
 	Opened Kind = "open"
 )
 
-// Event is something a caller publishes: a counted litre, or the end of one.
+// Event is something a caller publishes: a counted litre, or the end of
+// one, with the counter's state as of that event. (One edge can confirm a
+// held litre and end it: the pulse's snapshot is still the state at the
+// pulse, closed, not after the opening.)
 type Event struct {
 	Kind Kind
 	At   time.Duration
+	Snap Snapshot
 }
 
 // Config holds the user-space rules. Zero for both turns them off, leaving
@@ -182,7 +186,7 @@ func (k *Counter) Observe(e Edge) []Event {
 		k.inPulse = false
 		d := e.At - k.pulseAt
 		k.snap.LastClosed = &d
-		evs = append(evs, Event{Kind: Opened, At: e.At})
+		evs = append(evs, Event{Kind: Opened, At: e.At, Snap: k.Snapshot()})
 	}
 	return evs
 }
@@ -207,7 +211,7 @@ func (k *Counter) Tick(now time.Duration) []Event {
 	k.snap.LastPulseAt = &at
 	k.snap.Count++
 	k.inPulse, k.pulseAt = true, p.At
-	return []Event{{Kind: Pulse, At: p.At}}
+	return []Event{{Kind: Pulse, At: p.At, Snap: k.Snapshot()}}
 }
 
 func (k *Counter) setLevel(l Level) { k.level, k.snap.Level = l, l }
