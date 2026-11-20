@@ -270,6 +270,9 @@ func TestMeterRejects(t *testing.T) {
 		{"no gpio", strings.Replace(withMeter, "    gpio: 27\n", "", 1), "meters[0].gpio"},
 		{"gpio off the header", strings.Replace(withMeter, "gpio: 27", "gpio: 28", 1), "meters[0].gpio"},
 		{"negative gpio", strings.Replace(withMeter, "gpio: 27", "gpio: -1", 1), "meters[0].gpio"},
+		// The firmware probes 0 and 1 (ID_SD, ID_SC) for a HAT's EEPROM at boot.
+		{"gpio 0, the HAT ID pin", strings.Replace(withMeter, "gpio: 27", "gpio: 0", 1), "HAT"},
+		{"gpio 1, the HAT ID pin", strings.Replace(withMeter, "gpio: 27", "gpio: 1", 1), "HAT"},
 		{"no litres per pulse", strings.Replace(withMeter, "    litres_per_pulse: 1\n", "", 1), "litres_per_pulse"},
 		{"negative litres per pulse", strings.Replace(withMeter, "litres_per_pulse: 1", "litres_per_pulse: -1", 1), "litres_per_pulse"},
 		{"bad device id", strings.Replace(withMeter, "hot_water_meter", "Hot Meter", 1), "meters[0].device_id"},

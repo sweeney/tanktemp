@@ -178,7 +178,9 @@ const (
 	// MaxMeterMinInterval: the meter's maximum flow (Q4, 83 L/min) is a
 	// litre every 0.72 s, so a longer backstop would drop real litres.
 	MaxMeterMinInterval = 700 * time.Millisecond
-	// MaxGPIO is the highest BCM line on the 40-pin header.
+	// MinGPIO and MaxGPIO bound the BCM lines on the 40-pin header a meter
+	// may use: 0 and 1 are the HAT ID EEPROM's, probed at boot.
+	MinGPIO = 2
 	MaxGPIO = 27
 )
 
@@ -270,6 +272,7 @@ func Load(data []byte) (Config, error) {
 	v := validator{lines: lineIndex(&doc)}
 	v.checkFastNotNull(&doc)
 	v.check(&c)
+	v.checkMeters(&c)
 	if len(v.problems) > 0 {
 		return Config{}, &ValidationError{Problems: v.problems}
 	}
@@ -295,7 +298,6 @@ func (v *validator) add(line int, path, format string, args ...any) {
 
 func (v *validator) check(c *Config) {
 	v.checkService(c)
-	defer v.checkMeters(c)
 	if len(c.Tanks) == 0 {
 		v.add(0, "tanks", "no tanks configured")
 	}
@@ -504,7 +506,7 @@ func mapValue(n *yaml.Node, key string) *yaml.Node {
 //
 //	meters:
 //	  - device_id: hot_water_meter   # its key in devices_<site>; unique across tanks too
-//	    gpio: 27                     # the BCM line, on the 40-pin header (0..27)
+//	    gpio: 27                     # the BCM line, on the 40-pin header (2..27)
 //	    litres_per_pulse: 1          # the meter's K; required
 //	    chip: gpiochip0              # default
 //	    debounce: 20ms               # kernel debounce: required, at least 5ms (GUESSES G54)
@@ -540,8 +542,11 @@ func (v *validator) checkMeters(c *Config) {
 			v.add(0, p+".device_id", "device_id %q used twice (tanks and meters share them)", m.DeviceID)
 		}
 		ids[m.DeviceID] = true
-		if m.GPIO == nil || *m.GPIO < 0 || *m.GPIO > MaxGPIO {
-			v.add(0, p+".gpio", "required: a BCM line 0..%d", MaxGPIO)
+		switch {
+		case m.GPIO == nil || *m.GPIO < 0 || *m.GPIO > MaxGPIO:
+			v.add(0, p+".gpio", "required: a BCM line %d..%d", MinGPIO, MaxGPIO)
+		case *m.GPIO < MinGPIO:
+			v.add(0, p+".gpio", "%d is a HAT ID pin (ID_SD/ID_SC), which the firmware probes at boot; use %d..%d", *m.GPIO, MinGPIO, MaxGPIO)
 		}
 		if m.Chip == "" {
 			v.add(0, p+".chip", "empty (the default is %s)", DefaultMeter.Chip)
