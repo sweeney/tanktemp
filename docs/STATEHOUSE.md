@@ -7,7 +7,8 @@ normative; this document says what statehouse should do with it.
 
 Status (checked 2026-11-13): **tanktemp is live, and statehouse and
 greenhouse both consume it.** tanktemp has published on the production
-prefix, `energy/hot_water`, since 2026-11-02, and with two cylinders of five
+prefix since 2026-11-02: `energy/hot_water` until 2026-11-20, and
+`water/hot/tanktemp` since (WIRE.md, Changes), and with two cylinders of five
 probes each since 2026-11-08. statehouse's adapter is on: each of the ten
 probes is an `appliance_probe` device such as
 `probe_hot_water_cylinder_left_top`, with identity
@@ -54,8 +55,8 @@ SHUTDOWN. Its last will on that topic is `{"online":false,"event":"LWT"}`.
 {base}/status
 ```
 
-`base` is configurable, as for the other adapters, and defaults to
-`energy/hot_water`. Use exactly these two patterns rather than `{base}/#`,
+`base` is configurable, as for the other adapters. Production is
+`water/hot/tanktemp` since 2026-11-20 (it was `energy/hot_water`). Use exactly these two patterns rather than `{base}/#`,
 so a future topic doesn't arrive unannounced.
 
 ## Identity: one engine device per probe
@@ -206,7 +207,8 @@ online.
 - The adaptive cadence (2026-11-09, issue #1) changed only how often state
   messages arrive, not what they contain.
 - Keep the base configurable. It was `test/energy/hot_water` until
-  2026-11-02; nothing is published there now.
+  2026-11-02, then `energy/hot_water` until 2026-11-20, and is
+  `water/hot/tanktemp` now; nothing is published at the old ones.
 
 ## A worked example: the data-line fault
 

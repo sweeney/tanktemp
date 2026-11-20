@@ -12,7 +12,8 @@ every key is always present (except `reason`, below).
 ## Topics
 
 `{prefix}` is `mqtt.topic_prefix` in the config. The default is
-`energy/hot_water`; test deployments use `test/energy/hot_water`.
+`water/hot/tanktemp`; test deployments use `test/water/hot/tanktemp`. It was
+`energy/hot_water` until 2026-11-20 (see Changes).
 
 | Topic | When | QoS | Retained |
 |---|---|---|---|
@@ -138,6 +139,17 @@ What MQTT does and doesn't guarantee here:
 
 ## Changes
 
+- **2026-11-20, BREAKING, topics only:** the production prefix moved from
+  `energy/hot_water` to `water/hot/tanktemp`, so the topics are now
+  `water/hot/tanktemp/{device_id}/state` and `water/hot/tanktemp/status`.
+  Payloads and goldens are unchanged. It was a clean cut, with no
+  dual-publishing. The old retained messages were cleared once statehouse
+  (the one consumer) had moved its `base_topic`. `water/hot/` is shared:
+  washhouse publishes its derived topics there (`water/hot/state`,
+  `water/hot/tank/{id}`, `water/hot/events`, `water/hot/status`), so
+  tanktemp keeps its own `tanktemp` subtree, and its status and last will
+  never collide with washhouse's. A water meter is planned at
+  `water/hot/tanktemp/meter`, which `+/state` doesn't match.
 - **2026-11-09, issue #1, no payload change:** state messages can arrive
   faster than `sweep.interval` while probes are changing (Cadence, above).
   No field was added or changed, and the goldens are unchanged. A

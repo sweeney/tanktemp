@@ -34,7 +34,7 @@ func TestDefaults(t *testing.T) {
 	}
 	if c.W1Root != "/sys/bus/w1/devices" || c.Sweep.Interval != 30*time.Second || c.Sweep.Attempts != 3 ||
 		c.ClockSyncWait != 2*time.Minute || c.Heartbeat != 15*time.Minute || c.HTTP.Listen != ":80" ||
-		c.MQTT.TopicPrefix != "energy/hot_water" {
+		c.MQTT.TopicPrefix != "water/hot/tanktemp" {
 		t.Errorf("defaults = %+v", c)
 	}
 	// Sorted by order, and 1 is the bottom.
@@ -186,7 +186,7 @@ func TestPrefixRules(t *testing.T) {
 			t.Errorf("prefix %s: err = %v", bad, err)
 		}
 	}
-	for _, good := range []string{"energy/hot_water", "test/energy/hot_water", "tanks"} {
+	for _, good := range []string{"water/hot/tanktemp", "test/water/hot/tanktemp", "energy/hot_water", "tanks"} {
 		c, err := Load([]byte(strings.Replace(base, "%s", good, 1)))
 		if err != nil || c.MQTT.TopicPrefix != good {
 			t.Errorf("prefix %s: %v", good, err)

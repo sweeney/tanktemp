@@ -204,7 +204,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--info); outline-
       <span class="chip cu">2 topics</span>
       <span class="chip">6 goldens</span>
       <span class="chip">8 error codes</span>
-      <span class="chip">prefix: energy/hot_water (test/ until 2026-11-02)</span>
+      <span class="chip">prefix: water/hot/tanktemp (energy/hot_water until 2026-11-20)</span>
       <span class="chip warn">nothing subscribes yet</span>
     </div>
   </div>
@@ -224,7 +224,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--info); outline-
 <section id="topics">
   <div class="kicker">01 · Where messages go</div>
   <h2>The topic tree</h2>
-  <p class="lede">There are two topics. One carries a state message per tank per sweep. The other carries the daemon's lifecycle and its last will. <code>{prefix}</code> is <code>mqtt.topic_prefix</code>: <code>energy/hot_water</code> by default, <code>test/energy/hot_water</code> for the test deploy until 2026-11-02, when the first real cylinder went live on the default.</p>
+  <p class="lede">There are two topics. One carries a state message per tank per sweep. The other carries the daemon's lifecycle and its last will. <code>{prefix}</code> is <code>mqtt.topic_prefix</code>: <code>water/hot/tanktemp</code> by default since 2026-11-20. Before that it was <code>energy/hot_water</code>, and <code>test/energy/hot_water</code> for the test deploy until 2026-11-02.</p>
   <figure>
     <div class="scroll"><svg id="topicSvg" viewBox="0 0 760 330" role="img" aria-label="Topic tree: prefix, then device_id/state and status"></svg></div>
     <figcaption>The <code>{device_id}</code> is the tank's key in <code>devices_&lt;site&gt;</code>, so it matches <code>[a-z0-9_-]+</code> and is safe to use as a topic segment. The dashed branch is made up: it stands for a topic tanktemp might add one day.</figcaption>
@@ -423,7 +423,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--info); outline-
       <ul style="margin:6px 0;padding-left:18px;font-size:14px">
         <li>Renaming or removing a field.</li>
         <li>Changing an error code.</li>
-        <li>The prefix moved from <code>test/energy/hot_water</code> to <code>energy/hot_water</code> on 2026-11-02. Adapters keep the base configurable.</li>
+        <li>The prefix moved from <code>test/energy/hot_water</code> to <code>energy/hot_water</code> on 2026-11-02, then to <code>water/hot/tanktemp</code> on 2026-11-20. Adapters keep the base configurable.</li>
       </ul>
     </div>
   </div>
@@ -552,7 +552,7 @@ function wrapText(parent, x, y, text, maxChars, attrs, lh) {
     return g;
   };
   const link = (x1, y1, x2, y2, dashed) => S('path', {d:`M${x1},${y1} C${x1+40},${y1} ${x2-40},${y2} ${x2},${y2}`, fill:'none', stroke:'var(--muted)', 'stroke-width':1.5, 'stroke-dasharray':dashed?'5 4':'none'}, svg);
-  node(20, 132, 180, '{prefix}', 'energy/hot_water · test/…', 'var(--ink)');
+  node(20, 132, 180, '{prefix}', 'water/hot/tanktemp · test/…', 'var(--ink)');
   node(250, 40, 190, '{device_id}', 'one per tank: hot-water-cylinder', 'var(--info)');
   node(490, 40, 110, 'state', 'per sweep', 'var(--info)');
   node(250, 160, 190, 'status', 'the daemon, one per prefix', 'var(--copper)');
@@ -964,7 +964,7 @@ renderJSON('jsonFail', 'notesFail', 'rawFail', G.stateFail, {
 // ---------- 10. decisions ----------
 (function () {
   const dec = [
-    ['prefix', 'Prefix and topic shape', '<code>energy/hot_water</code>, with <code>{prefix}/{device_id}/state</code> per tank and <code>{prefix}/status</code> per daemon. device_id is the <code>devices_&lt;site&gt;</code> key; one tanktemp per site.', false],
+    ['prefix', 'Prefix and topic shape', '<code>water/hot/tanktemp</code>, with <code>{prefix}/{device_id}/state</code> per tank and <code>{prefix}/status</code> per daemon. device_id is the <code>devices_&lt;site&gt;</code> key; one tanktemp per site.', false],
     ['qos', 'Retained + QoS choices', 'State QoS 0, retained: the next sweep replaces it within 30 s. Status and will QoS 1, retained: the lifecycle mustn\'t be lost, and a late subscriber needs it.', false],
     ['G14', 'LWT without a timestamp (G14)', 'A will is fixed at connect time, so any timestamp in it would be the connect time and misleading.', true],
     ['G19', 'HEARTBEAT on reconnect, not a new event (G19)', 'Replaces the broker\'s retained LWT at once, using an event consumers already handle.', true],

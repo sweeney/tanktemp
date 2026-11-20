@@ -62,7 +62,7 @@ if [ "${FAKE_REJECT_VERSION:-}" = "$ver" ] || grep -q '^INVALID' "$cfg"; then
 fi
 broker=$(sed -n 's/^ *broker: *//p' "$cfg" | head -1)
 prefix=$(sed -n 's/^ *topic_prefix: *//p' "$cfg" | head -1)
-echo "$cfg: ok: 2 tanks, 10 sensors, sweep every 30s, verbose log off, publishing to ${prefix:-energy/hot_water} on $broker" >&2
+echo "$cfg: ok: 2 tanks, 10 sensors, sweep every 30s, verbose log off, publishing to ${prefix:-water/hot/tanktemp} on $broker" >&2
 exit 0
 BIN
     [ "$pad" -eq 0 ] || head -c "$pad" /dev/zero | tr '\0' '#'
@@ -527,7 +527,7 @@ config_yaml() {
 sweep: {interval: 30s}
 mqtt:
   broker: tcp://127.0.0.1:1883
-  topic_prefix: test/energy/hot_water
+  topic_prefix: test/water/hot/tanktemp
 tanks:
   - device_id: rig-bus-a
     sensors:
@@ -785,8 +785,8 @@ case_01() {
     check "--check names the host from deploy/host" says 'checking t@pi.test'
     check "--check reports the running build" says "running build: $CUR"
     check "--check reports the probes reading now" says 'sensors_ok 10'
-    check "--check reads the broker and prefix from -check-config" says 'publishing to test/energy/hot_water on tcp://127.0.0.1:1883'
-    check "--check reads the retained status from that broker and topic" grep -q -- '-h 127.0.0.1 -p 1883 -t test/energy/hot_water/status' "$FAKE_STATE/mosq"
+    check "--check reads the broker and prefix from -check-config" says 'publishing to test/water/hot/tanktemp on tcp://127.0.0.1:1883'
+    check "--check reads the retained status from that broker and topic" grep -q -- '-h 127.0.0.1 -p 1883 -t test/water/hot/tanktemp/status' "$FAKE_STATE/mosq"
     check "--check runs go vet ./..." grep -q '^go vet ./...' "$FAKE_STATE/go"
     check "--check runs go test -count=1 ./..." grep -q '^go test -count=1 ./...' "$FAKE_STATE/go"
     check "--check builds nothing" [ "$(grep -c '^go build' "$FAKE_STATE/go")" -eq 0 ]
@@ -1228,8 +1228,8 @@ case_47() {
     lib 'health_of "not json"; echo "[$H_STATUS][$H_SENSORS]"'
     check "lib: health_of is empty on junk" [ "$OUT" = "[][]" ]
     # shellcheck disable=SC2016
-    lib 'parse_check_config "/etc/tanktemp/config.yaml: ok: 1 tank, 3 sensors, publishing to test/energy/hot_water on tcp://broker.example:1883" && echo "$CFG_PREFIX $CFG_BROKER"'
-    check "lib: parse_check_config reads the prefix and the broker" [ "$OUT" = "test/energy/hot_water tcp://broker.example:1883" ]
+    lib 'parse_check_config "/etc/tanktemp/config.yaml: ok: 1 tank, 3 sensors, publishing to test/water/hot/tanktemp on tcp://broker.example:1883" && echo "$CFG_PREFIX $CFG_BROKER"'
+    check "lib: parse_check_config reads the prefix and the broker" [ "$OUT" = "test/water/hot/tanktemp tcp://broker.example:1883" ]
     # shellcheck disable=SC2016
     lib 'broker_addr tcp://broker.example:1884 && echo "$BROKER_HOST $BROKER_PORT"; broker_addr mqtt://b2 && echo "$BROKER_HOST $BROKER_PORT"'
     check "lib: broker_addr splits host and port, 1883 by default" [ "$OUT" = $'broker.example 1884\nb2 1883' ]

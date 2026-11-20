@@ -43,7 +43,7 @@ else
     broker=$(grep -oE 'broker:[[:space:]]*[^[:space:],}#]+' "$CONFIG" | head -1 | sed -E 's/broker:[[:space:]]*//') || true
     prefix=$(grep -vE '^[[:space:]]*#' "$CONFIG" | grep -oE 'topic_prefix:[[:space:]]*[^[:space:],}#]+' | head -1 | sed -E 's/topic_prefix:[[:space:]]*//') || true
     [ -n "$broker" ] || die "no mqtt.broker in $CONFIG"
-    prefix=${prefix:-energy/hot_water}
+    prefix=${prefix:-water/hot/tanktemp}
     host=$(sed -E 's#^[a-z]+://##; s#:[0-9]+$##' <<<"$broker")
     [ -n "$host" ] || die "can't read a host from broker '$broker'"
     URL="file://$PAGE#ws=ws://$host:$WS_PORT&prefix=$prefix"

@@ -27,7 +27,11 @@ on each, is set in config.
 3. **Scope: the tanktemp service, plus a full written spec for statehouse**
    (`docs/STATEHOUSE.md`), so statehouse can build its own adapter. No
    statehouse or greenhouse code in this plan.
-4. **Topics are under `energy/hot_water/`:** `energy/hot_water/{device_id}/state`.
+4. **Topics are under `water/hot/tanktemp/`:** `water/hot/tanktemp/{device_id}/state`.
+   They were under `energy/hot_water/` until 2026-11-20, when the owner moved
+   them to subject-named topics: `water/hot/` is shared with washhouse's
+   derived topics, and tanktemp keeps its own `tanktemp` subtree (WIRE.md,
+   Changes). The move was config-only (`deploy/move-topics.sh`).
 5. **Raw readings and their quality only.** tanktemp publishes the calibrated
    °C, the raw °C, the error kind, attempts and bus for each sensor. Stored
    energy, "hot water available", stratification and neighbour-divergence
@@ -189,7 +193,7 @@ log:
 mqtt:
   broker: tcp://broker.lan:1883
   client_id: tanktemp-<host>
-  topic_prefix: energy/hot_water    # default
+  topic_prefix: water/hot/tanktemp  # default (energy/hot_water until 2026-11-20)
   username: ""                      # optional; password_file if set
 tanks:
   - device_id: hot-water-cylinder   # the devices_<site> key; also the topic segment
@@ -288,10 +292,11 @@ All payloads are UTF-8 JSON. Unknown values are `null`, never 0.
 
 | Topic | When | QoS | Retained |
 |---|---|---|---|
-| `energy/hot_water/{device_id}/state` | every sweep | 0 | yes |
-| `energy/hot_water/status` | STARTUP, ready, HEARTBEAT, SHUTDOWN; LWT | 1 | yes |
+| `water/hot/tanktemp/{device_id}/state` | every sweep | 0 | yes |
+| `water/hot/tanktemp/status` | STARTUP, ready, HEARTBEAT, SHUTDOWN; LWT | 1 | yes |
 
-The prefix is configurable, and `energy/hot_water` is the default. The status
+The prefix is configurable, and `water/hot/tanktemp` is the default (it was
+`energy/hot_water` until 2026-11-20). The status
 topic belongs to the daemon, not to a tank. One Pi per site is assumed: a
 second tanktemp at the same site would need a different prefix.
 
@@ -763,7 +768,7 @@ host or namespace names (sweeney/common is public).
 This is written for statehouse to build its own `tanktemp` adapter, following
 the pattern of its `boiler`, `ups` and `climate` adapters.
 
-- Subscriptions: `energy/hot_water/+/state` and `energy/hot_water/status`. The
+- Subscriptions: `water/hot/tanktemp/+/state` and `water/hot/tanktemp/status` (`energy/hot_water/…` until 2026-11-20). The
   base topic is configurable, as for the other adapters.
 - **Identity:** one engine device per sensor, `scheme=tanktemp`,
   `primary=<device_id>.<position>`. A tank is not one engine device: each probe
@@ -819,7 +824,7 @@ since. How it got here is kept below, under History.
 | 8 web + main | done |
 | 9 deploy | done: `setup-pi.sh`, `deploy.sh` and their stub tests |
 | 10 devices follow-up | released, `devices/v0.2.0`: asset fields, `cylinder`, `part_of`, `telemetry`, `PlaceOf` |
-| 11 the rig | **in production** on `energy/hot_water`, both tanks fitted (5 probes each), `templog` disabled. Adaptive cadence (#4) is merged and live at `trigger_c_per_min: 1.5`; verbose logging is off again. About 50 single read retries a day across both buses, all recovered on the second attempt. **Not done:** the power-on-reset and data-line captures, and the water-bath calibration (offsets are 0); these need hands on the rig |
+| 11 the rig | **in production** on `water/hot/tanktemp` (on `energy/hot_water` until 2026-11-20), both tanks fitted (5 probes each), `templog` disabled. Adaptive cadence (#4) is merged and live at `trigger_c_per_min: 1.5`; verbose logging is off again. About 50 single read retries a day across both buses, all recovered on the second attempt. **Not done:** the power-on-reset and data-line captures, and the water-bath calibration (offsets are 0); these need hands on the rig |
 | follow-up | **Remove templog** (G24): due since 2026-11-08. It stays disabled, as the fallback, until you say |
 | 12 hand-off | **done.** `docs/STATEHOUSE.md` written. The tank and probe entries are in `devices_<site>`, probes with a room of their own. Checked 2026-11-13: statehouse's adapter is on, with all ten probes online as `appliance_probe` devices, and greenhouse charts them, with history from 2026-11-11. statehouse doesn't show the cylinders themselves (`telemetry: false`, so no asset relay yet); that's deliberate, and the owner has a plan for it |
 
