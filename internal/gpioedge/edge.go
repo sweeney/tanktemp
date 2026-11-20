@@ -2,10 +2,31 @@
 // about the kernel's GPIO character device (via go-gpiocdev, on Linux).
 //
 // It requests one line as an input with the pull-up on, for both edges,
-// with the kernel's debounce (gpiolib-cdev reports only a level that held
-// for the whole period) and timestamps on the monotonic clock. It reads the
-// line's level at the request, then forwards each kernel event as a
+// with the kernel's debounce and timestamps on the monotonic clock. It reads
+// the line's level at the request, then forwards each kernel event as a
 // meter.Edge stamped with the kernel's own timestamp and line seqno.
+//
+// What a kernel event means (drivers/gpio/gpiolib-cdev.c, read 2026-11-20):
+//
+//   - Its rising/falling id is the line's LEVEL as the kernel read it, not
+//     the direction of the edge that interrupted: line_event_id(level). That
+//     is why the rig's raw microsecond spikes carried the level the line
+//     already had, and why meter.Counter judges levels, never labels.
+//   - With debounce (software debounce, used when the pin controller has
+//     none, as BCM2835 is believed not to; the rig run will confirm it), an
+//     event is emitted only when the level after the line has been quiet
+//     for the period differs from the last one, and it is timestamped
+//     THEN: about meter.debounce (plus workqueue delay) after the edge.
+//     Intervals and closed times are unaffected bar jitter; every time is
+//     that much late.
+//   - The line seqno counts emitted events. When the kernel's buffer is
+//     full it drops the oldest event, whose seqno is never reused, so a
+//     loss shows as a gap.
+//
+// An edge in the moment between the request and reading the initial level
+// is already in that level, and its queued event then reads as noise: if it
+// was a closing, that litre goes uncounted. That window is microseconds
+// wide, once per start.
 //
 // Should the edge channel ever fill (its reader stalled for 256 edges, a
 // few minutes even at the meter's maximum flow), an edge is dropped rather
@@ -32,8 +53,8 @@ func levelOf(v int) meter.Level {
 	return meter.Closed
 }
 
-// edgeOf is a kernel event as a meter.Edge: a rising edge means the line
-// went high, so the reed opened.
+// edgeOf is a kernel event as a meter.Edge. "Rising" is the kernel's level
+// read for the event (high), not the edge's direction; high is open.
 func edgeOf(at time.Duration, rising bool, lineSeqno uint32) meter.Edge {
 	l := meter.Closed
 	if rising {

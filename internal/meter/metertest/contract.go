@@ -21,6 +21,9 @@ type Harness struct {
 // Wait is how long Contract waits for an edge, or for Edges to close.
 const Wait = 2 * time.Second
 
+// Quiet is how long an undriven line must stay quiet.
+const Quiet = 100 * time.Millisecond
+
 // Receive takes the next edge, failing the test after Wait.
 func Receive(t *testing.T, s meter.Source) (meter.Edge, bool) {
 	t.Helper()
@@ -40,6 +43,19 @@ func Contract(t *testing.T, h Harness) {
 		defer s.Close()
 		if l := s.Initial(); l != meter.Open && l != meter.Closed {
 			t.Errorf("Initial() = %v", l)
+		}
+	})
+	t.Run("a line nothing drives stays open and quiet", func(t *testing.T) {
+		s := h.Open(t)
+		defer s.Close()
+		select {
+		case e, ok := <-s.Edges():
+			if ok {
+				t.Errorf("an edge with nothing driving the line: %+v", e)
+			} else {
+				t.Error("Edges closed before Close")
+			}
+		case <-time.After(Quiet):
 		}
 	})
 	t.Run("Close closes Edges, and a second Close is a no-op", func(t *testing.T) {
