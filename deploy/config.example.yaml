@@ -37,6 +37,15 @@ mqtt:
   # username: ""
   # password_file: /etc/tanktemp/mqtt-password   # root:tanktemp 0640
 
+# The 1-Wire buses: the GPIO each bus's data wire is on (BCM 2..27).
+# setup-pi.sh writes config.txt's dtoverlay=w1-gpio lines from this, and needs
+# it; tanktemp checks at start that these are the buses loaded. A pin can be
+# one thing only: two buses, or a bus and a meter, on one pin are refused.
+onewire:
+  buses:
+    - {gpio: 4, label: D1}     # label: optional, for people
+    - {gpio: 17, label: D2}
+
 tanks:
   # device_id is the tank's key in devices_<site>, and its MQTT topic segment.
   - device_id: hot-water-cylinder

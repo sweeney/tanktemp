@@ -125,14 +125,30 @@ Tank temperatures change over minutes, so a 30 s interval is plenty.
 
 ### Enabling buses
 
-In `/boot/firmware/config.txt`, add one line per bus. Loading the same overlay
-more than once is supported. `./setup-pi.sh` adds any that are missing (for
-the GPIOs given by `--w1-gpios`, default `4,17`) and reboots, asking first:
+The buses' pins are declared in tanktemp's config (#10), the one place that
+says which pin is which:
+
+```yaml
+onewire:
+  buses:
+    - {gpio: 4, label: D1}
+    - {gpio: 17, label: D2}
+```
+
+The kernel takes them only from `/boot/firmware/config.txt`, one line per bus
+(loading the same overlay more than once is supported):
 
 ```
 dtoverlay=w1-gpio,gpiopin=4
 dtoverlay=w1-gpio,gpiopin=17
 ```
+
+`./setup-pi.sh` writes those lines from the config (`tanktemp -print-w1-gpios`
+prints the pins) and reboots, asking first. `--check` shows the exact change
+as a diff. It only ever adds lines: a `dtoverlay=w1-gpio` line for a pin the
+config doesn't declare is refused, named, for you to remove by hand. The
+config also refuses a pin used twice, by two buses or by a bus and the water
+meter.
 
 - **Reboot to apply.** To test without a reboot, load a bus for the current
   session with `sudo dtoverlay w1-gpio gpiopin=17`. It's gone on the next boot.
@@ -311,6 +327,15 @@ With a 30 s sweep interval, the 4 s parallel sweep is enough.
   `resolution may be corrupted. err=-5` for 3 sensors at boot, but all were
   fine when checked.
 - The clock is synced (below).
+- With `onewire.buses` declared, the buses running are the ones declared
+  (#10). Each loaded overlay is a device-tree node,
+  `/sys/firmware/devicetree/base/onewire@<pin in hex>`, whose `gpios`
+  property holds the pin as its second 32-bit cell (`00 00 00 07 00 00 00 04
+  00 00 00 00` on the rig: phandle 7, GPIO 4, flags 0). A node counts if it
+  isn't `status = "disabled"` and a driver has bound it
+  (`/sys/devices/platform/onewire@4/driver`). A declared pin with none is
+  `w1_bus_missing`; one for an undeclared pin is `w1_bus_undeclared`. Which
+  `w1_bus_masterN` is which pin still can't be told (below).
 
 ## Identifying sensors
 

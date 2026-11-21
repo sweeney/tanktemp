@@ -412,7 +412,7 @@ as it's given to `tools/guessreview/answers.json`, which is gitignored.
 
 ```sh
 ./setup-pi.sh --check user@host   # read-only: what a first install would do
-./setup-pi.sh user@host           # first install (full sudo): sudo rules, 1-Wire overlays (+ reboot), config, unit, first build
+./setup-pi.sh user@host           # first install (full sudo): sudo rules, 1-Wire overlays from the config (+ reboot), config, unit, first build
 ./deploy.sh --check user@host     # read-only pre-flight
 ./deploy.sh user@host             # build, upload, switch, verify, roll back on failure
 ./deploy.sh --rollback user@host
@@ -444,6 +444,17 @@ refuses a config with a `meters` block, so on a Pi that's behind,
 A Pi set up before this keeps its builds in `~/tanktemp`. To move it, run
 `./setup-pi.sh --check`, then `./setup-pi.sh`: it copies the builds, repoints
 the links and restarts once. It leaves `~/tanktemp` for you to remove.
+
+**The 1-Wire bus pins are in the config** (`onewire.buses`, #10), next to
+the meter's: the one place that says which pin is which. `setup-pi.sh` writes
+`config.txt`'s `dtoverlay=w1-gpio,gpiopin=N` lines from them (`tanktemp
+-config FILE -print-w1-gpios` prints them), shows the exact change with
+`--check`, and only ever adds lines: one for a pin the config doesn't
+declare is refused, named. It refuses a config without the block.
+`-check-config` names the buses, or warns in capitals that they aren't
+declared, and at start tanktemp checks the buses loaded are the ones
+declared (`w1_bus_missing`, `w1_bus_undeclared`). The pins aren't a
+`setup-pi.sh` option any more (`--w1-gpios` is gone).
 
 The host can also go in `deploy/host` (gitignored). The config comes from
 `deploy/config.local.yaml` (gitignored; start from
