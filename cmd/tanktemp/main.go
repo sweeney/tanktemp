@@ -90,8 +90,8 @@ func realMain(args []string, out io.Writer) int {
 		}
 		meters := ""
 		for _, m := range cfg.Meters {
-			meters += fmt.Sprintf(", meter %s on %s:%d (%v L/pulse, debounce %s, hold %s, min interval %s)",
-				m.DeviceID, m.Chip, *m.GPIO, m.LitresPerPulse, shortDuration(m.Debounce), shortDuration(m.Hold), shortDuration(m.MinInterval))
+			meters += fmt.Sprintf(", meter %s on %s:%d (%s, closed reads %s; %v L/pulse, debounce %s, hold %s, min interval %s)",
+				m.DeviceID, m.Chip, *m.GPIO, m.Bias, m.ClosedLevel, m.LitresPerPulse, shortDuration(m.Debounce), shortDuration(m.Hold), shortDuration(m.MinInterval))
 		}
 		fmt.Fprintf(out, "%s: ok: %d tank%s, %d sensor%s, %s, verbose log %s%s, publishing to %s on %s\n",
 			*path, len(cfg.Tanks), plural(len(cfg.Tanks)), n, plural(n), cadenceSummary(cfg.Sweep), verbose, meters, cfg.MQTT.TopicPrefix, cfg.MQTT.Broker)
@@ -203,7 +203,11 @@ func serve(cfg config.Config) error {
 		Verbose:     vlog,
 		Version:     version,
 		OpenMeter: func(m config.Meter) (meter.Source, error) {
-			return gpioedge.Open(lineSettings(m))
+			l, err := gpioedge.Open(lineSettings(m))
+			if err != nil {
+				return nil, err // not a typed nil inside the interface
+			}
+			return l, nil
 		},
 		Mono: gpioedge.Now,
 	})

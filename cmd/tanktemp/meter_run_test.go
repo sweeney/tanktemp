@@ -309,7 +309,7 @@ func TestCheckConfigShowsTheMeter(t *testing.T) {
 	_ = os.WriteFile(path, []byte("mqtt: {broker: tcp://b:1883}\ntanks:\n  - device_id: t\n    sensors:\n      - {rom: 28-0000117287e6, position: top, order: 1}\nmeters:\n  - {device_id: hot_water_meter, gpio: 27, litres_per_pulse: 1}\n"), 0o644)
 	var out strings.Builder
 	if code := realMain([]string{"-config", path, "-check-config"}, &out); code != 0 ||
-		!strings.Contains(out.String(), ", meter hot_water_meter on gpiochip0:27 (1 L/pulse, debounce 20ms, hold 20ms, min interval 600ms), publishing to water/hot/tanktemp on tcp://b:1883\n") {
+		!strings.Contains(out.String(), ", meter hot_water_meter on gpiochip0:27 (pull-up, closed reads low; 1 L/pulse, debounce 20ms, hold 20ms, min interval 600ms), publishing to water/hot/tanktemp on tcp://b:1883\n") {
 		t.Errorf("code %d, out %q", code, out.String())
 	}
 }

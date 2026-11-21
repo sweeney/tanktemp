@@ -29,6 +29,45 @@ type Loop struct {
 	reqs  chan request
 	done  chan struct{}
 	held  *Edge // taken from the Source but stamped after a request's now: next
+
+	// Trace, if set before Run, is called on Run's goroutine after each
+	// edge and each tick (or request's now) with what the counter made of
+	// it: pulsewatch's per-edge verdicts, from this same loop.
+	Trace func(Step)
+}
+
+// Step is one thing the loop handled: an edge (Edge non-nil) or the passage
+// of time to Now; the counter's state before and after, and what it
+// emitted.
+type Step struct {
+	Edge          *Edge
+	Now           time.Duration
+	Before, After Snapshot
+	Events        []Event
+}
+
+func (l *Loop) observe(e Edge) {
+	var before Snapshot
+	if l.Trace != nil {
+		before = l.k.Snapshot()
+	}
+	evs := l.k.Observe(e)
+	l.publish(evs)
+	if l.Trace != nil {
+		l.Trace(Step{Edge: &e, Now: e.At, Before: before, After: l.k.Snapshot(), Events: evs})
+	}
+}
+
+func (l *Loop) tick(now time.Duration) {
+	var before Snapshot
+	if l.Trace != nil {
+		before = l.k.Snapshot()
+	}
+	evs := l.k.Tick(now)
+	l.publish(evs)
+	if l.Trace != nil {
+		l.Trace(Step{Now: now, Before: before, After: l.k.Snapshot(), Events: evs})
+	}
 }
 
 // NewLoop is a loop over k and src, calling emit (on Run's goroutine) for
@@ -56,7 +95,7 @@ func (l *Loop) Run(ctx context.Context) error {
 	for {
 		if e := l.held; e != nil {
 			l.held = nil
-			l.publish(l.k.Observe(*e))
+			l.observe(*e)
 		}
 		select {
 		case <-ctx.Done():
@@ -65,7 +104,7 @@ func (l *Loop) Run(ctx context.Context) error {
 			if !ok {
 				return l.closed()
 			}
-			l.publish(l.k.Observe(e))
+			l.observe(e)
 		case now := <-l.ticks:
 			// Every edge already queued first: select picks at random
 			// among ready cases, and a tick must never confirm a closing
@@ -73,7 +112,7 @@ func (l *Loop) Run(ctx context.Context) error {
 			if !l.drain(maxDuration) {
 				return l.closed()
 			}
-			l.publish(l.k.Tick(now))
+			l.tick(now)
 		case r := <-l.reqs:
 			// Likewise up to its now, then confirm what now confirms: "as
 			// of now". An edge stamped later waits (in held) until after.
@@ -81,7 +120,7 @@ func (l *Loop) Run(ctx context.Context) error {
 				close(r.reply)
 				return l.closed()
 			}
-			l.publish(l.k.Tick(r.now))
+			l.tick(r.now)
 			s := l.k.Snapshot()
 			if r.sweep {
 				l.emit(Event{Kind: Swept, At: r.now, Snap: s})
@@ -102,7 +141,7 @@ func (l *Loop) drain(upTo time.Duration) bool {
 				return true
 			}
 			l.held = nil
-			l.publish(l.k.Observe(*e))
+			l.observe(*e)
 		}
 		select {
 		case e, ok := <-l.src.Edges():
@@ -113,7 +152,7 @@ func (l *Loop) drain(upTo time.Duration) bool {
 				l.held = &e
 				return true
 			}
-			l.publish(l.k.Observe(e))
+			l.observe(e)
 		default:
 			return true
 		}

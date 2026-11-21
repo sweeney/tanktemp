@@ -158,3 +158,32 @@ func TestLoopSaysWhyTheSourceStopped(t *testing.T) {
 		t.Errorf("Run = %v", err)
 	}
 }
+
+// Trace sees every edge and tick, in order, with what each did.
+func TestLoopTrace(t *testing.T) {
+	src := metertest.NewFake(meter.Open)
+	ticks := make(chan time.Duration)
+	k, _ := meter.New(meter.Config{Hold: 20 * ms, MinInterval: 600 * ms}, meter.Open)
+	l := meter.NewLoop(k, src, ticks, func(meter.Event) {})
+	var steps []meter.Step
+	l.Trace = func(s meter.Step) { steps = append(steps, s) }
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { defer close(done); l.Run(ctx) }()
+	src.Push(1000*ms, meter.Closed)
+	src.Push(1005*ms, meter.Open) // short
+	src.Push(2000*ms, meter.Closed)
+	ticks <- 2050 * ms // confirms
+	l.Snapshot(context.Background(), 2050*ms)
+	cancel()
+	<-done
+	if len(steps) < 4 {
+		t.Fatalf("%d steps", len(steps))
+	}
+	if s := steps[1]; s.Edge == nil || s.Edge.Seqno != 2 || s.After.Short != s.Before.Short+1 {
+		t.Errorf("step 2 = %+v, want the short", s)
+	}
+	if s := steps[3]; s.Edge != nil || s.Now != 2050*ms || len(s.Events) != 1 || s.Events[0].Kind != meter.Pulse {
+		t.Errorf("step 4 = %+v, want the tick's pulse", s)
+	}
+}
