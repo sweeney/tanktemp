@@ -60,9 +60,10 @@ The meter was fitted on GPIO 27 with only the Pi's internal pull-up, and every r
 
 ```json
 {"device_id":"hot_water_meter","timestamp":"2026-11-20T01:30:00Z","clock_synced":true,
- "trigger":"sweep","litres_per_pulse":1,"counting_since":"2026-11-19T22:41:07Z",
- "count":1640,"last_pulse_at":"2026-11-19T23:02:16.904Z","last_interval_ms":5821,
- "last_closed_ms":1339,"noise":0,"glitches":0,"lost":0}
+ "trigger":"sweep","seq":1062,"litres_per_pulse":1,"level":"open",
+ "counting_since":"2026-11-19T22:41:07Z","count":1640,
+ "last_pulse_at":"2026-11-19T23:02:16.904Z","last_interval_ms":5821,
+ "last_closed_ms":1339,"noise":0,"short":0,"glitches":0,"lost":0}
 ```
 
 **This silence is itself the check on the loop assumption.** A thermosiphon through the meter would show here as a pulse every few minutes, all night (§5).

@@ -414,9 +414,10 @@ so `deploy.sh` runs `-check-config` through `sudo -u tanktemp`.
 The unit (`tanktemp.service`) is hardened. For the water meter, it uses
 `DevicePolicy=closed` with `DeviceAllow=char-gpiochip rw` and
 `SupplementaryGroups=gpio` in place of `PrivateDevices=true`, which would
-hide the GPIO chips. The rest of what `PrivateDevices` gave is spelled out:
-the `@raw-io` system calls filtered, native architecture only, and
-`/dev/shm` hidden. `systemd-analyze security` scores it 3.6, against 3.7
+hide the GPIO chips. What else `PrivateDevices` implied is kept: the
+`@raw-io` system calls are filtered, and `CapabilityBoundingSet` already
+drops `CAP_SYS_RAWIO` and `CAP_MKNOD`. Two extras go beyond it: native
+architecture only, and `/dev/shm` hidden. `systemd-analyze security` scores it 3.6, against 3.7
 before (lower is better). The service user isn't added to `gpio`; only the
 service gets it. Both scripts refuse a Pi with no `gpio` group (Raspberry
 Pi OS makes it), because systemd can't start the unit without it.

@@ -1663,8 +1663,9 @@ case_72() {
     # the device policy is closed (the standard pseudo-devices only) plus
     # the GPIO chips, read-write, and the gpio group they belong to.
     check "the unit no longer hides all devices (PrivateDevices)" not grep -qE '^PrivateDevices=(true|yes)' "$unit"
-    # and what PrivateDevices=true also gave, spelled out (systemd.exec(5)):
-    # the @raw-io filter, no foreign architectures, no host /dev/shm.
+    # PrivateDevices=true also implied the @raw-io filter (kept) and dropping
+    # CAP_SYS_RAWIO and CAP_MKNOD (the bounding set above already does);
+    # native architectures only and no host /dev/shm are extra hardening.
     # systemd-analyze security on the rig: old 3.7, this 3.6.
     for line in DevicePolicy=closed 'DeviceAllow=char-gpiochip rw' SupplementaryGroups=gpio \
         'SystemCallFilter=~@raw-io' SystemCallArchitectures=native InaccessiblePaths=-/dev/shm; do

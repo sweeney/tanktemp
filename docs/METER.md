@@ -104,8 +104,10 @@ high-impedance pin. For example, at one HW_OFF: 6 spikes in 247 µs, then
   `/dev/gpiochip*`, so the unit uses instead:
   - `DevicePolicy=closed`: no device but the standard pseudo-devices;
   - `DeviceAllow=char-gpiochip rw`: the GPIO chips;
-  - the rest of what `PrivateDevices` gave, spelled out:
-    `SystemCallFilter=~@raw-io`, `SystemCallArchitectures=native` and
+  - what else `PrivateDevices` implied: `SystemCallFilter=~@raw-io`,
+    and dropping `CAP_SYS_RAWIO` and `CAP_MKNOD`, which
+    `CapabilityBoundingSet=CAP_NET_BIND_SERVICE` already does;
+  - two extras beyond it: `SystemCallArchitectures=native` and
     `InaccessiblePaths=-/dev/shm`.
 
   `systemd-analyze security` scores it 3.6, against 3.7 for the unit
