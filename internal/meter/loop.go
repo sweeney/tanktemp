@@ -13,11 +13,13 @@ import (
 // monotonic clock as the edges; main sends one every 50 ms (GUESSES G59),
 // which bounds a pulse's publish to hold + 50 ms after its closing.
 //
-// Before a tick or a snapshot, Run takes every edge already queued, so
-// neither can overtake an earlier edge. An edge still inside the kernel or
-// go-gpiocdev's watcher when a tick is read can't be taken: that window is
-// the delivery latency (microseconds to a millisecond or two), far inside
-// the 20 ms hold it would have to beat.
+// Before a tick or a snapshot, Run takes every edge already queued (for a
+// snapshot, every one stamped at or before its now), so neither can
+// overtake an earlier edge. An edge still inside the kernel or
+// go-gpiocdev's watcher when a tick is read can't be taken: so a closing
+// whose reopening is in flight then, and that is shorter than the hold by
+// no more than the delivery latency (microseconds to a millisecond or
+// two), counts. That is harmless: a real closing is at least about 150 ms.
 type Loop struct {
 	k     *Counter
 	src   Source
@@ -25,6 +27,7 @@ type Loop struct {
 	emit  func(Event)
 	reqs  chan request
 	done  chan struct{}
+	held  *Edge // taken from the Source but stamped after a request's now: next
 }
 
 // NewLoop is a loop over k and src, calling emit (on Run's goroutine) for
@@ -41,6 +44,10 @@ var ErrSourceClosed = errors.New("meter: the line's edges stopped")
 func (l *Loop) Run(ctx context.Context) error {
 	defer close(l.done)
 	for {
+		if e := l.held; e != nil {
+			l.held = nil
+			l.publish(l.k.Observe(*e))
+		}
 		select {
 		case <-ctx.Done():
 			return nil
@@ -53,13 +60,14 @@ func (l *Loop) Run(ctx context.Context) error {
 			// Every edge already queued first: select picks at random
 			// among ready cases, and a tick must never confirm a closing
 			// whose (earlier) reopening is waiting behind it.
-			if !l.drain() {
+			if !l.drain(maxDuration) {
 				return ErrSourceClosed
 			}
 			l.publish(l.k.Tick(now))
 		case r := <-l.reqs:
-			// Likewise, then confirm what now confirms: "as of now".
-			if !l.drain() {
+			// Likewise up to its now, then confirm what now confirms: "as
+			// of now". An edge stamped later waits (in held) until after.
+			if !l.drain(r.now) {
 				close(r.reply)
 				return ErrSourceClosed
 			}
@@ -73,13 +81,27 @@ func (l *Loop) Run(ctx context.Context) error {
 	}
 }
 
-// drain takes the edges already queued; false if the Source closed.
-func (l *Loop) drain() bool {
+const maxDuration = time.Duration(1<<63 - 1)
+
+// drain takes the edges already queued, up to the first stamped after upTo
+// (kept in held); false if the Source closed.
+func (l *Loop) drain(upTo time.Duration) bool {
 	for {
+		if e := l.held; e != nil {
+			if e.At > upTo {
+				return true
+			}
+			l.held = nil
+			l.publish(l.k.Observe(*e))
+		}
 		select {
 		case e, ok := <-l.src.Edges():
 			if !ok {
 				return false
+			}
+			if e.At > upTo {
+				l.held = &e
+				return true
 			}
 			l.publish(l.k.Observe(e))
 		default:
@@ -101,8 +123,9 @@ type request struct {
 }
 
 // Snapshot is the counter's state as of now (monotonic, the edges' clock):
-// after every edge the Source has delivered so far, and with any closing
-// whose hold has passed by now confirmed (and published) first.
+// after every edge the Source has delivered so far that is stamped at or
+// before now, and with any change whose hold has passed by now confirmed
+// (and published) first.
 // false if Run has stopped, or ctx ended first.
 func (l *Loop) Snapshot(ctx context.Context, now time.Duration) (Snapshot, bool) {
 	return l.ask(ctx, request{now: now, reply: make(chan Snapshot, 1)})
@@ -119,8 +142,11 @@ func (l *Loop) Sweep(ctx context.Context, now time.Duration) bool {
 func (l *Loop) ask(ctx context.Context, r request) (Snapshot, bool) {
 	select {
 	case l.reqs <- r:
-		s, ok := <-r.reply
-		return s, ok
+		select { // reply is buffered: the loop never waits on an abandoned one
+		case s, ok := <-r.reply:
+			return s, ok
+		case <-ctx.Done():
+		}
 	case <-l.done:
 	case <-ctx.Done():
 	}

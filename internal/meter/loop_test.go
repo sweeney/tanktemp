@@ -106,11 +106,11 @@ func TestLoopEdgeConfirmsWithoutATick(t *testing.T) {
 	}
 }
 
-// Snapshot reflects every edge sent before it was asked for.
+// Snapshot reflects every edge sent before it was asked for, up to its now.
 func TestLoopSnapshot(t *testing.T) {
 	h := start(t, meter.Closed)
 	h.src.Push(1000*ms, meter.Open)
-	s, ok := h.loop.Snapshot(context.Background(), 0)
+	s, ok := h.loop.Snapshot(context.Background(), 1000*ms)
 	if !ok || s.Level != meter.Open || s.Count != 0 {
 		t.Errorf("snapshot %+v, %v", s, ok)
 	}
