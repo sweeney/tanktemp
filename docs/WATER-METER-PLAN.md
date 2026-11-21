@@ -19,7 +19,7 @@ why; where the build went another way:
   100 ms, `min_interval` at most 700 ms, and `litres_per_pulse` at most
   1000. GPIO 0 and 1 are refused.
 - **Unit** (§3, §4.1): `DevicePolicy=closed` with `DeviceAllow=char-gpiochip
-  rw` and `SupplementaryGroups=gpio`; the `tanktemp` user is **not** added
+  r` and `SupplementaryGroups=gpio`; the `tanktemp` user is **not** added
   to `gpio`. `setup-pi.sh` and `deploy.sh` refuse a Pi with no `gpio` group;
   they don't check the line is free (a busy line is `gpio_request_failed`
   at start).

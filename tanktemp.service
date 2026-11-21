@@ -27,8 +27,11 @@ ProtectHome=yes
 PrivateTmp=true
 # The water meter's GPIO line (docs/WIRE.md, Meter). PrivateDevices=true
 # would hide /dev/gpiochip*, so instead: no device but the standard
-# pseudo-devices (closed), plus the GPIO chips, and their group (gpio, as
-# Raspberry Pi OS makes them root:gpio 0660). Without a meter configured
+# pseudo-devices (closed), plus the GPIO chips, read-only, and their group
+# (gpio, as Raspberry Pi OS makes them root:gpio 0660). Read-only is
+# enough: go-gpiocdev opens the chip O_RDONLY, and a line request is an
+# ioctl that returns a new descriptor, which the device policy (it checks
+# open()) doesn't see. Without a meter configured
 # none of them is opened. PrivateDevices=true also implied the @raw-io
 # system call filter, kept here, and dropping CAP_SYS_RAWIO and CAP_MKNOD,
 # which CapabilityBoundingSet above already does (systemd.exec(5)). Two
@@ -37,7 +40,7 @@ PrivateTmp=true
 # rig, 2026-11-20: 3.6, against the old unit's 3.7 (without these three
 # lines, 4.0).
 DevicePolicy=closed
-DeviceAllow=char-gpiochip rw
+DeviceAllow=char-gpiochip r
 SupplementaryGroups=gpio
 SystemCallFilter=~@raw-io
 SystemCallArchitectures=native

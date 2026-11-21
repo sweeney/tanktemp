@@ -427,7 +427,8 @@ user with mode 0755. That directory holds the timestamped builds, the
 so `deploy.sh` runs `-check-config` through `sudo -u tanktemp`.
 
 The unit (`tanktemp.service`) is hardened. For the water meter, it uses
-`DevicePolicy=closed` with `DeviceAllow=char-gpiochip rw` and
+`DevicePolicy=closed` with `DeviceAllow=char-gpiochip r` (read-only is
+enough to request a line) and
 `SupplementaryGroups=gpio` in place of `PrivateDevices=true`, which would
 hide the GPIO chips. What else `PrivateDevices` implied is kept: the
 `@raw-io` system calls are filtered, and `CapabilityBoundingSet` already

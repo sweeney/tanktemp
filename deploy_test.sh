@@ -1803,13 +1803,14 @@ case_72() {
     # The water meter's GPIO line (docs/WIRE.md, Meter; the owner's decision
     # of 2026-11-20): PrivateDevices would hide /dev/gpiochip*, so instead
     # the device policy is closed (the standard pseudo-devices only) plus
-    # the GPIO chips, read-write, and the gpio group they belong to.
+    # the GPIO chips, read-only (enough to request a line), and the gpio
+    # group they belong to.
     check "the unit no longer hides all devices (PrivateDevices)" not grep -qE '^PrivateDevices=(true|yes)' "$unit"
     # PrivateDevices=true also implied the @raw-io filter (kept) and dropping
     # CAP_SYS_RAWIO and CAP_MKNOD (the bounding set above already does);
     # native architectures only and no host /dev/shm are extra hardening.
     # systemd-analyze security on the rig: old 3.7, this 3.6.
-    for line in DevicePolicy=closed 'DeviceAllow=char-gpiochip rw' SupplementaryGroups=gpio \
+    for line in DevicePolicy=closed 'DeviceAllow=char-gpiochip r' SupplementaryGroups=gpio \
         'SystemCallFilter=~@raw-io' SystemCallArchitectures=native InaccessiblePaths=-/dev/shm; do
         check "the unit has $line" grep -qx "$line" "$unit"
     done
