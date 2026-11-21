@@ -1438,6 +1438,26 @@ case_115() {
     check "naming it" says 'dtparam=gpiopin=22'
 }
 
+# A new config is checked by the build the Pi runs, not only by this
+# commit's, before it's installed (review on #11): a build from before #10
+# refuses onewire:, and installing a config it rejects would leave its
+# restart failing. So setup refuses, says to deploy first, and installs and
+# restarts nothing.
+case_116() {
+    fresh
+    echo "# a change" >>"$REPO/deploy/config.local.yaml"
+    before=$(snapshot)
+    setup FAKE_REJECT_VERSION="${CUR##*-}" -- --check
+    check "--check refuses a config the running build rejects (2)" rc_is 2
+    check "saying to deploy first" says 'deploy.sh'
+    setup FAKE_REJECT_VERSION="${CUR##*-}" -- --yes
+    check "a real run refuses it too (2)" rc_is 2
+    check "installing nothing" [ "$(snapshot)" = "$before" ]
+    check "restarting nothing" [ "$(restarts)" -eq 0 ]
+    setup -- --yes
+    check "a build that takes it: installed (rc $RC)" rc_is 0
+}
+
 # setup trusts -print-w1-gpios only in its one shape (review on #11).
 case_114() {
     fresh

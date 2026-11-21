@@ -56,8 +56,11 @@
 #   3. The config: the local file is checked with this commit's tanktemp
 #      -check-config (built for this machine) and, if it differs from
 #      /etc/tanktemp/config.yaml on the Pi (a diff is shown), installed there
-#      as root:tanktemp 0640. Without a local file, the Pi's own is kept (and
-#      checked); with neither, setup refuses. A config (or its mqtt
+#      as root:tanktemp 0640, once the build the Pi runs has accepted it too
+#      (-check-config, from stdin, as the deploy user): a build from before a
+#      new key refuses the key, so setup refuses and says to deploy first.
+#      Without a local file, the Pi's own is kept (and checked); with
+#      neither, setup refuses. A config (or its mqtt
 #      password_file) with another owner or mode is made root:tanktemp 0640.
 #      If tanktemp is already running, a new config restarts it. While it
 #      still runs as another user (the old layout's), this step waits for
@@ -302,6 +305,20 @@ elif [ "$pi_has_config" = yes ]; then
     config_check "$TMP/pi-config.yaml" "$CONFIG_PATH on $REMOTE"
 else
     refuse "no config: $REMOTE has no $CONFIG_PATH and there is no $CONFIG here (copy deploy/config.example.yaml to it, or give --config PATH)"
+fi
+
+# A new config must suit the build the Pi will restart onto, not only this
+# commit's (review on #11): a build from before a new key refuses it, and
+# its restart would then fail. So the installed build checks it too, read
+# from stdin as the deploy user (the builds are 0755; no sudo, nothing
+# staged), before anything changes. On a first install the build is this
+# commit's, already checked.
+if [ $CONFIG_CHANGE -eq 1 ] && [ "$build" != MISSING ] && [ $migrate -eq 0 ]; then
+    # shellcheck disable=SC2029 # PI_DIR and LINK are this script's, expanded here
+    pi_out=$(ssh "${SSHOPTS[@]}" "$REMOTE" "$PI_DIR/$LINK -check-config -config /dev/stdin" <"$CONFIG" 2>&1) ||
+        refuse "the build $REMOTE runs ($build) rejects $CONFIG, so restarting it onto that would fail. Deploy this commit first (./deploy.sh), then run this again. It says:
+$pi_out"
+    info "and $build, which $REMOTE runs, accepts it"
 fi
 
 # 1-Wire: the overlay line for each bus the config declares, in config.txt,
