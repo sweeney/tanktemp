@@ -38,7 +38,7 @@ func hwLine(t *testing.T) (string, int) {
 func hwOpen(t *testing.T) meter.Source {
 	t.Helper()
 	chip, n := hwLine(t)
-	s, err := Open(chip, n, 20*time.Millisecond)
+	s, err := Open(Settings{Chip: chip, Offset: n, Debounce: 20 * time.Millisecond})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestHardwareBusy(t *testing.T) {
 	s := hwOpen(t)
 	defer s.Close()
 	chip, n := hwLine(t)
-	if s2, err := Open(chip, n, 20*time.Millisecond); err == nil {
+	if s2, err := Open(Settings{Chip: chip, Offset: n, Debounce: 20 * time.Millisecond}); err == nil {
 		s2.Close()
 		t.Fatal("a held line was requested again")
 	} else if !strings.Contains(err.Error(), chip) {

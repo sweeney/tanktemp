@@ -16,6 +16,9 @@ type Harness struct {
 	// Drive makes the line take each level in turn. Nil when nothing can
 	// drive it (a real reed on the rig): the edge checks are then skipped.
 	Drive func(t *testing.T, s meter.Source, levels ...meter.Level)
+	// Capacity is how many unread edges the Source holds; 0 skips the
+	// full-buffer check (it needs Drive too).
+	Capacity int
 }
 
 // Wait is how long Contract waits for an edge, or for Edges to close.
@@ -45,7 +48,9 @@ func Contract(t *testing.T, h Harness) {
 			t.Errorf("Initial() = %v", l)
 		}
 	})
-	t.Run("a line nothing drives stays open and quiet", func(t *testing.T) {
+	// Quiet, not open: a real line at rest may read closed (the pointer
+	// resting on the magnet).
+	t.Run("a line nothing drives stays quiet", func(t *testing.T) {
 		s := h.Open(t)
 		defer s.Close()
 		select {
@@ -79,7 +84,7 @@ func Contract(t *testing.T, h Harness) {
 		t.Log("no driver: the edge checks are skipped")
 		return
 	}
-	t.Run("edges come in seqno order, on the monotonic clock, at the levels driven", func(t *testing.T) {
+	t.Run("edges come in seqno order from 1, on the monotonic clock, at the levels driven", func(t *testing.T) {
 		s := h.Open(t)
 		defer s.Close()
 		l := s.Initial()
@@ -98,10 +103,50 @@ func Contract(t *testing.T, h Harness) {
 			if e.Level != w {
 				t.Errorf("edge %d: level %v, want %v", i, e.Level, w)
 			}
+			if i == 0 && e.Seqno != 1 {
+				t.Errorf("the first edge's seqno is %d: a request's events are numbered from 1, so the counter can see a loss before the first", e.Seqno)
+			}
 			if i > 0 && (e.Seqno != prev.Seqno+1 || e.At < prev.At) {
 				t.Errorf("edge %d: seqno %d at %v after seqno %d at %v", i, e.Seqno, e.At, prev.Seqno, prev.At)
 			}
 			prev = e
+		}
+	})
+	if h.Capacity == 0 {
+		return
+	}
+	t.Run("a full Edges drops rather than blocks, and a drop shows as a seqno gap", func(t *testing.T) {
+		s := h.Open(t)
+		defer s.Close()
+		levels := func(n int, from meter.Level) []meter.Level {
+			var out []meter.Level
+			for range n {
+				from = map[meter.Level]meter.Level{meter.Open: meter.Closed, meter.Closed: meter.Open}[from]
+				out = append(out, from)
+			}
+			return out
+		}
+		driven := make(chan struct{})
+		more := levels(h.Capacity+2, s.Initial())
+		go func() { defer close(driven); h.Drive(t, s, more...) }()
+		select {
+		case <-driven:
+		case <-time.After(Wait):
+			t.Fatalf("driving %d edges into a Source holding %d blocked", len(more), h.Capacity)
+		}
+		var last meter.Edge
+		for range h.Capacity {
+			if e, ok := Receive(t, s); ok {
+				last = e
+			}
+		}
+		h.Drive(t, s, levels(1, more[len(more)-1])...)
+		e, ok := Receive(t, s)
+		if !ok {
+			t.Fatal("Edges closed")
+		}
+		if e.Seqno <= last.Seqno+1 {
+			t.Errorf("after %d dropped edges, seqno %d follows %d: no gap to count as lost", len(more)-h.Capacity, e.Seqno, last.Seqno)
 		}
 	})
 }

@@ -3,6 +3,7 @@ package meter
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -37,8 +38,17 @@ func NewLoop(k *Counter, src Source, ticks <-chan time.Duration, emit func(Event
 	return &Loop{k: k, src: src, ticks: ticks, emit: emit, reqs: make(chan request), done: make(chan struct{})}
 }
 
-// ErrSourceClosed is Run's error when the Source's edges stop.
+// ErrSourceClosed is Run's error when the Source's edges stop. If the
+// Source can say why (an Err() error method, as gpioedge's line has), Run's
+// error wraps it with the reason.
 var ErrSourceClosed = errors.New("meter: the line's edges stopped")
+
+func (l *Loop) closed() error {
+	if e, ok := l.src.(interface{ Err() error }); ok && e.Err() != nil {
+		return fmt.Errorf("%w: %v", ErrSourceClosed, e.Err())
+	}
+	return ErrSourceClosed
+}
 
 // Run runs until ctx ends (nil) or the Source closes (ErrSourceClosed).
 func (l *Loop) Run(ctx context.Context) error {
@@ -53,7 +63,7 @@ func (l *Loop) Run(ctx context.Context) error {
 			return nil
 		case e, ok := <-l.src.Edges():
 			if !ok {
-				return ErrSourceClosed
+				return l.closed()
 			}
 			l.publish(l.k.Observe(e))
 		case now := <-l.ticks:
@@ -61,7 +71,7 @@ func (l *Loop) Run(ctx context.Context) error {
 			// among ready cases, and a tick must never confirm a closing
 			// whose (earlier) reopening is waiting behind it.
 			if !l.drain(maxDuration) {
-				return ErrSourceClosed
+				return l.closed()
 			}
 			l.publish(l.k.Tick(now))
 		case r := <-l.reqs:
@@ -69,7 +79,7 @@ func (l *Loop) Run(ctx context.Context) error {
 			// of now". An edge stamped later waits (in held) until after.
 			if !l.drain(r.now) {
 				close(r.reply)
-				return ErrSourceClosed
+				return l.closed()
 			}
 			l.publish(l.k.Tick(r.now))
 			s := l.k.Snapshot()

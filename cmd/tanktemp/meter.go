@@ -9,6 +9,7 @@ import (
 
 	"github.com/sweeney/common/mqttpub"
 	"github.com/sweeney/tanktemp/internal/config"
+	"github.com/sweeney/tanktemp/internal/gpioedge"
 	"github.com/sweeney/tanktemp/internal/meter"
 	"github.com/sweeney/tanktemp/internal/payload"
 	"github.com/sweeney/tanktemp/internal/web"
@@ -320,4 +321,14 @@ func (v *meterStatus) report() []web.MeterStatus {
 		out.LastPulseAt = &p
 	}
 	return []web.MeterStatus{out}
+}
+
+// lineSettings is a meter's line as gpioedge requests it: every pin and
+// electrical fact from the config.
+func lineSettings(m config.Meter) gpioedge.Settings {
+	return gpioedge.Settings{
+		Chip: m.Chip, Offset: *m.GPIO, Debounce: m.Debounce,
+		Bias:       map[string]gpioedge.Bias{config.BiasPullUp: gpioedge.PullUp, config.BiasPullDown: gpioedge.PullDown, config.BiasNone: gpioedge.None}[m.Bias],
+		ClosedHigh: m.ClosedLevel == config.ClosedHigh,
+	}
 }

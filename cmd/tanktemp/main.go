@@ -203,7 +203,7 @@ func serve(cfg config.Config) error {
 		Verbose:     vlog,
 		Version:     version,
 		OpenMeter: func(m config.Meter) (meter.Source, error) {
-			return gpioedge.Open(m.Chip, *m.GPIO, m.Debounce)
+			return gpioedge.Open(lineSettings(m))
 		},
 		Mono: gpioedge.Now,
 	})

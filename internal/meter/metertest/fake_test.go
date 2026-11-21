@@ -17,6 +17,7 @@ func TestFakeMeetsContract(t *testing.T) {
 				f.Push(time.Duration(i+1)*time.Second, l)
 			}
 		},
+		Capacity: Capacity,
 	})
 }
 

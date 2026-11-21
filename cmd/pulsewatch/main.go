@@ -43,7 +43,7 @@ func run(args []string, out, errOut io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	src, err := gpioedge.Open(*chip, *gpio, *debounce)
+	src, err := gpioedge.Open(gpioedge.Settings{Chip: *chip, Offset: *gpio, Debounce: *debounce})
 	if err != nil {
 		fmt.Fprintf(errOut, "pulsewatch: %v\n", err)
 		return 1

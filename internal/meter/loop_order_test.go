@@ -2,6 +2,8 @@ package meter_test
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -133,5 +135,26 @@ func TestLoopAskHonoursItsContextOnceAccepted(t *testing.T) {
 		}
 	case <-time.After(500 * ms):
 		t.Error("Snapshot still waiting 450 ms past its deadline")
+	}
+}
+
+// errSource is a Source that can say why its edges stopped.
+type errSource struct {
+	*metertest.Fake
+	err error
+}
+
+func (s errSource) Err() error { return s.err }
+
+// When a Source says why its edges stopped (gpioedge's line: its chip
+// stopped answering), Run's error carries the reason, for /healthz.
+func TestLoopSaysWhyTheSourceStopped(t *testing.T) {
+	src := errSource{metertest.NewFake(meter.Open), errors.New("GPIO 27 on gpiochip0 stopped answering: no such device")}
+	k, _ := meter.New(meter.Config{Hold: 20 * ms, MinInterval: 600 * ms}, meter.Open)
+	l := meter.NewLoop(k, src, nil, func(meter.Event) {})
+	src.Close()
+	err := l.Run(context.Background())
+	if !errors.Is(err, meter.ErrSourceClosed) || !strings.Contains(err.Error(), "no such device") {
+		t.Errorf("Run = %v", err)
 	}
 }

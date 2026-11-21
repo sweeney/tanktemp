@@ -43,7 +43,9 @@ var forbiddenDirect = []string{
 
 var forbiddenDeps = []string{
 	module + "/internal/onewire",
+	module + "/internal/gpioedge",
 	module + "/internal/web",
+	"github.com/warthog618/go-gpiocdev",
 	"github.com/eclipse/paho.mqtt.golang",
 	"github.com/sweeney/common/mqttpub",
 }

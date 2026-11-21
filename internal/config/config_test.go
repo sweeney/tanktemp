@@ -278,6 +278,32 @@ func TestMeterProblemsHaveLines(t *testing.T) {
 	}
 }
 
+// The wiring's electrical facts are config, not code (review on #9): by
+// default a reed to ground with the internal pull-up, closed reading low;
+// an external resistor (bias none) or an inverting opto-isolator (closed
+// high) is a config change.
+func TestMeterWiring(t *testing.T) {
+	c, err := Load([]byte(withMeter))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := c.Meters[0]; m.Bias != BiasPullUp || m.ClosedLevel != ClosedLow {
+		t.Errorf("defaults: bias %q, closed_level %q", m.Bias, m.ClosedLevel)
+	}
+	for _, b := range []string{BiasPullUp, BiasPullDown, BiasNone} {
+		for _, l := range []string{ClosedLow, ClosedHigh} {
+			c, err := Load([]byte(withMeter + "    bias: " + b + "\n    closed_level: " + l + "\n"))
+			if err != nil {
+				t.Errorf("bias %s, closed_level %s: %v", b, l, err)
+				continue
+			}
+			if m := c.Meters[0]; m.Bias != b || m.ClosedLevel != l {
+				t.Errorf("got bias %q, closed_level %q", m.Bias, m.ClosedLevel)
+			}
+		}
+	}
+}
+
 func TestMeterOverrides(t *testing.T) {
 	c, err := Load([]byte(withMeter + "    chip: gpiochip4\n    debounce: 10ms\n    hold: 30ms\n    min_interval: 500ms\n"))
 	if err != nil {
@@ -314,6 +340,8 @@ func TestMeterRejects(t *testing.T) {
 		{"hold not under min_interval", withMeter + "    hold: 600ms\n", "meters[0].hold"},
 		{"min_interval past the meter's maximum flow", withMeter + "    min_interval: 800ms\n", "meters[0].min_interval"},
 		{"two meters", two, "one meter"},
+		{"unknown bias", withMeter + "    bias: pull-sideways\n", "meters[0].bias"},
+		{"unknown closed level", withMeter + "    closed_level: 0\n", "meters[0].closed_level"},
 		// .inf passed "> 0" and then crashed the first meter message (json
 		// can't encode +Inf), restarting tanktemp every 5 s (review on #9).
 		{"infinite litres per pulse", strings.Replace(withMeter, "litres_per_pulse: 1", "litres_per_pulse: .inf", 1), "litres_per_pulse"},

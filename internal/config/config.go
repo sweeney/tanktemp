@@ -169,7 +169,19 @@ type Sensor struct {
 }
 
 // Meter defaults and limits (GUESSES G54-G56).
-var DefaultMeter = Meter{Chip: "gpiochip0", Debounce: 20 * time.Millisecond, Hold: 20 * time.Millisecond, MinInterval: 600 * time.Millisecond}
+var DefaultMeter = Meter{Chip: "gpiochip0", Bias: BiasPullUp, ClosedLevel: ClosedLow,
+	Debounce: 20 * time.Millisecond, Hold: 20 * time.Millisecond, MinInterval: 600 * time.Millisecond}
+
+// A meter line's bias, and the level it reads with the reed closed: the
+// wiring's electrical facts. The default, a reed between the GPIO and
+// ground with the Pi's internal pull-up, reads low when closed.
+const (
+	BiasPullUp   = "pull-up"
+	BiasPullDown = "pull-down"
+	BiasNone     = "none" // an external resistor sets the idle level
+	ClosedLow    = "low"
+	ClosedHigh   = "high" // e.g. behind an inverting opto-isolator
+)
 
 const (
 	// MinMeterDebounce: below this a typo could leave today's unfiltered
@@ -193,7 +205,7 @@ const (
 	MaxGPIO = 27
 )
 
-var meterKeys = []string{"device_id", "chip", "gpio", "litres_per_pulse", "debounce", "hold", "min_interval"}
+var meterKeys = []string{"device_id", "chip", "gpio", "bias", "closed_level", "litres_per_pulse", "debounce", "hold", "min_interval"}
 
 // UnmarshalYAML starts each meter from DefaultMeter, and refuses unknown
 // keys (n.Decode alone wouldn't: KnownFields doesn't reach custom decoders).
@@ -532,16 +544,20 @@ func mapValue(n *yaml.Node, key string) *yaml.Node {
 //	    gpio: 27                     # the BCM line, on the 40-pin header (2..27)
 //	    litres_per_pulse: 1          # the meter's K; required, at most 1000
 //	    chip: gpiochip0              # default
+//	    bias: pull-up                # pull-up (default), pull-down or none
+//	    closed_level: low            # low (default) or high: what the line reads with the reed closed
 //	    debounce: 20ms               # kernel debounce: required, 5ms..100ms (GUESSES G54)
 //	    hold: 20ms                   # a closing counts once held this long; at most 100ms (G55)
 //	    min_interval: 600ms          # the shortest gap between counted litres (G56)
 //
-// The line is read with the pull-up on: open reads high, closed low. One
-// meter only for now: WIRE.md gives a second one its own topic, not yet built.
+// One meter only for now: WIRE.md gives a second one its own topic, not
+// yet built.
 type Meter struct {
 	DeviceID       string        `yaml:"device_id"`
 	Chip           string        `yaml:"chip"`
 	GPIO           *int          `yaml:"gpio"`
+	Bias           string        `yaml:"bias"`
+	ClosedLevel    string        `yaml:"closed_level"`
 	LitresPerPulse float64       `yaml:"litres_per_pulse"`
 	Debounce       time.Duration `yaml:"debounce"`
 	Hold           time.Duration `yaml:"hold"`
@@ -595,6 +611,12 @@ func (v *validator) checkMeters(c *Config) {
 			v.add(v.lines.meter(i, "gpio"), p+".gpio", "required: a BCM line %d..%d", MinGPIO, MaxGPIO)
 		case *m.GPIO < MinGPIO:
 			v.add(v.lines.meter(i, "gpio"), p+".gpio", "%d is a HAT ID pin (ID_SD/ID_SC), which the firmware probes at boot; use %d..%d", *m.GPIO, MinGPIO, MaxGPIO)
+		}
+		if m.Bias != BiasPullUp && m.Bias != BiasPullDown && m.Bias != BiasNone {
+			v.add(v.lines.meter(i, "bias"), p+".bias", "%q: one of %s, %s or %s", m.Bias, BiasPullUp, BiasPullDown, BiasNone)
+		}
+		if m.ClosedLevel != ClosedLow && m.ClosedLevel != ClosedHigh {
+			v.add(v.lines.meter(i, "closed_level"), p+".closed_level", "%q: %s or %s, what the line reads with the reed closed", m.ClosedLevel, ClosedLow, ClosedHigh)
 		}
 		if m.Chip == "" {
 			v.add(v.lines.meter(i, "chip"), p+".chip", "empty (the default is %s)", DefaultMeter.Chip)
