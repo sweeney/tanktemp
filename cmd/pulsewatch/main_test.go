@@ -16,13 +16,13 @@ const ms = time.Millisecond
 // One run with every verdict, the reed starting open:
 //
 //	seq 1  1000 ms closed  held
-//	seq 2  1400 ms open    confirms litre 1 (at seq 1), closed 400 ms
-//	seq 3  1500 ms open    noise: already open
+//	seq 2  1400 ms open    confirms litre 1 (at seq 1); the opening is held
+//	seq 3  1500 ms open    noise: already open; confirms the opening: closed 400 ms
 //	seq 4  2000 ms closed  held
 //	seq 5  2005 ms open    short: reopened in 5 ms, under the 20 ms hold
 //	seq 6  2100 ms closed  held (1100 ms after litre 1)
-//	seq 7  2500 ms open    litre 2, closed 400 ms
-//	seq 8  2600 ms closed  held
+//	seq 7  2500 ms open    litre 2
+//	seq 8  2600 ms closed  held; litre 2 ended, closed 400 ms
 //	seq 9  2700 ms open    glitch: litre 3 would be 500 ms after litre 2
 //	seq 13 3600 ms open    3 edges lost before it
 func TestWatch(t *testing.T) {
@@ -46,13 +46,13 @@ func TestWatch(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
 	want := [][]string{
 		{"seq 1 ", "closed", "+0.000s"},
-		{"seq 2 ", "open", "+0.400s", "litre 1", "closed 400ms"},
-		{"seq 3 ", "open", "noise"},
+		{"seq 2 ", "open", "+0.400s", "litre 1"},
+		{"seq 3 ", "open", "noise", "litre 1 ended: closed 400ms"},
 		{"seq 4 ", "closed"},
 		{"seq 5 ", "open", "short"},
 		{"seq 6 ", "closed"},
-		{"seq 7 ", "open", "litre 2", "closed 400ms"},
-		{"seq 8 ", "closed"},
+		{"seq 7 ", "open", "litre 2"},
+		{"seq 8 ", "closed", "litre 2 ended: closed 400ms"},
 		{"seq 9 ", "open", "glitch"},
 		{"seq 13 ", "open", "3 lost before it"},
 		{"2 litres", "noise 1", "short 1", "glitches 1", "lost 3"},

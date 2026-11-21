@@ -14,8 +14,9 @@ const ms = time.Millisecond
 
 var cfg = Config{Hold: 20 * ms, MinInterval: 600 * ms}
 
-// feed runs edges through a fresh counter (seqnos 1, 2, 3, ...) and returns
-// it with every event it emitted, in order.
+// feed runs edges through a fresh counter (seqnos 1, 2, 3, ...), then lets
+// the last edge's hold pass (a Tick at its time + Hold), and returns the
+// counter with every event it emitted, in order.
 func feed(t *testing.T, c Config, initial Level, edges ...Edge) (*Counter, []Event) {
 	t.Helper()
 	k, err := New(c, initial)
@@ -28,6 +29,9 @@ func feed(t *testing.T, c Config, initial Level, edges ...Edge) (*Counter, []Eve
 			e.Seqno = uint64(i + 1)
 		}
 		evs = append(evs, k.Observe(e)...)
+	}
+	if len(edges) > 0 {
+		evs = append(evs, k.Tick(edges[len(edges)-1].At+c.Hold)...)
 	}
 	return k, evs
 }
@@ -90,7 +94,8 @@ func TestInterval(t *testing.T) {
 // Tick confirms a held closing without waiting for the opening (the pointer
 // can rest on the magnet for hours), stamped at the closing, not at the tick.
 func TestTickConfirmsHeldClosing(t *testing.T) {
-	k, evs := feed(t, cfg, Open, at(1000*ms, Closed))
+	k, _ := New(cfg, Open)
+	evs := k.Observe(Edge{At: 1000 * ms, Level: Closed, Seqno: 1})
 	if len(evs) != 0 {
 		t.Fatalf("a closing was confirmed before its hold: %s", kinds(evs))
 	}
@@ -105,6 +110,7 @@ func TestTickConfirmsHeldClosing(t *testing.T) {
 		t.Errorf("a second Tick confirmed again: %s", kinds(evs))
 	}
 	evs = k.Observe(Edge{At: 9000 * ms, Level: Open, Seqno: 2})
+	evs = append(evs, k.Tick(9020*ms)...)
 	if kinds(evs) != "open" || *k.Snapshot().LastClosed != 8000*ms {
 		t.Errorf("after the rest: %s, %+v", kinds(evs), k.Snapshot())
 	}
@@ -144,6 +150,7 @@ func TestShortClosingIsDropped(t *testing.T) {
 	// And the counter carries on normally.
 	_ = k.Observe(Edge{At: 2000 * ms, Level: Closed, Seqno: 3})
 	evs = k.Observe(Edge{At: 2400 * ms, Level: Open, Seqno: 4})
+	evs = append(evs, k.Tick(2420*ms)...)
 	if kinds(evs) != "pulse,open" || k.Snapshot().Count != 1 {
 		t.Errorf("after a short: %s, %+v", kinds(evs), k.Snapshot())
 	}
@@ -208,7 +215,7 @@ func TestSeqnoGapResyncs(t *testing.T) {
 	}
 	// The next real pulse counts.
 	k.Observe(Edge{At: 5000 * ms, Level: Closed, Seqno: 9})
-	if evs := k.Observe(Edge{At: 5400 * ms, Level: Open, Seqno: 10}); kinds(evs) != "pulse,open" || k.Snapshot().Count != 2 {
+	if evs := append(k.Observe(Edge{At: 5400 * ms, Level: Open, Seqno: 10}), k.Tick(5420*ms)...); kinds(evs) != "pulse,open" || k.Snapshot().Count != 2 {
 		t.Errorf("after the resync: %s, %+v", kinds(evs), k.Snapshot())
 	}
 }
@@ -230,24 +237,26 @@ func TestSeqnoGapDropsHeldClosingPastItsHold(t *testing.T) {
 // a held closing is kept, so no litre vanishes without trace (review, #1).
 func TestRepeatedSeqnoKeepsPending(t *testing.T) {
 	k, _ := New(cfg, Open)
-	k.Observe(Edge{At: 1000 * ms, Level: Closed, Seqno: 5})
-	k.Observe(Edge{At: 1001 * ms, Level: Closed, Seqno: 5}) // repeat
-	k.Observe(Edge{At: 1002 * ms, Level: Open, Seqno: 3})   // backwards
+	k.Observe(Edge{At: 1000 * ms, Level: Closed, Seqno: 1})
+	k.Observe(Edge{At: 1001 * ms, Level: Closed, Seqno: 1}) // repeat
+	k.Observe(Edge{At: 1002 * ms, Level: Open, Seqno: 0})   // backwards
 	evs := k.Tick(2000 * ms)
 	s := k.Snapshot()
 	if kinds(evs) != "pulse" || s.Count != 1 || s.Noise != 2 || s.Lost != 0 || s.Level != Closed {
 		t.Errorf("events %s, snapshot %+v; want the held closing counted, noise 2, lost 0", kinds(evs), s)
 	}
-	if evs := k.Observe(Edge{At: 2400 * ms, Level: Open, Seqno: 6}); kinds(evs) != "open" {
+	if evs := append(k.Observe(Edge{At: 2400 * ms, Level: Open, Seqno: 2}), k.Tick(2420*ms)...); kinds(evs) != "open" {
 		t.Errorf("the next real edge: %s", kinds(evs))
 	}
 }
 
-// The first edge sets the seqno base; it's never a gap.
-func TestFirstSeqnoIsTheBase(t *testing.T) {
+// The kernel numbers a request's events from 1 (review on #9: the first
+// edge used to set the base, so a loss before it went uncounted). A first
+// edge numbered 41 is a gap of 40, and resyncs like any other.
+func TestFirstSeqnoAfterOneIsALoss(t *testing.T) {
 	k, _ := feed(t, cfg, Open, Edge{At: 1000 * ms, Level: Closed, Seqno: 41}, Edge{At: 1400 * ms, Level: Open, Seqno: 42})
-	if s := k.Snapshot(); s.Lost != 0 || s.Count != 1 {
-		t.Errorf("snapshot = %+v", s)
+	if s := k.Snapshot(); s.Lost != 40 || s.Count != 0 {
+		t.Errorf("snapshot = %+v, want lost 40 and nothing counted across it", s)
 	}
 }
 

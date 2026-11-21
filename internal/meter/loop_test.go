@@ -79,23 +79,28 @@ func TestLoopPublishesAPulseAtTheTickAfterItsHold(t *testing.T) {
 		t.Errorf("emitted %+v", got)
 	}
 	h.src.Push(1400*ms, meter.Open)
+	h.ticks <- 1410 * ms
+	h.none(t)
+	h.ticks <- 1450 * ms // the opening is held too
 	got = h.next(t)
-	if got.ev.Kind != meter.Opened || got.snap.LastClosed == nil || *got.snap.LastClosed != 400*ms {
+	if got.ev.Kind != meter.Opened || got.ev.At != 1400*ms || got.snap.LastClosed == nil || *got.snap.LastClosed != 400*ms {
 		t.Errorf("emitted %+v", got)
 	}
 }
 
-// An edge confirms a held closing too, with no tick.
+// An edge confirms a held change too, with no tick.
 func TestLoopEdgeConfirmsWithoutATick(t *testing.T) {
 	h := start(t, meter.Open)
 	h.src.Push(1000*ms, meter.Closed)
 	h.src.Push(1400*ms, meter.Open)
-	a, b := h.next(t), h.next(t)
+	a := h.next(t)
+	h.src.Push(2000*ms, meter.Closed) // confirms the opening
+	b := h.next(t)
 	if a.ev.Kind != meter.Pulse || b.ev.Kind != meter.Opened {
 		t.Fatalf("emitted %+v then %+v", a, b)
 	}
-	// One edge confirmed and ended the litre: the pulse's snapshot is the
-	// state at the pulse (closed, no closed time yet), not after the open.
+	// The pulse's snapshot is the state at the pulse (closed, no closed
+	// time yet), not after the open.
 	if a.snap.Level != meter.Closed || a.snap.LastClosed != nil || b.snap.Level != meter.Open || *b.snap.LastClosed != 400*ms {
 		t.Errorf("pulse snapshot %+v, open snapshot %+v", a.snap, b.snap)
 	}

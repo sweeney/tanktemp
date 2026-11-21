@@ -22,17 +22,19 @@
 //     closing is kept.
 //  2. Noise: an edge reporting the level the counter already holds changes
 //     nothing.
-//  3. Hold: a closing counts only once it has stayed closed for Hold, which
-//     the next edge or a Tick confirms. A closing that reopens sooner was a
-//     spike that flipped the reading: both edges are one "short". This is
-//     belt and braces behind the kernel's debounce.
+//  3. Hold: a change of level, either way, takes effect only once it has
+//     held for Hold, which the next edge or a Tick confirms. One that
+//     reverts sooner was a spike that flipped the reading: both edges are
+//     one "short", and nothing changes (a litre in progress carries on
+//     through an open spike). This is belt and braces behind the kernel's
+//     debounce.
 //  4. MinInterval: a held closing less than MinInterval after the last
 //     COUNTED closing is a glitch, a backstop: the meter's maximum flow
 //     (Q4, 83 L/min) is a pulse every 0.72 s.
 //
-// A counted litre is stamped at its closing edge, not when the hold
-// confirmed it. The opening that ends a counted pulse reports how long the
-// reed was closed, which gives the flow within a single litre (the reed is
+// A counted litre is stamped at its closing edge, and the opening that ends
+// it at its opening edge, not when the hold confirmed them. The opening
+// reports how long the reed was closed, which gives the flow within a single litre (the reed is
 // closed for a roughly fixed share of each turn; consumers learn the share).
 package meter
 
@@ -86,10 +88,10 @@ const (
 	Swept Kind = "sweep"
 )
 
-// Event is something a caller publishes: a counted litre, or the end of
-// one, with the counter's state as of that event. (One edge can confirm a
-// held litre and end it: the pulse's snapshot is still the state at the
-// pulse, closed, not after the opening.)
+// Event is something a caller publishes: a counted litre, the end of one,
+// or (from Loop) a sweep's state, with the counter's state as of that event.
+// The caller's emit must not call back into the Loop (Snapshot, Sweep): the
+// loop is waiting on it.
 type Event struct {
 	Kind Kind
 	At   time.Duration
@@ -119,12 +121,12 @@ type Snapshot struct {
 
 // Counter is the state machine. It is not safe for concurrent use.
 type Counter struct {
-	cfg     Config
-	level   Level
-	seq     uint64
-	haveSeq bool
+	cfg    Config
+	level  Level  // the line's level as last read
+	stable Level  // the level once held for Hold
+	seq    uint64 // the last edge's seqno; the kernel numbers from 1
 
-	pending *Edge // a closing waiting out its hold
+	pending *Edge // a change of level waiting out its hold
 	inPulse bool  // the current closed phase is a counted litre
 	pulseAt time.Duration
 
@@ -143,7 +145,7 @@ func New(c Config, initial Level) (*Counter, error) {
 	if initial != Open && initial != Closed {
 		return nil, fmt.Errorf("meter: initial level %v is not open or closed", initial)
 	}
-	k := &Counter{cfg: c, level: initial}
+	k := &Counter{cfg: c, level: initial, stable: initial}
 	k.snap.Level = initial
 	return k, nil
 }
@@ -151,21 +153,24 @@ func New(c Config, initial Level) (*Counter, error) {
 // Observe takes the next edge and returns what to publish, in order.
 func (k *Counter) Observe(e Edge) []Event {
 	// A repeated or backwards seqno is no edge the kernel sent in order:
-	// ignore it as noise, and keep any held closing.
-	if k.haveSeq && e.Seqno <= k.seq {
+	// ignore it as noise, and keep any held change.
+	if e.Seqno <= k.seq {
 		k.snap.Noise++
 		return nil
 	}
-	// Then a gap: a closing still held at a gap is dropped even past its
-	// hold, since the dropped edges may have reopened it.
-	if k.haveSeq && e.Seqno != k.seq+1 {
+	// Then a gap (from 1: the kernel numbers each request's events from 1).
+	// A change still held at a gap is dropped even past its hold, since the
+	// dropped edges may have undone it, and a litre in progress has no
+	// known end.
+	if e.Seqno != k.seq+1 {
 		k.snap.Lost += e.Seqno - k.seq - 1
 		k.seq = e.Seqno
 		k.pending, k.inPulse = nil, false
 		k.setLevel(e.Level)
+		k.stable = e.Level
 		return nil
 	}
-	k.seq, k.haveSeq = e.Seqno, true
+	k.seq = e.Seqno
 
 	evs := k.Tick(e.At)
 
@@ -173,36 +178,36 @@ func (k *Counter) Observe(e Edge) []Event {
 		k.snap.Noise++
 		return evs
 	}
-	if e.Level == Closed {
-		k.setLevel(Closed)
-		p := e
-		k.pending = &p
-		return append(evs, k.Tick(e.At)...) // a zero hold confirms at once
-	}
-	// Closed -> open.
-	k.setLevel(Open)
-	if k.pending != nil { // reopened within the hold
+	k.setLevel(e.Level)
+	if k.pending != nil { // back to the stable level within the hold: a spike
 		k.pending = nil
 		k.snap.Short++
 		return evs
 	}
-	if k.inPulse {
-		k.inPulse = false
-		d := e.At - k.pulseAt
-		k.snap.LastClosed = &d
-		evs = append(evs, Event{Kind: Opened, At: e.At, Snap: k.Snapshot()})
-	}
-	return evs
+	p := e
+	k.pending = &p
+	return append(evs, k.Tick(e.At)...) // a zero hold confirms at once
 }
 
-// Tick confirms a held closing once now is at least Hold after it, so a
-// litre counts even while the pointer rests on the magnet.
+// Tick confirms a held change once now is at least Hold after it: so a
+// litre counts even while the pointer rests on the magnet, and the opening
+// that ends one is reported though no edge follows it.
 func (k *Counter) Tick(now time.Duration) []Event {
 	p := k.pending
 	if p == nil || now-p.At < k.cfg.Hold {
 		return nil
 	}
 	k.pending = nil
+	k.stable = p.Level
+	if p.Level == Open {
+		if !k.inPulse {
+			return nil
+		}
+		k.inPulse = false
+		d := p.At - k.pulseAt
+		k.snap.LastClosed = &d
+		return []Event{{Kind: Opened, At: p.At, Snap: k.Snapshot()}}
+	}
 	if last := k.snap.LastPulseAt; last != nil && k.cfg.MinInterval > 0 && p.At-*last < k.cfg.MinInterval {
 		k.snap.Glitches++
 		return nil

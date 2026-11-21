@@ -132,17 +132,17 @@ what a rejected edge means are for consumers (washhouse).
 | `device_id` | the meter: its key in `devices_<site>` |
 | `timestamp` | to the second. For `pulse`, the counted closing; for `open`, the opening (exactly: `last_pulse_at` + `last_closed_ms`; use that, not this rounded time, for flow); for `sweep`, the sweep's start, the same as that sweep's tank states. A `sweep` message is the meter **as of the sweep's start** (taken then, not after the sweep), so it and the tank states are a matched snapshot |
 | `clock_synced` | as for state |
-| `trigger` | `pulse`: a litre was counted, published within `meter.hold` + 50 ms of its closing (tanktemp checks a held closing at least every 50 ms, and at every edge). `open`: the opening that ends a counted litre, with its `last_closed_ms`. `sweep`: with every sweep, so the count is never older than a sweep |
+| `trigger` | `pulse`: a litre was counted, published within `meter.hold` + 50 ms of its closing (tanktemp checks a held closing at least every 50 ms, and at every edge). `open`: the opening that ends a counted litre, with its `last_closed_ms`, published within `meter.hold` + 50 ms of the opening (an opening is held too) and stamped at the opening itself. `sweep`: with every sweep, so the count is never older than a sweep |
 | `seq` | numbers this run's meter messages as they're published: 1, 2, 3… from `counting_since`, with no gaps of tanktemp's making (one missing is a publish that failed, the broker being unreachable, or a message lost in transit). Messages are in the counter's order, so `count` never falls as `seq` rises. A retained replay repeats one; **de-duplicate on (`counting_since`, `seq`)**. Only `count` measures litres: tanktemp may skip a litre's own message when the broker is too slow (and replaces a waiting `sweep` message with a newer one), which a consumer sees as `count` jumping by more than one |
 | `litres_per_pulse` | from the config (the meter's K) |
-| `level` | the reed now, after debounce: `open` or `closed`. Closed for hours means the pointer is resting on the magnet. A new closing reads `closed` for up to `meter.hold` + 50 ms before its `pulse`, while it's being held; that is not a fault. Never unknown: tanktemp reads it when it requests the line, and a line it can't read is `gpio_request_failed` |
+| `level` | the reed now, after debounce: `open` or `closed`. Closed for hours means the pointer is resting on the magnet. A new closing reads `closed` for up to `meter.hold` + 50 ms before its `pulse`, and the opening that ends a litre reads `open` as long before its `open`, while each is being held; that is not a fault. Never unknown: tanktemp reads it when it requests the line, and a line it can't read is `gpio_request_failed` |
 | `counting_since` | when this count started: when tanktemp requested the line. A new value is a reset; anything between the two runs went unseen |
 | `count` | litres counted since `counting_since`, as pulses: litres = `count` × `litres_per_pulse`. A message lost in delivery loses nothing: the next one carries the total |
 | `last_pulse_at` | the last counted closing, **to the millisecond** (unlike other times). The kernel stamps an edge once its debounce has confirmed it, so this, like every meter time, is about `meter.debounce` (20 ms) after the reed moved; intervals and closed times are unaffected. `null` before the first |
 | `last_interval_ms` | between the last two counted closings, on the monotonic clock. `null` before the second |
 | `last_closed_ms` | how long the reed stayed closed in the last counted litre that has ended, on the monotonic clock. The reed is closed for a roughly fixed share of each turn (about 0.23 on the rig), so this gives the flow within one litre; tanktemp doesn't interpret it. Minutes or hours means the pointer rested on the magnet (the rig's first night had 4 h 26 m): it is not a flow. `null` until one has |
 | `noise` | edges reporting the level the reed already had: a spike shorter than the kernel could read (or, should the kernel ever send one, an event out of order). They change nothing. Expected 0 with the kernel debounce on; a rise means it isn't holding |
-| `short` | closings that reopened within `meter.hold`: a spike that did flip the reading. Neither edge counts. Expected 0 |
+| `short` | spikes that did flip the reading, either way: a closing that reopened within `meter.hold`, or an opening that reclosed within it. Neither edge of a spike counts, and a litre in progress carries on through one (it isn't ended, and the reclosing isn't a new litre). Expected 0 |
 | `glitches` | held closings less than `meter.min_interval` after the last counted one. Not counted. The meter's maximum flow is a litre every 0.72 s, so expected 0 |
 | `lost` | edges the kernel dropped (its event buffer overflowed). After a loss tanktemp takes the line's level as it now is and counts nothing across the gap, nor a closing still being held when it came: a litre may be lost, never invented. **So with `lost` > 0, `count` is a lower bound, short by at most 2 × `lost`** (a loss of n edges can miss up to n/2 + 1 litres: those among the dropped edges, the held one, and the one in progress at the resync; and n/2 + 1 ≤ 2n). Expected 0 |
 
@@ -152,8 +152,9 @@ what a rejected edge means are for consumers (washhouse).
 litre per change from open to closed, judged on the level read after each
 edge, never on the edge's label alone. The checks, in order: a gap in the
 kernel's event numbers (`lost`), an edge that doesn't change the level
-(`noise`), a closing that doesn't hold for `meter.hold` (`short`), and a
-closing too soon after the last counted one (`glitches`). The kernel
+(`noise`), a change of level, either way, that doesn't hold for
+`meter.hold` (`short`), and a closing too soon after the last counted one
+(`glitches`). The kernel
 debounces the line first (`meter.debounce`, required, at least 5 ms). On the rig's
 first night, with no debounce, 15 of 277 edges were spikes that came as the
 boiler's programmer switched; counting every falling edge gave 140 litres,
@@ -218,6 +219,9 @@ What MQTT does and doesn't guarantee here:
   status gains `meters` (`[]` with none) and the `startup_problems` code
   `gpio_request_failed`. Tank state is unchanged. Consumers that decode
   status strictly must accept the new key.
+  Before any consumer used it (review on #9): an opening is held like a
+  closing, so `short` counts spikes either way, and `open` is published
+  within `meter.hold` + 50 ms of the opening.
 
 - **2026-11-20, BREAKING, topics only:** the production prefix moved from
   `energy/hot_water` to `water/hot/tanktemp`, so the topics are now

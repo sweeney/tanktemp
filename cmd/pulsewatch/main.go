@@ -99,8 +99,11 @@ func watch(ctx context.Context, src meter.Source, ticks <-chan time.Duration, k 
 		case now := <-ticks:
 			before := k.Snapshot()
 			for _, ev := range k.Tick(now) {
-				if ev.Kind == meter.Pulse {
+				switch ev.Kind {
+				case meter.Pulse:
 					fmt.Fprintf(out, "tick           litre %d (held %v, resting on the magnet)\n", ev.Snap.Count, now-ev.At)
+				case meter.Opened:
+					fmt.Fprintf(out, "tick           litre %d ended: closed %v\n", ev.Snap.Count, *ev.Snap.LastClosed)
 				}
 			}
 			if k.Snapshot().Glitches > before.Glitches {
@@ -136,7 +139,7 @@ func watch(ctx context.Context, src meter.Source, ticks <-chan time.Duration, k 
 				case meter.Pulse:
 					says = append(says, fmt.Sprintf("litre %d", ev.Snap.Count))
 				case meter.Opened:
-					says = append(says, fmt.Sprintf("closed %v", *ev.Snap.LastClosed))
+					says = append(says, fmt.Sprintf("litre %d ended: closed %v", ev.Snap.Count, *ev.Snap.LastClosed))
 				}
 			}
 			if e.Level == meter.Closed && after.Noise == before.Noise && after.Lost == before.Lost {
