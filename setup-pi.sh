@@ -154,6 +154,14 @@ link_or() { echo "readlink $1 || { [ -e $1 ] && echo ELSE || echo MISSING; }"; }
 state() { echo "e=\$(systemctl is-enabled $1 2>/dev/null) || true; echo \"\${e:-not-found}\"; systemctl is-active $1 || true"; }
 # perms PATH: owner:group mode, or MISSING.
 perms() { echo "if [ -e $1 ]; then stat -c '%U:%G %a' $1; else echo MISSING; fi"; }
+# W1_ODD: an awk program listing the 1-Wire lines in config.txt this
+# script can't read (review on #11): a dtoverlay=w1-gpio under a filter
+# section other than [all] (it applies only on some Pis, or none), and any
+# dtparam=gpiopin= (the overlay's pin set on a line of its own). One line,
+# "LINE: text (in [section]); ...", empty when there are none (after the
+# w1: it is sent with).
+# shellcheck disable=SC2016 # an awk program, run on the Pi
+W1_ODD='/^[[:space:]]*\[/ { sec = $1 } /^[[:space:]]*dtoverlay=w1-gpio/ && sec != "" && sec != "[all]" { printf "%d: %s (in %s); ", NR, $0, sec } /^[[:space:]]*dtparam=gpiopin/ { printf "%d: %s; ", NR, $0 } END { print "" }'
 facts=$(r "uname -m
 echo \$HOME
 id -un
@@ -177,7 +185,8 @@ $(state templog)
 $(perms "$CONFIG_PATH")
 [ -e $SUDOERS ] && echo yes || echo no
 getent group gpio >/dev/null 2>&1 && echo gpio-yes || echo gpio-no
-for c in $SUDO_CMDS; do p=\$(PATH=$SUDO_PATH command -v \$c) || p=MISSING; printf '%s=%s ' \$c \"\$p\"; done; echo") || refuse "cannot ssh to $REMOTE"
+for c in $SUDO_CMDS; do p=\$(PATH=$SUDO_PATH command -v \$c) || p=MISSING; printf '%s=%s ' \$c \"\$p\"; done; echo
+printf w1:; if [ -r $BOOT_CONFIG ]; then awk '$W1_ODD' $BOOT_CONFIG; else echo; fi") || refuse "cannot ssh to $REMOTE"
 {
     read -r remote_arch
     read -r pi_home
@@ -204,7 +213,9 @@ for c in $SUDO_CMDS; do p=\$(PATH=$SUDO_PATH command -v \$c) || p=MISSING; print
     read -r have_sudoers
     read -r gpio_group
     read -r sudo_paths
+    read -r w1_odd
 } <<<"$facts"
+w1_odd="${w1_odd#w1:}" # never an empty last line, which read would take as the end
 pi_has_config=no
 [ "$config_perms" = MISSING ] || pi_has_config=yes
 
@@ -306,6 +317,7 @@ w1_out=$("$HOST_BIN" -print-w1-gpios -config "$USED_CONFIG" 2>&1) || {
 IFS=, read -r -a W1_PINS <<<"$w1_out"
 masters="${masters//[[:space:]]/}"
 [ "$overlays" != UNREADABLE ] || refuse "cannot read $BOOT_CONFIG on $REMOTE to check for dtoverlay=w1-gpio"
+[ -z "${w1_odd// /}" ] || refuse "$BOOT_CONFIG on $REMOTE has 1-Wire line(s) this script can't read, so it can't tell which buses are set up: ${w1_odd%; }. It understands plain dtoverlay=w1-gpio[,gpiopin=N] lines, outside any section or under [all]: rewrite them that way by hand"
 read -r -a have_pins <<<"$overlays"
 for p in ${have_pins[@]+"${have_pins[@]}"}; do
     case " ${W1_PINS[*]} " in

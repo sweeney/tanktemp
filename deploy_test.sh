@@ -1418,6 +1418,26 @@ case_109() {
     check "and changes nothing" [ "$(snapshot)" = "$before" ]
 }
 
+# setup reads only plain dtoverlay=w1-gpio[,gpiopin=N] lines outside any
+# section or under [all]. A 1-Wire line under a filter such as [pi3], or a
+# gpiopin set with dtparam, it can't read: refused, naming the line, not
+# misread (review on #11).
+case_115() {
+    fresh
+    printf '[pi3]\ndtoverlay=w1-gpio,gpiopin=22\n' >>"$CASE/boot/config.txt"
+    before=$(snapshot)
+    setup -- --check
+    check "a 1-Wire line under [pi3] is refused (2)" rc_is 2
+    check "naming it" says 'gpiopin=22'
+    check "and the section" says 'pi3'
+    check "changing nothing" [ "$(snapshot)" = "$before" ]
+    fresh
+    printf '[all]\ndtoverlay=w1-gpio\ndtparam=gpiopin=22\n' >>"$CASE/boot/config.txt"
+    setup -- --check
+    check "a gpiopin set with dtparam is refused (2)" rc_is 2
+    check "naming it" says 'dtparam=gpiopin=22'
+}
+
 # setup trusts -print-w1-gpios only in its one shape (review on #11).
 case_114() {
     fresh
