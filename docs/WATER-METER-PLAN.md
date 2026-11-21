@@ -26,7 +26,7 @@ why; where the build went another way:
 - **Wire** (§4.4): WIRE.md added `seq`, `meters: []` with none, and the
   `lost` bound of 2 × `lost`.
 - **Not built yet:** the cadence flow trigger (`sweep.fast.on_flow`, a
-  separate PR), the bucket test (§8), and the status page's meter view.
+  separate PR) and the bucket test (§8).
 
 washhouse itself is still a plan.
 

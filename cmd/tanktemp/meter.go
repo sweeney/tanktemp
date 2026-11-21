@@ -304,7 +304,7 @@ func (v *meterStatus) report() []web.MeterStatus {
 	v.mu.Lock()
 	state, reason, mr := v.state, v.reason, v.mr
 	v.mu.Unlock()
-	out := web.MeterStatus{DeviceID: v.cfg.DeviceID, Line: fmt.Sprintf("%s:%d", v.cfg.Chip, *v.cfg.GPIO), State: state}
+	out := web.MeterStatus{DeviceID: v.cfg.DeviceID, Line: fmt.Sprintf("%s:%d", v.cfg.Chip, *v.cfg.GPIO), State: state, LitresPerPulse: v.cfg.LitresPerPulse}
 	if reason != "" {
 		out.Reason = &reason
 	}
@@ -328,6 +328,9 @@ func (v *meterStatus) report() []web.MeterStatus {
 	if s.LastPulseAt != nil {
 		p := mr.wallOf(*s.LastPulseAt).UTC().Format("2006-01-02T15:04:05.000Z07:00")
 		out.LastPulseAt = &p
+	}
+	if s.LastInterval != nil {
+		out.LastIntervalMS = i64(uint64(s.LastInterval.Milliseconds()))
 	}
 	return []web.MeterStatus{out}
 }

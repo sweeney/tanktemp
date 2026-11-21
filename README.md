@@ -192,8 +192,14 @@ One meter is supported for now.
   `meters`. A line that can't be requested (busy, not permitted, no chip)
   is the startup problem `gpio_request_failed`, and a line that stops
   answering while counting (its chip gone) is `stopped`, with the reason:
-  either way tanktemp is `degraded`, and the probes carry on. The status
-  page doesn't show the meter yet.
+  either way tanktemp is `degraded`, and the probes carry on.
+- **The status page** (`/`) has a card per meter, beside the tanks: its
+  state; the litres since `counting_since`; when the last litre came and
+  the gap to the one before (with the flow that gap means, in L/min); the
+  reed's level and line; and, in amber, any `noise`, `short`, `glitches`,
+  `lost` or messages dropped by a slow broker. A failed or stopped meter
+  shows why. `/api/status`'s `meters` also carries `litres_per_pulse` and
+  `last_interval_ms` for it.
 - **`-check-config`** names the meter, its line, its wiring and its
   timings.
 - **Permissions.** The unit gives tanktemp the GPIO chips and the `gpio`
