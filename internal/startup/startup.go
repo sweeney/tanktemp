@@ -22,6 +22,9 @@ const (
 	CodeResolution        = "resolution"
 	CodeInspectFailed     = "inspect_failed"
 	CodeGPIORequestFailed = "gpio_request_failed"
+	CodeW1BusMissing      = "w1_bus_missing"
+	CodeW1BusUndeclared   = "w1_bus_undeclared"
+	CodeW1BusCheckFailed  = "w1_bus_check_failed"
 )
 
 // WantResolution is the resolution tanktemp expects (12-bit, 0.0625 °C).
@@ -101,4 +104,37 @@ func WaitForSync(ctx context.Context, synced func() bool, wait, poll time.Durati
 			}
 		}
 	}
+}
+
+// CheckBuses compares the 1-Wire bus pins the config declares with those
+// whose overlay is loaded (found, from the device tree, or err if it
+// couldn't be read), in config order then pin order (#10). With none
+// declared there's nothing to check.
+func CheckBuses(declared, found []int, err error) []Problem {
+	if len(declared) == 0 {
+		return nil
+	}
+	if err != nil {
+		return []Problem{{Code: CodeW1BusCheckFailed, Message: fmt.Sprintf("can't tell which 1-Wire buses are loaded: %v", err)}}
+	}
+	loaded := map[int]bool{}
+	for _, p := range found {
+		loaded[p] = true
+	}
+	want := map[int]bool{}
+	var out []Problem
+	for _, p := range declared {
+		want[p] = true
+		if !loaded[p] {
+			out = append(out, Problem{Code: CodeW1BusMissing, Message: fmt.Sprintf(
+				"no 1-Wire bus is loaded on GPIO %d, which onewire.buses declares: is its dtoverlay=w1-gpio,gpiopin=%d line in config.txt (setup-pi.sh), and has the Pi rebooted since?", p, p)})
+		}
+	}
+	for _, p := range found {
+		if !want[p] {
+			out = append(out, Problem{Code: CodeW1BusUndeclared, Message: fmt.Sprintf(
+				"a 1-Wire bus is loaded on GPIO %d, which onewire.buses doesn't declare: declare it, or remove its line from config.txt", p)})
+		}
+	}
+	return out
 }

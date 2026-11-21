@@ -91,7 +91,7 @@ reading. Its `timestamp` says how old it is.
 | `sensors_ok`, `sensors_failed` | from the last sweep; `null` before the first |
 | `unexpected` | thermometers seen on a bus but not configured (a swapped probe shows up here). `null` before the first sweep |
 | `meters` | the configured meters' device IDs, in config order; `[]` when there are none |
-| `startup_problems` | from the startup checks: `rom` (`null` for a bus-wide problem, and for a meter), `code` (`discover_failed`, `not_present`, `parasite_power`, `resolution`, `inspect_failed`, or for a meter `gpio_request_failed`: the line is busy, not permitted, or its chip wasn't found, so the meter isn't counting), and a human `message` naming what failed |
+| `startup_problems` | from the startup checks: `rom` (`null` for a bus-wide problem, and for a meter), `code` (`discover_failed`, `not_present`, `parasite_power`, `resolution`, `inspect_failed`, or for a meter `gpio_request_failed`: the line is busy, not permitted, or its chip wasn't found, so the meter isn't counting; with `onewire.buses` declared, `w1_bus_missing`: no 1-Wire bus is loaded on a declared GPIO, `w1_bus_undeclared`: one is loaded on a GPIO the config doesn't declare, and `w1_bus_check_failed`: the device tree couldn't be read to tell), and a human `message` naming what failed |
 | `reason` | SHUTDOWN only: the signal (`SIGTERM`, `SIGINT`) or `context` |
 
 The **last will** is exactly `{"online":false,"event":"LWT"}`, retained, QoS
@@ -213,6 +213,10 @@ What MQTT does and doesn't guarantee here:
   either way.
 
 ## Changes
+
+- **Additive (#10):** `startup_problems` gains `w1_bus_missing`,
+  `w1_bus_undeclared` and `w1_bus_check_failed` (`rom` `null`), reported
+  only when the config declares `onewire.buses`. No payload shape changes.
 
 - **2026-11-20, additive: the water meter** (sweeney/tanktemp#9). New
   topic `{prefix}/meter` (Meter, above), live on the rig since 22:09 UTC;

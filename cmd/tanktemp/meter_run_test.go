@@ -111,7 +111,9 @@ func startMeterRigWith(t *testing.T, cfg config.Config, openErr error, wrap func
 		t.Fatal(err)
 	}
 	d.Listener, r.url = ln, "http://"+ln.Addr().String()
-	d.SysFS = fstest.MapFS{"proc/loadavg": {Data: []byte("0.1 0.2 0.3 1/1 1\n")}}
+	d.SysFS = fstest.MapFS{"proc/loadavg": {Data: []byte("0.1 0.2 0.3 1/1 1\n")},
+		// One w1-gpio overlay loaded, on GPIO 4 (#10).
+		"sys/firmware/devicetree/base/onewire@4/gpios": {Data: []byte{0, 0, 0, 7, 0, 0, 0, 4, 0, 0, 0, 0}}}
 	d.Disk = func() (sysinfo.Disk, error) { return sysinfo.Disk{TotalBytes: 1 << 30, FreeBytes: 1 << 29}, nil }
 	if wrap != nil {
 		d.Pub = wrap(d.Pub)
@@ -383,3 +385,30 @@ func TestRunReportsAFailedMeter(t *testing.T) {
 }
 
 func nospace(s string) string { return strings.Join(strings.Fields(s), "") }
+
+// With the buses declared, a declared one that isn't loaded is a startup
+// problem, named (#10); the probes still publish.
+func TestRunReportsAMissingBus(t *testing.T) {
+	cfg := meterConfig(t)
+	four, seventeen := 4, 17
+	cfg.OneWire.Buses = []config.Bus{{GPIO: &four}, {GPIO: &seventeen}}
+	r := startMeterRig(t, cfg, nil)
+	r.waitFor(t, 3)
+	st, _ := r.pub.Find(prefix + "/status")
+	if !strings.Contains(st.Payload, `{"rom":null,"code":"w1_bus_missing","message":"no 1-Wire bus is loaded on GPIO 17`) ||
+		strings.Contains(st.Payload, "GPIO 4,") {
+		t.Errorf("status %s", st.Payload)
+	}
+	if _, ok := r.pub.Find(prefix + "/hot-water-cylinder/state"); !ok {
+		t.Error("no tank state")
+	}
+}
+
+// Without them declared there is no bus check (a config from before #10).
+func TestRunWithoutDeclaredBusesChecksNone(t *testing.T) {
+	r := startMeterRig(t, meterConfig(t), nil)
+	r.waitFor(t, 3)
+	if st, _ := r.pub.Find(prefix + "/status"); strings.Contains(st.Payload, "w1_bus") {
+		t.Errorf("status %s", st.Payload)
+	}
+}

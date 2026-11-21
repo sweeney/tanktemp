@@ -384,6 +384,10 @@ func run(ctx context.Context, cfg config.Config, d deps) error {
 		d.Logger.Printf("clock not NTP-synced after %v; sweeps will say clock_synced:false", cfg.ClockSyncWait)
 	}
 	report := startup.Check(ctx, cfg.Tanks, d.Source)
+	if pins := cfg.OneWire.Pins(); len(pins) > 0 { // #10: the buses are where the config says
+		found, err := onewire.BusPins(d.SysFS)
+		report.Problems = append(report.Problems, startup.CheckBuses(pins, found, err)...)
+	}
 
 	// The sweep's timestamp is the wall clock (it's published); lifecycle
 	// and the cadence's schedule run on deps.Now, monotonic in production.
