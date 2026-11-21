@@ -39,11 +39,23 @@ while [ $# -gt 0 ]; do
     case "$1" in
         -version) echo "$ver"; exit 0 ;;
         -check-config) check=1 ;;
+        -print-w1-gpios) printw1=1 ;;
         -config) cfg="$2"; shift ;;
     esac
     shift
 done
-[ "$check" = 1 ] || { echo "fake tanktemp: only -version and -check-config" >&2; exit 1; }
+# -print-w1-gpios: the pins of the config's "  buses: [{gpio: N}, ...]"
+# line (config_yaml's one form), comma-separated; exit 2 with none, as
+# tanktemp does. FAKE_W1_PRINT replaces the output, to test setup-pi's
+# check of it.
+if [ "${printw1:-0}" = 1 ]; then
+    [ -z "${FAKE_W1_PRINT:-}" ] || { echo "$FAKE_W1_PRINT"; exit 0; }
+    pins=$(sed -n 's/^  buses: *\[\(.*\)\]$/\1/p' "$cfg" | grep -oE 'gpio: *[0-9]+' | grep -oE '[0-9]+' | paste -sd, -)
+    [ -n "$pins" ] || { echo "tanktemp: $cfg declares no 1-Wire buses: add onewire.buses"; exit 2; }
+    echo "$pins"
+    exit 0
+fi
+[ "$check" = 1 ] || { echo "fake tanktemp: only -version, -check-config and -print-w1-gpios" >&2; exit 1; }
 who="${FAKE_RUN_AS:-}"
 [ -n "$who" ] || { [ "${FAKE_AS_ROOT:-0}" = 1 ] && who=root || who=$(id -un); }
 [ -z "${FAKE_STATE:-}" ] || echo "check-config $ver $cfg as $who" >>"$FAKE_STATE/checks"
@@ -539,6 +551,8 @@ sweep: {interval: 30s}
 mqtt:
   broker: tcp://127.0.0.1:1883
   topic_prefix: test/water/hot/tanktemp
+onewire:
+  buses: [{gpio: 4}, {gpio: 17}]
 tanks:
   - device_id: rig-bus-a
     sensors:
@@ -1373,16 +1387,104 @@ case_104() {
     check "and its last line is kept whole" grep -qx 'no newline at the end' "$CASE/boot/config.txt"
 }
 
+# with_buses PINS: the local config, declaring the 1-Wire buses PINS (e.g.
+# "{gpio: 5}"), or none at all with PINS empty (#10).
+with_buses() {
+    if [ -n "$1" ]; then
+        config_yaml | sed "s/^  buses: .*/  buses: [$1]/" >"$REPO/deploy/config.local.yaml"
+    else
+        config_yaml | sed '/^onewire:/d; /^  buses:/d' >"$REPO/deploy/config.local.yaml"
+    fi
+}
+
+# The overlay lines come from the config's onewire.buses (#10): a bus on
+# GPIO 5 gets a GPIO5 line, and nothing else.
 case_105() {
     no_w1
-    setup -- --yes --w1-gpios 5
-    check "--w1-gpios 5 sets up (rc $RC)" rc_is 0
+    with_buses "{gpio: 5}"
+    setup -- --yes
+    check "buses [5] in the config sets up (rc $RC)" rc_is 0
     check "with a GPIO5 line" [ "$(w1_lines 5)" -eq 1 ]
     check "and no GPIO4 or GPIO17 line" [ "$(w1_lines 4)$(w1_lines 17)" = 00 ]
+}
+
+# --w1-gpios is gone: the config is the one place the pins are said.
+case_109() {
+    fresh
+    before=$(snapshot)
+    setup -- --check --w1-gpios 4,17
+    check "--w1-gpios is refused (2)" rc_is 2
+    check "pointing at the config" says 'onewire.buses'
+    check "and changes nothing" [ "$(snapshot)" = "$before" ]
+}
+
+# setup trusts -print-w1-gpios only in its one shape (review on #11).
+case_114() {
+    fresh
+    before=$(snapshot)
+    setup FAKE_W1_PRINT='4;rm -rf /' -- --check
+    check "a malformed pin list is refused (2)" rc_is 2
+    check "showing what it got" says 'rm -rf'
+    check "and changing nothing" [ "$(snapshot)" = "$before" ]
+}
+
+# A config that declares no buses: setup can't know which lines config.txt
+# needs, so it refuses, before changing anything.
+case_110() {
+    fresh
+    with_buses ""
+    before=$(snapshot)
+    setup -- --check
+    check "no onewire.buses: --check refuses (2)" rc_is 2
+    check "saying what to add" says 'onewire.buses'
+    setup -- --yes
+    check "and so does a real run (2)" rc_is 2
+    check "changing nothing" [ "$(snapshot)" = "$before" ]
+}
+
+# A dtoverlay=w1-gpio line for a pin the config doesn't declare: setup only
+# ever adds to config.txt, so it refuses and names the line to remove.
+case_111() {
+    fresh
+    echo 'dtoverlay=w1-gpio,gpiopin=22' >>"$CASE/boot/config.txt"
+    before=$(snapshot)
+    setup -- --check
+    check "an undeclared overlay line is refused (2)" rc_is 2
+    check "naming it" says 'gpiopin=22'
+    setup -- --yes
+    check "a real run refuses it too (2)" rc_is 2
+    check "and nothing changed" [ "$(snapshot)" = "$before" ]
+}
+
+# The lines are a set: the config's buses in another order, against a Pi
+# that already has both lines, is no change to config.txt.
+case_112() {
+    fresh
+    with_buses "{gpio: 17}, {gpio: 4}"
+    setup -- --check
+    check "reordered buses: --check passes" rc_is 0
+    check "without adding to config.txt" not says 'add to'
+    check "or rebooting" not says 'reboot'
+    check "saying the lines are there" says '2 dtoverlay=w1-gpio line'
+}
+
+# --check shows exactly what config.txt would become, as a diff, and edits
+# nothing; the real run then makes exactly that change.
+case_113() {
     no_w1
-    setup -- --check --w1-gpios 4,x
-    check "--w1-gpios 4,x is refused" rc_is 2
-    check "naming the bad value" says 'w1-gpios'
+    printf '[pi5]\ndtoverlay=nospi10\n' >>"$CASE/boot/config.txt"
+    cp "$CASE/boot/config.txt" "$GDIR/config.txt.before"
+    before=$(snapshot)
+    setup -- --check
+    check "--check shows the diff: [all] added" says '^ *\+\[all\]$'
+    check "and the GPIO4 line" says '^ *\+dtoverlay=w1-gpio,gpiopin=4$'
+    check "and the GPIO17 line" says '^ *\+dtoverlay=w1-gpio,gpiopin=17$'
+    check "and edits nothing" [ "$(snapshot)" = "$before" ]
+    echo "$OUT" | sed -n 's/^ *+\([^+].*\)$/\1/p' >"$GDIR/added"
+    setup -- --yes
+    check "then --yes sets up (rc $RC)" rc_is 0
+    diff "$GDIR/config.txt.before" "$CASE/boot/config.txt" | sed -n 's/^> //p' >"$GDIR/made"
+    check "adding exactly the lines the diff showed" cmp -s "$GDIR/added" "$GDIR/made"
 }
 
 case_106() {
