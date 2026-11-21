@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -250,6 +251,33 @@ func TestMeterDefaults(t *testing.T) {
 	}
 }
 
+// Each limit's own value is accepted: the boundaries are inclusive.
+func TestMeterAcceptsItsLimits(t *testing.T) {
+	for name, y := range map[string]string{
+		"gpio 2":                strings.Replace(withMeter, "gpio: 27", "gpio: 2", 1),
+		"debounce 5ms":          withMeter + "    debounce: 5ms\n",
+		"debounce 100ms":        withMeter + "    debounce: 100ms\n",
+		"hold 0s":               withMeter + "    hold: 0s\n",
+		"hold 100ms":            withMeter + "    hold: 100ms\n",
+		"min_interval 700ms":    withMeter + "    min_interval: 700ms\n",
+		"litres_per_pulse 1000": strings.Replace(withMeter, "litres_per_pulse: 1", "litres_per_pulse: 1000", 1),
+	} {
+		if _, err := Load([]byte(y)); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+// A meter's problems name their line, as the tanks' do.
+func TestMeterProblemsHaveLines(t *testing.T) {
+	y := strings.Replace(withMeter, "gpio: 27", "gpio: 0", 1)
+	_, err := Load([]byte(y))
+	line := strings.Count(y[:strings.Index(y, "gpio: 0")], "\n") + 1
+	if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("line %d: meters[0].gpio", line)) {
+		t.Errorf("err = %v, want line %d", err, line)
+	}
+}
+
 func TestMeterOverrides(t *testing.T) {
 	c, err := Load([]byte(withMeter + "    chip: gpiochip4\n    debounce: 10ms\n    hold: 30ms\n    min_interval: 500ms\n"))
 	if err != nil {
@@ -286,6 +314,19 @@ func TestMeterRejects(t *testing.T) {
 		{"hold not under min_interval", withMeter + "    hold: 600ms\n", "meters[0].hold"},
 		{"min_interval past the meter's maximum flow", withMeter + "    min_interval: 800ms\n", "meters[0].min_interval"},
 		{"two meters", two, "one meter"},
+		// .inf passed "> 0" and then crashed the first meter message (json
+		// can't encode +Inf), restarting tanktemp every 5 s (review on #9).
+		{"infinite litres per pulse", strings.Replace(withMeter, "litres_per_pulse: 1", "litres_per_pulse: .inf", 1), "litres_per_pulse"},
+		{"NaN litres per pulse", strings.Replace(withMeter, "litres_per_pulse: 1", "litres_per_pulse: .nan", 1), "litres_per_pulse"},
+		{"absurd litres per pulse", strings.Replace(withMeter, "litres_per_pulse: 1", "litres_per_pulse: 1e308", 1), "litres_per_pulse"},
+		// A debounce or hold longer than the shortest real closing (about
+		// 150 ms at Q4, G55) would lose litres with every counter at 0.
+		{"debounce over the shortest closing", withMeter + "    debounce: 200ms\n", "meters[0].debounce"},
+		{"hold over the shortest closing", withMeter + "    hold: 200ms\n", "meters[0].hold"},
+		// "meters:" with everything under it commented out, or a bare "-",
+		// must not quietly mean "no meter" (the sweep.fast trap).
+		{"empty meters block", valid + "meters:\n#  - device_id: hot_water_meter\n", "meters"},
+		{"a bare - in meters", valid + "meters:\n  -\n", "meters[0]"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := Load([]byte(tt.yaml))

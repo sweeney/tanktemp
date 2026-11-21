@@ -178,6 +178,15 @@ const (
 	// MaxMeterMinInterval: the meter's maximum flow (Q4, 83 L/min) is a
 	// litre every 0.72 s, so a longer backstop would drop real litres.
 	MaxMeterMinInterval = 700 * time.Millisecond
+	// MaxMeterDebounce and MaxMeterHold: the shortest real closing is about
+	// 150 ms at Q4 (G55). A kernel debounce longer than a closing never
+	// reports it, and a hold longer than one calls it short, so either
+	// would lose litres (the debounce with every counter at 0).
+	MaxMeterDebounce = 100 * time.Millisecond
+	MaxMeterHold     = 100 * time.Millisecond
+	// MaxLitresPerPulse: a sanity cap on K. Meters come in 0.001 to 1000
+	// L/pulse; past that it's a typo (and +Inf can't be encoded as JSON).
+	MaxLitresPerPulse = 1000
 	// MinGPIO and MaxGPIO bound the BCM lines on the 40-pin header a meter
 	// may use: 0 and 1 are the HAT ID EEPROM's, probed at boot.
 	MinGPIO = 2
@@ -271,6 +280,7 @@ func Load(data []byte) (Config, error) {
 	_ = yaml.Unmarshal(data, &doc) // already known to parse
 	v := validator{lines: lineIndex(&doc)}
 	v.checkFastNotNull(&doc)
+	v.checkMetersNotNull(&doc)
 	v.check(&c)
 	v.checkMeters(&c)
 	if len(v.problems) > 0 {
@@ -461,13 +471,26 @@ func (v *validator) checkService(c *Config) {
 }
 
 // lines finds source lines for tank and sensor fields in the parsed YAML.
-type lines struct{ tanks *yaml.Node }
+type lines struct{ tanks, meters *yaml.Node }
 
 func lineIndex(doc *yaml.Node) lines {
 	if len(doc.Content) == 0 {
 		return lines{}
 	}
-	return lines{tanks: mapValue(doc.Content[0], "tanks")}
+	return lines{tanks: mapValue(doc.Content[0], "tanks"), meters: mapValue(doc.Content[0], "meters")}
+}
+
+// meter returns the line of meters[mi], at key if present, else the item
+// itself; 0 if unknown.
+func (l lines) meter(mi int, key string) int {
+	if l.meters == nil || l.meters.Kind != yaml.SequenceNode || mi >= len(l.meters.Content) {
+		return 0
+	}
+	n := l.meters.Content[mi]
+	if v := mapValue(n, key); v != nil {
+		return v.Line
+	}
+	return n.Line
 }
 
 // at returns the line of tanks[ti] (si < 0) or tanks[ti].sensors[si], at key
@@ -507,10 +530,10 @@ func mapValue(n *yaml.Node, key string) *yaml.Node {
 //	meters:
 //	  - device_id: hot_water_meter   # its key in devices_<site>; unique across tanks too
 //	    gpio: 27                     # the BCM line, on the 40-pin header (2..27)
-//	    litres_per_pulse: 1          # the meter's K; required
+//	    litres_per_pulse: 1          # the meter's K; required, at most 1000
 //	    chip: gpiochip0              # default
-//	    debounce: 20ms               # kernel debounce: required, at least 5ms (GUESSES G54)
-//	    hold: 20ms                   # a closing counts once held this long (G55)
+//	    debounce: 20ms               # kernel debounce: required, 5ms..100ms (GUESSES G54)
+//	    hold: 20ms                   # a closing counts once held this long; at most 100ms (G55)
 //	    min_interval: 600ms          # the shortest gap between counted litres (G56)
 //
 // The line is read with the pull-up on: open reads high, closed low. One
@@ -525,9 +548,34 @@ type Meter struct {
 	MinInterval    time.Duration `yaml:"min_interval"`
 }
 
+// checkMetersNotNull refuses a "meters:" with nothing under it (every line
+// commented out) and a bare "-" item: like an empty sweep.fast, neither may
+// quietly mean "no meter".
+func (v *validator) checkMetersNotNull(doc *yaml.Node) {
+	if len(doc.Content) == 0 {
+		return
+	}
+	m := mapValue(doc.Content[0], "meters")
+	if m == nil {
+		return
+	}
+	if m.Tag == "!!null" {
+		v.add(m.Line, "meters", "meters is empty: leave the block out for no meter")
+		return
+	}
+	if m.Kind != yaml.SequenceNode {
+		return
+	}
+	for i, n := range m.Content {
+		if n.Tag == "!!null" {
+			v.add(n.Line, fmt.Sprintf("meters[%d]", i), "empty: a meter needs at least device_id, gpio and litres_per_pulse")
+		}
+	}
+}
+
 func (v *validator) checkMeters(c *Config) {
 	if len(c.Meters) > 1 {
-		v.add(0, "meters", "%d meters: only one meter is supported for now", len(c.Meters))
+		v.add(v.lines.meter(1, ""), "meters", "%d meters: only one meter is supported for now", len(c.Meters))
 	}
 	ids := map[string]bool{}
 	for _, t := range c.Tanks {
@@ -537,34 +585,40 @@ func (v *validator) checkMeters(c *Config) {
 		p := fmt.Sprintf("meters[%d]", i)
 		switch {
 		case !reDeviceID.MatchString(m.DeviceID):
-			v.add(0, p+".device_id", "%q must be lowercase letters, digits, _ and - (it is its devices_<site> key)", m.DeviceID)
+			v.add(v.lines.meter(i, "device_id"), p+".device_id", "%q must be lowercase letters, digits, _ and - (it is its devices_<site> key)", m.DeviceID)
 		case ids[m.DeviceID]:
-			v.add(0, p+".device_id", "device_id %q used twice (tanks and meters share them)", m.DeviceID)
+			v.add(v.lines.meter(i, "device_id"), p+".device_id", "device_id %q used twice (tanks and meters share them)", m.DeviceID)
 		}
 		ids[m.DeviceID] = true
 		switch {
 		case m.GPIO == nil || *m.GPIO < 0 || *m.GPIO > MaxGPIO:
-			v.add(0, p+".gpio", "required: a BCM line %d..%d", MinGPIO, MaxGPIO)
+			v.add(v.lines.meter(i, "gpio"), p+".gpio", "required: a BCM line %d..%d", MinGPIO, MaxGPIO)
 		case *m.GPIO < MinGPIO:
-			v.add(0, p+".gpio", "%d is a HAT ID pin (ID_SD/ID_SC), which the firmware probes at boot; use %d..%d", *m.GPIO, MinGPIO, MaxGPIO)
+			v.add(v.lines.meter(i, "gpio"), p+".gpio", "%d is a HAT ID pin (ID_SD/ID_SC), which the firmware probes at boot; use %d..%d", *m.GPIO, MinGPIO, MaxGPIO)
 		}
 		if m.Chip == "" {
-			v.add(0, p+".chip", "empty (the default is %s)", DefaultMeter.Chip)
+			v.add(v.lines.meter(i, "chip"), p+".chip", "empty (the default is %s)", DefaultMeter.Chip)
 		}
-		if !(m.LitresPerPulse > 0) {
-			v.add(0, p+".litres_per_pulse", "required, and greater than 0 (the meter's K)")
+		if !(m.LitresPerPulse > 0) || m.LitresPerPulse > MaxLitresPerPulse {
+			v.add(v.lines.meter(i, "litres_per_pulse"), p+".litres_per_pulse", "required, greater than 0 and at most %v (the meter's K)", MaxLitresPerPulse)
 		}
 		if m.Debounce < MinMeterDebounce {
-			v.add(0, p+".debounce", "%v: must be at least %v; the kernel debounce keeps electrical spikes from counting as litres", m.Debounce, MinMeterDebounce)
+			v.add(v.lines.meter(i, "debounce"), p+".debounce", "%v: must be at least %v; the kernel debounce keeps electrical spikes from counting as litres", m.Debounce, MinMeterDebounce)
 		}
 		if m.MinInterval > MaxMeterMinInterval {
-			v.add(0, p+".min_interval", "%v is over %v: at the meter's maximum flow a real litre comes every 0.72 s", m.MinInterval, MaxMeterMinInterval)
+			v.add(v.lines.meter(i, "min_interval"), p+".min_interval", "%v is over %v: at the meter's maximum flow a real litre comes every 0.72 s", m.MinInterval, MaxMeterMinInterval)
+		}
+		if m.Debounce > MaxMeterDebounce {
+			v.add(v.lines.meter(i, "debounce"), p+".debounce", "%v is over %v: the kernel would never report a closing shorter than it, and a real one can be 150 ms", m.Debounce, MaxMeterDebounce)
+		}
+		if m.Hold > MaxMeterHold {
+			v.add(v.lines.meter(i, "hold"), p+".hold", "%v is over %v: a real closing can be 150 ms, and one shorter than the hold is not counted", m.Hold, MaxMeterHold)
 		}
 		if m.Debounce >= m.MinInterval {
-			v.add(0, p+".debounce", "%v must be shorter than min_interval (%v)", m.Debounce, m.MinInterval)
+			v.add(v.lines.meter(i, "debounce"), p+".debounce", "%v must be shorter than min_interval (%v)", m.Debounce, m.MinInterval)
 		}
 		if m.Hold < 0 || m.Hold >= m.MinInterval {
-			v.add(0, p+".hold", "%v must be 0 or more and shorter than min_interval (%v)", m.Hold, m.MinInterval)
+			v.add(v.lines.meter(i, "hold"), p+".hold", "%v must be 0 or more and shorter than min_interval (%v)", m.Hold, m.MinInterval)
 		}
 	}
 }
