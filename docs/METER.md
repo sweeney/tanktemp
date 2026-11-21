@@ -60,6 +60,9 @@ the rig. It's the meter's counterpart to [`ONEWIRE.md`](ONEWIRE.md).
 
 - **The pull-up is the Pi's internal one only**, about 50 kΩ, which
   tanktemp sets when it requests the line. Open reads high, closed low.
+  Both are config, not code: `bias` (`pull-up`, the default; `pull-down`;
+  `none` for an external resistor) and `closed_level` (`low`, the default;
+  `high`, say behind an inverting opto-isolator).
 - **There is no RC filter.** A small conditioning board (a 10 kΩ pull-up,
   then 10 kΩ and 100 nF in series) is specified in WATER-METER-PLAN §3,
   but isn't fitted. The software must count correctly without it.
@@ -68,7 +71,7 @@ the rig. It's the meter's counterpart to [`ONEWIRE.md`](ONEWIRE.md).
   EEPROM pins, which the firmware probes at boot.
 - **No `config.txt` change is needed.** There is no overlay: tanktemp
   requests the line through the GPIO character device at start, with the
-  pull-up, both edges and the debounce.
+  configured bias, both edges and the debounce.
 - **To check:** whether the reed is isolated from the pipe (multimeter).
   If it isn't, the dry contact is tied to bonded earth.
 
@@ -127,18 +130,27 @@ high-impedance pin. For example, at one HW_OFF: 6 spikes in 247 µs, then
 
 ## The character device interface (`internal/gpioedge`)
 
-`gpioedge.Open(chip, offset, debounce)` requests the line through
-`go-gpiocdev`:
+`gpioedge.Open(Settings)` requests the line through `go-gpiocdev`, with
+every value from the meter's config (chip, line, bias, closed level,
+debounce):
 
-- as an input, with the pull-up;
+- as an input, with the configured bias;
 - on both edges;
 - with the kernel debounce, refused below 5 ms;
 - with event timestamps from `CLOCK_MONOTONIC`;
 - under the consumer name `tanktemp-meter`.
 
 It reads the level once at the request (`Initial`), then forwards each
-event to a channel as a `meter.Edge`: the monotonic time, the level, and
-the kernel's line sequence number.
+event to a channel as a `meter.Edge`: the monotonic time, the level
+(closed being whichever raw level `closed_level` says), and the kernel's
+line sequence number, which counts from 1 for each request.
+
+**A dead line ends.** go-gpiocdev's watcher ignores a failed event read
+(v0.9.0), so a chip that went away would otherwise look alive for ever.
+gpioedge reads the line's level every 5 s; if that fails, it releases
+the line, closes `Edges` and says why (`Err`). The loop then stops,
+`/healthz` says `stopped` with the reason and is `degraded`, and the
+probes carry on.
 
 What the kernel does, which the counter relies on:
 
@@ -150,9 +162,15 @@ What the kernel does, which the counter relies on:
 | The event buffer (a kfifo) drops its **oldest** event when full | the line sequence number jumps: `lost`. tanktemp's own handler is non-blocking, with a 256-event buffer, and expects 0 |
 | Event stamps are `CLOCK_MONOTONIC` | `gpioedge.Now` reads the same clock, so tanktemp can turn an edge's time into wall time: wall now − (mono now − edge time) |
 
-`internal/gpioedge` is the only package that imports `go-gpiocdev` or
-`golang.org/x/sys/unix`. Off Linux it builds a stub, so the rest of
-tanktemp builds and tests on a Mac.
+Only `line_linux.go`'s request touches `go-gpiocdev` (and
+`golang.org/x/sys/unix`, for the clock). Everything else in gpioedge (the
+initial read, the non-blocking hand-off, close ordering, the event mapping,
+the liveness check) is portable, behind two small interfaces: `chipLine`
+(a requested line: `Value`, `Close`) and `requester`. So
+`metertest.Contract`, the same suite the fake meets, runs against
+gpioedge itself with a fake chip, on a Mac and in CI; the hardware check
+runs it against the real line. `boundaries_test.go` keeps gpioedge and
+go-gpiocdev out of the core.
 
 ## Counting (`internal/meter`)
 
@@ -160,27 +178,35 @@ tanktemp builds and tests on a Mac.
 the request, then takes each edge with `Observe` and the passage of time
 with `Tick`. It checks, in this order:
 
-1. **lost:** a gap in the sequence numbers. It takes the edge's level as
-   the line's level, drops any closing still being held, and counts
-   nothing across the gap. A repeated or backwards number is `noise`.
+1. **lost:** a gap in the sequence numbers (from 1, so a loss before the
+   first edge counts too). It takes the edge's level as the line's level,
+   drops any change still being held, ends any litre in progress without
+   an `open`, and counts nothing across the gap. A repeated or backwards
+   number is `noise`.
 2. **noise:** an edge that doesn't change the level.
-3. **short:** a closing that reopens within `meter.hold` (20 ms). Neither
-   edge counts.
+3. **short:** a change, either way, that reverts within `meter.hold`
+   (20 ms): a closing that reopens, or an opening that recloses. Neither
+   edge counts, and a litre in progress carries on through an open spike.
 4. **glitch:** a held closing less than `meter.min_interval` (600 ms) after
-   the last counted litre. Not counted.
+   the last counted litre, measured closing to closing. Not counted.
 
 A closing that passes all four is **counted once it has held for
-`meter.hold`**. It's confirmed at the next edge or tick, and tanktemp ticks
-every 50 ms (G59), so a `pulse` message follows its closing within `hold` +
-50 ms. The opening that ends a counted litre emits `open`, with
-`last_closed_ms`.
+`meter.hold`**, and the opening that ends it is reported once it has held
+too. Each is confirmed at the next edge or tick, and tanktemp ticks every
+50 ms (G59), so a `pulse` message follows its closing, and an `open` its
+opening, within `hold` + 50 ms. Each is stamped at its own edge; the
+`open` carries `last_closed_ms`.
 
 `meter.Loop` is the one goroutine that owns the counter. It selects over
 edges, ticks and requests (a snapshot for `/healthz`, a sweep's snapshot),
-and **drains every queued edge before handling a tick or a request**. So a
-tick can't confirm a closing ahead of the edge that would have made it
-`short`, and a snapshot never misses an edge already received. Each event
-carries its own snapshot, taken as it happened.
+and **drains every queued edge before handling a tick or a request** (for
+a request, every edge stamped up to its `now`; a later one waits until
+after). So a tick can't confirm a closing ahead of the edge that would
+have made it `short`, a snapshot never misses an edge already received,
+and a sweep's state is as of the sweep's start. Each event carries its
+own snapshot, taken as it happened. An optional `Trace` hook sees every
+edge and tick with what it did; that's how pulsewatch reports from the
+same loop.
 
 `cmd/tanktemp` turns events into `{prefix}/meter` messages off the loop:
 
@@ -189,7 +215,11 @@ carries its own snapshot, taken as it happened.
 - a waiting `sweep` message is replaced by a newer one;
 - `seq` is assigned as each message leaves the queue, so it has no gaps of
   tanktemp's making;
-- the queue is flushed (for up to 2 s) before SHUTDOWN.
+- at SHUTDOWN, a last `sweep`; then the loop stops, so no litre can
+  follow; the queue is flushed (for up to 2 s); and the publisher stops.
+  Nothing is published on the meter topic after SHUTDOWN, and no meter
+  publish can race MQTT's close (which picks a clean disconnect or the
+  last will from the last publish).
 
 `/healthz` and `/api/status` report each meter's state:
 
@@ -198,7 +228,7 @@ carries its own snapshot, taken as it happened.
 | `starting` | tanktemp is starting; the line isn't requested yet |
 | `counting` | the line is requested and the loop running |
 | `failed` | the line couldn't be requested (`gpio_request_failed`); see `reason` |
-| `stopped` | the line stopped while running; see `reason` |
+| `stopped` | the line stopped while running (its chip stopped answering); see `reason` |
 
 Alongside the state: the counters, `publish_dropped` (messages dropped by
 a slow broker, not litres) and `queued`.
@@ -212,7 +242,7 @@ a slow broker, not litres) and `queued`.
 | a new `counting_since` | tanktemp restarted, or requested the line again. Anything between the two runs went unseen |
 | `noise` rising | same-level events reached user space: the debounce isn't holding |
 | `short` or `glitches` rising | spikes long enough to flip the debounced level. Not counted, but worth a look: see the next section |
-| `lost` > 0 | the kernel dropped edges. `count` is a lower bound, short by at most 2 × `lost` (WIRE.md) |
+| `lost` > 0 | edges were dropped, by the kernel or by tanktemp's 256-edge hand-off. `count` is a lower bound, short by at most 2 × `lost` (WIRE.md) |
 | `gpio_request_failed` in `startup_problems`, meter state `failed` | the line is busy (another holder), not permitted (the unit or group), or the chip wasn't found. Probes still publish; `/healthz` is `degraded` |
 
 ### Creep, and a pointer parked at the magnet's edge
@@ -223,22 +253,25 @@ apart and no boiler event near them. washhouse reads that as a slow creep,
 about 0.1 L/min: secondary circulation through the meter, or a drip. The
 pointer sat at the edge of the magnet and chattered.
 
-Today those chatters are µs long, and the 20 ms debounce swallows them. A
-chatter that opened for 20 ms or more and then closed would count as a
-litre, and no counter would show it: it holds (so not `short`), comes more
-than 600 ms after the last litre (so not a `glitch`), and is a real change
-of level (so not `noise`). washhouse's audit flags any litre whose opening
+Today those chatters are µs long, and the 20 ms debounce swallows them.
+Should one get through, the counter holds an opening as it holds a
+closing, so an open spike under `meter.hold` is `short` and the litre in
+progress carries on (review on #9). A chatter that stayed open for longer
+than the hold and then closed would still count as a litre, with no
+counter to show it: it is a real change of level, and more than 600 ms
+after the last litre. washhouse's audit flags any litre whose opening
 before it lasted under 300 ms; a real litre is open at least about 0.55 s,
-even at Q4. None has been seen. If one is, the fix in the counter is a
-minimum open time before a closing can count.
+even at Q4. None has been seen. If one is, a longer minimum open time is
+the next step.
 
 ## What the rig has shown
 
 | When | What | Result |
 |---|---|---|
-| 19–20 Nov, 17:29–09:08 UTC | raw `gpiomon` capture, no debounce: 277 edges, committed as `internal/meter/testdata/first-night` | 131 litres, 0 phantom. 15 spikes in 8 clusters, all rejected. Counting falling edges would have given 140 |
-| 19–20 Nov, 17:29–22:03 UTC (29 h) | the same capture, continued: 657 edges, replayed offline | 305 litres raw, and 305 with the spikes removed as the kernel debounce would. All 47 spikes rejected; the shortest interval between litres was 1.40 s (a bath). washhouse's independent decoder agrees |
+| 19–20 Nov, 15 h 39 m | raw `gpiomon` capture, no debounce: 277 edges, committed as `internal/meter/testdata/first-night` (its times shifted to start at 2000-01-01) | 131 litres, 0 phantom. 15 spikes in 8 clusters, all rejected. Counting falling edges would have given 140 |
+| 19–20 Nov, 28½ h | the same capture, continued: 657 edges, replayed offline (not committed) | 306 litres starting open, 305 starting closed (the first edge is a closing), raw or with the spikes removed as the kernel debounce would. All 46–47 spikes rejected, short 0; the shortest interval between litres was 1.40 s (a bath). washhouse's independent decoder agrees |
 | 20 Nov, 22:09 UTC | tanktemp counting live, debounce 20 ms | a tap run of 6 litres, 9.2–10.3 s apart (6.3 L/min), closed 2.3–2.6 s each (duty 0.25). `noise`, `short`, `glitches` and `lost` all 0 |
+| 20–21 Nov, overnight | the first night live, audited by washhouse: 1,381 messages | `seq` gap-free, no contract problems, no sweep gaps. `noise`, `short`, `glitches` and `lost` stayed 0 across all four of the morning's programmer switches (CH and HW on, CH off, HW off), the switches that made spikes in the raw capture. 9 L; median duty 0.248 |
 
 Measured flows from the first night: bath 32–39 L/min, shower 7 L/min,
 sinks 4–5 L/min. Overnight there was no litre at all for 8½ hours.
@@ -246,17 +279,23 @@ sinks 4–5 L/min. Overnight there was no litre at all for 8½ hours.
 ## Tools
 
 - **`cmd/pulsewatch`** watches the line and prints what the counter makes
-  of each edge: counted (with its closed time), noise, short, glitch or
-  lost, then a summary. It runs the same `gpioedge` source and
-  `meter.Counter` as tanktemp, with the same 50 ms tick. It's the tool for
-  the bucket test and for tuning `debounce`, `hold` and `min_interval`. It
-  only reads, and it needs the line free, so stop tanktemp first.
+  of each edge, and of each tick that does something: counted, ended (with
+  its closed time), noise, short, glitch or lost, then a summary. It runs
+  the same `gpioedge` line, `meter.Loop` and `Counter` as tanktemp, with
+  the same 50 ms tick, so a slow terminal can't make it count what
+  tanktemp wouldn't. It's the tool for the bucket test and for tuning
+  `debounce`, `hold` and `min_interval`. It takes the meter's line and
+  settings from tanktemp's config (there is no built-in pin), and a flag
+  overrides one value. It only reads, and it needs the line free, so stop
+  tanktemp first. The config is `root:tanktemp 0640`, so run it as a user
+  who can read it, or pass a copy.
 
   ```sh
   GOOS=linux GOARCH=arm GOARM=6 CGO_ENABLED=0 go build -o pulsewatch ./cmd/pulsewatch
   # copy to the Pi, stop tanktemp, then:
-  ./pulsewatch -for 2m                     # GPIO 27 on gpiochip0, the config's defaults
-  ./pulsewatch -gpio 27 -debounce 10ms -hold 20ms -min-interval 600ms
+  ./pulsewatch -config config.yaml -for 2m           # the config's meter, as tanktemp counts it
+  ./pulsewatch -config config.yaml -debounce 10ms    # the same, with one value changed
+  ./pulsewatch -config "" -gpio 27                   # no config: the defaults, on GPIO 27
   ```
 
 - **The hardware check** (build tag `hardware`, never run in CI) requests
@@ -290,11 +329,8 @@ sinks 4–5 L/min. Overnight there was no litre at all for 8½ hours.
 - **The bucket test** (deferred): draw a measured 10 L from a full-bore
   tap, three times, and compare `pulsewatch`, the published `count` and the
   dial. No litre has been checked against a bucket yet.
-- **The kernel debounce across boiler switching, live.** The replays show
-  that removing the same-level spikes gives the right count. The overnight
-  audit from 20 Nov (`noise`, `short`, `glitches` and `lost` all 0 across
-  every HW and CH switch) is what will confirm the kernel does that on this
-  Pi.
+- **The kernel debounce across boiler switching, over more nights.** The
+  first live night held (above); one night is four switches.
 - **Whether the reed is isolated from the pipe**, and what the cable
   label says.
 - **The conditioning board**, which isn't fitted yet. Once it is, the

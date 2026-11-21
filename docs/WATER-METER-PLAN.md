@@ -13,9 +13,11 @@ config in the README, the wire in WIRE.md. This plan stays as the record of
 why; where the build went another way:
 
 - **Config** (§4.2): `chip` is a name (default `gpiochip0`), not found by
-  label; there is no `active_low` key (the pull-up is always on, so closed
-  reads low); `hold` was added; `debounce` must be at least 5 ms, and
-  `min_interval` at most 700 ms. GPIO 0 and 1 are refused.
+  label; in place of `active_low`, `bias` (`pull-up`, `pull-down`, `none`)
+  and `closed_level` (`low`, `high`); `hold` was added, and holds an
+  opening as well as a closing; `debounce` is 5–100 ms, `hold` at most
+  100 ms, `min_interval` at most 700 ms, and `litres_per_pulse` at most
+  1000. GPIO 0 and 1 are refused.
 - **Unit** (§3, §4.1): `DevicePolicy=closed` with `DeviceAllow=char-gpiochip
   rw` and `SupplementaryGroups=gpio`; the `tanktemp` user is **not** added
   to `gpio`. `setup-pi.sh` and `deploy.sh` refuse a Pi with no `gpio` group;

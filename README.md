@@ -155,47 +155,60 @@ and what the rig showed are in [`docs/METER.md`](docs/METER.md).
 meters:                            # optional; absent = no meter, no GPIO opened
   - device_id: hot_water_meter     # its key in devices_<site>; unique across tanks too
     gpio: 27                       # the BCM line (2..27), wired to the reed with GND
-    litres_per_pulse: 1            # the meter's K
+    litres_per_pulse: 1            # the meter's K (at most 1000)
     # chip: gpiochip0
-    # debounce: 20ms               # kernel debounce: required, at least 5ms
-    # hold: 20ms                   # a closing counts once held this long
+    # bias: pull-up                # pull-up, pull-down, or none (an external resistor)
+    # closed_level: low            # what the line reads with the reed closed: low or high
+    # debounce: 20ms               # kernel debounce: required, 5ms..100ms
+    # hold: 20ms                   # a change counts once held this long (at most 100ms)
     # min_interval: 600ms          # the shortest gap between litres (at most 700ms)
 ```
 
-The pin is in the config, not the code: tanktemp requests exactly the
-`chip` and `gpio` given, with the pull-up on, so open reads high and closed
-low. One meter is supported for now.
+The pin and the wiring are in the config, not the code: tanktemp requests
+exactly the `chip` and `gpio` given, with the `bias` given, and reads
+`closed_level` as closed. The defaults are a reed between the GPIO and
+ground with the Pi's internal pull-up, so open reads high and closed low.
+One meter is supported for now.
 
 - **How a litre is counted.** One litre per change from open to closed,
   judged on the level the kernel reads, never on an edge's label. The
   kernel debounces first. Then, in order, an edge is rejected as `lost` (a
   gap in the kernel's event numbers: tanktemp resyncs and counts nothing
-  across it), `noise` (it doesn't change the level), `short` (a closing
-  that doesn't hold for `hold`) or a `glitch` (too soon after the last
-  litre). The counters are published, and expected to stay 0.
+  across it), `noise` (it doesn't change the level), `short` (a change
+  either way that doesn't hold for `hold`: a spike, through which a litre
+  in progress carries on) or a `glitch` (too soon after the last litre).
+  The counters are published, and expected to stay 0.
 - **When it publishes.** A `pulse` within `hold` + 50 ms of each counted
-  closing; an `open` when that litre's closing ends, with how long it
-  lasted; and a `sweep` with every sweep. `seq` numbers the messages with
-  no gaps, and `count` never falls as `seq` rises.
+  closing; an `open` within `hold` + 50 ms of the opening that ends it,
+  with how long it was closed; and a `sweep` with every sweep, and a last
+  one at shutdown, before SHUTDOWN, after which nothing more. `seq`
+  numbers the messages with no gaps, and `count` never falls as `seq`
+  rises.
 - **Nothing is persisted.** The count starts at 0 when tanktemp starts, and
   `counting_since` says when; consumers take differences.
 - **Health.** `/healthz` and `/api/status` have a `meters` block: `state`
   (`starting`, `counting`, `failed`, `stopped`), the level, the count and
   counters, `publish_dropped` and `queued`. The status message lists
   `meters`. A line that can't be requested (busy, not permitted, no chip)
-  is the startup problem `gpio_request_failed`: tanktemp is `degraded`, and
-  the probes carry on. The status page doesn't show the meter yet.
-- **`-check-config`** names the meter, its line and its timings.
+  is the startup problem `gpio_request_failed`, and a line that stops
+  answering while counting (its chip gone) is `stopped`, with the reason:
+  either way tanktemp is `degraded`, and the probes carry on. The status
+  page doesn't show the meter yet.
+- **`-check-config`** names the meter, its line, its wiring and its
+  timings.
 - **Permissions.** The unit gives tanktemp the GPIO chips and the `gpio`
   group, and nothing else new ([Deploying](#deploying)).
 
 To watch the line on the Pi, with tanktemp stopped (only one process can
-hold it), `cmd/pulsewatch` prints what the counter makes of each edge:
+hold it), `cmd/pulsewatch` runs the same loop and counter as tanktemp and
+prints what they make of each edge. It takes the line and every setting
+from tanktemp's config; a flag overrides one:
 
 ```sh
 GOOS=linux GOARCH=arm GOARM=6 CGO_ENABLED=0 go build -o pulsewatch ./cmd/pulsewatch
 # copy to the Pi, stop tanktemp, then:
-./pulsewatch -for 2m    # GPIO 27 on gpiochip0; -debounce, -hold, -min-interval to tune
+./pulsewatch -config config.yaml -for 2m           # the config's meter (-meter to pick one)
+./pulsewatch -config config.yaml -debounce 10ms    # tuning: one value changed
 ```
 
 ## Testing
@@ -209,7 +222,9 @@ No hardware, root or broker needed. There are two layers:
 - **Core logic** (`cadence`, `config`, `meter`, `sweep`, `payload`,
   `startup`, `status`) sees the sensors only through `reading.Source` and
   the meter only through `meter.Source`. It's tested against the scriptable
-  `readingtest.Fake` and `metertest.Fake`. `boundaries_test.go` fails the
+  `readingtest.Fake` and `metertest.Fake`. The GPIO code itself
+  (`internal/gpioedge`) is portable but for one request function, and
+  meets `metertest.Contract` with a fake chip. `boundaries_test.go` fails the
   build if a core package imports `os`, `io/fs`, `net`, `syscall`, the
   1-Wire handler or MQTT.
 - **The meter's counter** (`internal/meter`) is table-tested edge by edge,

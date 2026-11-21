@@ -50,15 +50,17 @@ tanks:
 
 # A reed-switch water meter on a GPIO line (docs/METER.md; on the wire:
 # docs/WIRE.md, Meter). Optional: without it no GPIO chip is opened. One meter
-# for now. The pin is read with the pull-up on (open high, closed low): wire
-# the reed between the GPIO and GND, with the Pi powered off.
+# for now. By default the reed goes between the GPIO and GND (wire it with the
+# Pi powered off), with the internal pull-up: open reads high, closed low.
 # meters:
 #   - device_id: hot-water-meter   # its key in devices_<site>; unique across tanks too
 #     gpio: 27                     # required: the BCM line, 2..27 (0 and 1 are the HAT ID pins)
-#     litres_per_pulse: 1          # required: the meter's K, > 0
+#     litres_per_pulse: 1          # required: the meter's K, > 0 and at most 1000
 #     chip: gpiochip0
-#     debounce: 20ms               # kernel debounce; at least 5ms (spikes from nearby
+#     bias: pull-up                # pull-up, pull-down, or none (an external resistor)
+#     closed_level: low            # what the line reads with the reed closed: low or high
+#     debounce: 20ms               # kernel debounce: 5ms..100ms (spikes from nearby
 #                                  # switching otherwise reach the counter)
-#     hold: 20ms                   # a closing counts once held this long
+#     hold: 20ms                   # a change counts once held this long; at most 100ms
 #     min_interval: 600ms          # the shortest gap between litres; at most 700ms (a
 #                                  # 5 m3/h meter at full flow gives one every 0.72 s)
