@@ -326,6 +326,7 @@ func Load(data []byte) (Config, error) {
 	v.checkFastNotNull(&doc)
 	v.checkMetersNotNull(&doc)
 	v.checkOneWireNotNull(&doc)
+	v.checkIntegerPins(&doc)
 	v.check(&c)
 	v.checkMeters(&c)
 	v.checkOneWire(&c)
@@ -653,6 +654,29 @@ func (v *validator) checkOneWireNotNull(doc *yaml.Node) {
 	for i, n := range b.Content {
 		if n.Tag == "!!null" {
 			v.add(n.Line, fmt.Sprintf("onewire.buses[%d]", i), "empty: a bus needs its gpio")
+		}
+	}
+}
+
+// checkIntegerPins refuses a gpio that isn't written as an integer: yaml
+// decodes 4.5 (or 1e1) into an int by truncating it, so pin 4.5 would
+// quietly be pin 4 (review on #11).
+func (v *validator) checkIntegerPins(doc *yaml.Node) {
+	if len(doc.Content) == 0 {
+		return
+	}
+	root := doc.Content[0]
+	for _, list := range []struct {
+		path string
+		seq  *yaml.Node
+	}{{"onewire.buses", mapValue(mapValue(root, "onewire"), "buses")}, {"meters", mapValue(root, "meters")}} {
+		if list.seq == nil || list.seq.Kind != yaml.SequenceNode {
+			continue
+		}
+		for i, n := range list.seq.Content {
+			if g := mapValue(n, "gpio"); g != nil && g.Kind == yaml.ScalarNode && g.Tag != "!!int" {
+				v.add(g.Line, fmt.Sprintf("%s[%d].gpio", list.path, i), "%q is not a whole number: a GPIO is a BCM line number", g.Value)
+			}
 		}
 	}
 }

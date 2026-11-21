@@ -49,6 +49,10 @@ func TestOneWireRejects(t *testing.T) {
 		{"no gpio", valid + "onewire: {buses: [{label: D1}]}\n", "onewire.buses[0].gpio"},
 		{"gpio off the header", valid + "onewire: {buses: [{gpio: 28}]}\n", "onewire.buses[0].gpio"},
 		{"gpio 0, the HAT ID pin", valid + "onewire: {buses: [{gpio: 0}]}\n", "HAT"},
+		// yaml.v3 decodes 4.5 into an int as 4 (review on #11): refused, not truncated.
+		{"a fractional gpio", valid + "onewire: {buses: [{gpio: 4.5}]}\n", "onewire.buses[0].gpio"},
+		{"an exponent gpio", valid + "onewire: {buses: [{gpio: 1e1}]}\n", "onewire.buses[0].gpio"},
+		{"a fractional meter gpio", valid + "meters:\n  - {device_id: hot_water_meter, gpio: 27.9, litres_per_pulse: 1}\n", "meters[0].gpio"},
 		{"a pin twice", valid + "onewire: {buses: [{gpio: 4}, {gpio: 4}]}\n", "onewire.buses[0]"},
 		// Today this loads, and fails only at runtime as gpio_request_failed.
 		{"the meter on a bus pin", withBuses + "meters:\n  - {device_id: hot_water_meter, gpio: 4, litres_per_pulse: 1}\n", "onewire.buses[0]"},
