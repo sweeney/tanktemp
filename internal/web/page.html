@@ -216,10 +216,14 @@ function meterView(m, now) {
     v.headline = litres(m.count, m.litres_per_pulse);
     let last = "no litre yet";
     if (m.last_pulse_at) {
-      last = "last litre " + ago(now - Date.parse(m.last_pulse_at)) + " ago";
-      if (m.last_interval_ms) {
-        const gap = m.last_interval_ms < 60000 ? (m.last_interval_ms / 1000).toFixed(1) + " s" : ago(m.last_interval_ms);
-        last += ", " + gap + " after the one before (" + (m.litres_per_pulse * 60000 / m.last_interval_ms).toFixed(1) + " L/min)";
+      const since = now - Date.parse(m.last_pulse_at);
+      last = "last litre " + ago(since) + " ago";
+      // The flow only while it can still be flowing: a gap under 36 s
+      // (about the meter's slowest accurate flow) and the last litre within
+      // twice the gap, or a minute. An old gap isn't a flow now.
+      const gap = m.last_interval_ms;
+      if (gap && gap < 36000 && since <= Math.max(2 * gap, 60000)) {
+        last += ", " + (gap / 1000).toFixed(1) + " s after the one before (" + (m.litres_per_pulse * 60000 / gap).toFixed(1) + " L/min)";
       }
     }
     v.lines = [last, "reed " + m.level + " · " + m.line];

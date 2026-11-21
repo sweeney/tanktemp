@@ -28,13 +28,24 @@ func TestPageMeterView(t *testing.T) {
 		name, meter string
 		want        view
 	}{
+		// The flow shows only while it can still be flowing (review on #13):
+		// the gap under 36 s (100 L/h, the meter's Q1 or so) and the last
+		// litre within twice the gap, or a minute.
+		{"counting, mid-draw", `{"device_id":"hot_water_meter","line":"gpiochip0:27","state":"counting","reason":null,"litres_per_pulse":1,
+			"level":"open","count":131,"counting_since":"2026-11-21T09:25:33Z","last_pulse_at":"2026-11-21T09:39:50Z","last_interval_ms":12449,
+			"noise":0,"short":0,"glitches":0,"lost":0,"publish_dropped":0,"queued":0}`,
+			view{"counting", "ok", "131 L", []string{
+				"last litre 10 s ago, 12.4 s after the one before (4.8 L/min)",
+				"reed open · gpiochip0:27",
+			}, nil}},
+		{"a slow gap, recent", `{"device_id":"m","line":"gpiochip0:27","state":"counting","reason":null,"litres_per_pulse":1,
+			"level":"open","count":2,"counting_since":"2026-11-21T09:25:33Z","last_pulse_at":"2026-11-21T09:39:55Z","last_interval_ms":40000,
+			"noise":0,"short":0,"glitches":0,"lost":0,"publish_dropped":0,"queued":0}`,
+			view{"counting", "ok", "2 L", []string{"last litre 5 s ago", "reed open · gpiochip0:27"}, nil}},
 		{"counting, after a draw", `{"device_id":"hot_water_meter","line":"gpiochip0:27","state":"counting","reason":null,"litres_per_pulse":1,
 			"level":"open","count":131,"counting_since":"2026-11-21T09:25:33Z","last_pulse_at":"2026-11-21T09:36:17.668Z","last_interval_ms":12449,
 			"noise":0,"short":0,"glitches":0,"lost":0,"publish_dropped":0,"queued":0}`,
-			view{"counting", "ok", "131 L", []string{
-				"last litre 3 min ago, 12.4 s after the one before (4.8 L/min)",
-				"reed open · gpiochip0:27",
-			}, nil}},
+			view{"counting", "ok", "131 L", []string{"last litre 3 min ago", "reed open · gpiochip0:27"}, nil}},
 		{"no litre yet, resting closed", `{"device_id":"m","line":"gpiochip0:27","state":"counting","reason":null,"litres_per_pulse":1,
 			"level":"closed","count":0,"counting_since":"2026-11-21T09:25:33Z","last_pulse_at":null,"last_interval_ms":null,
 			"noise":0,"short":0,"glitches":0,"lost":0,"publish_dropped":0,"queued":0}`,
@@ -46,12 +57,16 @@ func TestPageMeterView(t *testing.T) {
 		{"counters and drops are warnings", `{"device_id":"m","line":"gpiochip0:27","state":"counting","reason":null,"litres_per_pulse":1,
 			"level":"open","count":9,"counting_since":"2026-11-21T09:25:33Z","last_pulse_at":"2026-11-19T09:40:00Z","last_interval_ms":600000,
 			"noise":15,"short":1,"glitches":0,"lost":3,"publish_dropped":2,"queued":0}`,
-			view{"counting", "ok", "9 L", []string{"last litre 2 d ago, 10 min after the one before (0.1 L/min)", "reed open · gpiochip0:27"},
+			view{"counting", "ok", "9 L", []string{"last litre 2 d ago", "reed open · gpiochip0:27"},
 				[]string{"noise 15", "short 1", "lost 3: the count is a lower bound", "2 messages dropped by a slow broker"}}},
 		{"failed", `{"device_id":"m","line":"gpiochip0:27","state":"failed","reason":"GPIO 27 on gpiochip0: device or resource busy","litres_per_pulse":1,
 			"level":null,"count":null,"counting_since":null,"last_pulse_at":null,"last_interval_ms":null,
 			"noise":null,"short":null,"glitches":null,"lost":null,"publish_dropped":0,"queued":0}`,
 			view{"failed", "degraded", "not counting", []string{"gpiochip0:27"}, []string{"GPIO 27 on gpiochip0: device or resource busy"}}},
+		{"stopped", `{"device_id":"m","line":"gpiochip0:27","state":"stopped","reason":"meter: the line's edges stopped: GPIO 27 on gpiochip0 stopped answering: no such device","litres_per_pulse":1,
+			"level":null,"count":null,"counting_since":null,"last_pulse_at":null,"last_interval_ms":null,
+			"noise":null,"short":null,"glitches":null,"lost":null,"publish_dropped":0,"queued":0}`,
+			view{"stopped", "degraded", "not counting", []string{"gpiochip0:27"}, []string{"meter: the line's edges stopped: GPIO 27 on gpiochip0 stopped answering: no such device"}}},
 		{"starting", `{"device_id":"m","line":"gpiochip0:27","state":"starting","reason":null,"litres_per_pulse":1,
 			"level":null,"count":null,"counting_since":null,"last_pulse_at":null,"last_interval_ms":null,
 			"noise":null,"short":null,"glitches":null,"lost":null,"publish_dropped":0,"queued":0}`,
