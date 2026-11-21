@@ -56,7 +56,7 @@ func TestCheckConfigShowsTheCadence(t *testing.T) {
 	dir := t.TempDir()
 	base := "mqtt: {broker: tcp://b:1883}\ntanks:\n  - device_id: t\n    sensors:\n      - {rom: 28-0000117287e6, position: top, order: 1}\n"
 	for _, tt := range []struct{ extra, want string }{
-		{"", ", sweep every 30s, verbose log off, publishing to "},
+		{"", ", sweep every 30s, verbose log off, 1-Wire bus pins NOT DECLARED (onewire.buses; setup-pi.sh needs them), publishing to "},
 		{"sweep: {interval: 1m}\n", ", sweep every 1m, verbose log off, "},
 		{"sweep: {fast: {}}\n", ", sweep every 30s, 10s while a probe changes 1.5 °C/min (hold 2m, decay 5m), verbose log off, "},
 		{"sweep: {fast: {interval: 5s, trigger_c_per_min: 2, hold: 0s, decay: 90s}}\n", ", sweep every 30s, 5s while a probe changes 2 °C/min (hold 0s, decay 1m30s), "},

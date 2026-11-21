@@ -34,8 +34,40 @@ type Config struct {
 	HTTP          HTTP          `yaml:"http"`
 	MQTT          MQTT          `yaml:"mqtt"`
 	Log           Log           `yaml:"log"`
+	OneWire       OneWire       `yaml:"onewire"`
 	Tanks         []Tank        `yaml:"tanks"`
 	Meters        []Meter       `yaml:"meters"`
+}
+
+// OneWire declares the 1-Wire buses (#10): which GPIO each bus's data wire
+// is on. The kernel's w1-gpio driver takes its pins only from config.txt at
+// boot; setup-pi.sh writes those lines from this, and tanktemp checks at
+// start that the buses it finds are on these pins. Optional, so a config
+// from before it still loads, but setup-pi.sh needs it.
+//
+//	onewire:
+//	  buses:
+//	    - {gpio: 4, label: D1}   # label: optional, for people
+//	    - {gpio: 17, label: D2}
+type OneWire struct {
+	Buses []Bus `yaml:"buses"`
+}
+
+// Bus is one 1-Wire bus.
+type Bus struct {
+	GPIO  *int   `yaml:"gpio"`
+	Label string `yaml:"label"`
+}
+
+// Pins is the declared buses' GPIOs, in config order; nil with none.
+func (o OneWire) Pins() []int {
+	var out []int
+	for _, b := range o.Buses {
+		if b.GPIO != nil {
+			out = append(out, *b.GPIO)
+		}
+	}
+	return out
 }
 
 // Sweep is how often and how hard the sensors are read.
@@ -293,8 +325,11 @@ func Load(data []byte) (Config, error) {
 	v := validator{lines: lineIndex(&doc)}
 	v.checkFastNotNull(&doc)
 	v.checkMetersNotNull(&doc)
+	v.checkOneWireNotNull(&doc)
 	v.check(&c)
 	v.checkMeters(&c)
+	v.checkOneWire(&c)
+	v.checkPins(&c)
 	if len(v.problems) > 0 {
 		return Config{}, &ValidationError{Problems: v.problems}
 	}
@@ -483,27 +518,34 @@ func (v *validator) checkService(c *Config) {
 }
 
 // lines finds source lines for tank and sensor fields in the parsed YAML.
-type lines struct{ tanks, meters *yaml.Node }
+type lines struct{ tanks, meters, buses *yaml.Node }
 
 func lineIndex(doc *yaml.Node) lines {
 	if len(doc.Content) == 0 {
 		return lines{}
 	}
-	return lines{tanks: mapValue(doc.Content[0], "tanks"), meters: mapValue(doc.Content[0], "meters")}
+	return lines{tanks: mapValue(doc.Content[0], "tanks"), meters: mapValue(doc.Content[0], "meters"),
+		buses: mapValue(mapValue(doc.Content[0], "onewire"), "buses")}
 }
 
-// meter returns the line of meters[mi], at key if present, else the item
+// item returns the line of seq[i], at key if present, else the item
 // itself; 0 if unknown.
-func (l lines) meter(mi int, key string) int {
-	if l.meters == nil || l.meters.Kind != yaml.SequenceNode || mi >= len(l.meters.Content) {
+func item(seq *yaml.Node, i int, key string) int {
+	if seq == nil || seq.Kind != yaml.SequenceNode || i >= len(seq.Content) {
 		return 0
 	}
-	n := l.meters.Content[mi]
+	n := seq.Content[i]
 	if v := mapValue(n, key); v != nil {
 		return v.Line
 	}
 	return n.Line
 }
+
+func (l lines) bus(i int, key string) int { return item(l.buses, i, key) }
+
+// meter returns the line of meters[mi], at key if present, else the item
+// itself; 0 if unknown.
+func (l lines) meter(mi int, key string) int { return item(l.meters, mi, key) }
 
 // at returns the line of tanks[ti] (si < 0) or tanks[ti].sensors[si], at key
 // if present, else the item itself; 0 if unknown.
@@ -586,6 +628,71 @@ func (v *validator) checkMetersNotNull(doc *yaml.Node) {
 		if n.Tag == "!!null" {
 			v.add(n.Line, fmt.Sprintf("meters[%d]", i), "empty: a meter needs at least device_id, gpio and litres_per_pulse")
 		}
+	}
+}
+
+// checkOneWireNotNull refuses an "onewire:" or "buses:" with nothing
+// under it, and a bare "-" bus: none may quietly mean "no buses declared".
+func (v *validator) checkOneWireNotNull(doc *yaml.Node) {
+	if len(doc.Content) == 0 {
+		return
+	}
+	o := mapValue(doc.Content[0], "onewire")
+	if o == nil {
+		return
+	}
+	if o.Tag == "!!null" {
+		v.add(o.Line, "onewire", "onewire is empty: declare its buses, or leave the block out")
+		return
+	}
+	b := mapValue(o, "buses")
+	if b == nil || b.Tag == "!!null" || (b.Kind == yaml.SequenceNode && len(b.Content) == 0) {
+		v.add(o.Line, "onewire.buses", "no buses: declare each bus's GPIO, e.g. buses: [{gpio: 4}]")
+		return
+	}
+	for i, n := range b.Content {
+		if n.Tag == "!!null" {
+			v.add(n.Line, fmt.Sprintf("onewire.buses[%d]", i), "empty: a bus needs its gpio")
+		}
+	}
+}
+
+// checkOneWire checks each declared bus's pin.
+func (v *validator) checkOneWire(c *Config) {
+	for i, b := range c.OneWire.Buses {
+		p := fmt.Sprintf("onewire.buses[%d]", i)
+		switch {
+		case b.GPIO == nil || *b.GPIO < 0 || *b.GPIO > MaxGPIO:
+			v.add(v.lines.bus(i, "gpio"), p+".gpio", "required: a BCM line %d..%d", MinGPIO, MaxGPIO)
+		case *b.GPIO < MinGPIO:
+			v.add(v.lines.bus(i, "gpio"), p+".gpio", "%d is a HAT ID pin (ID_SD/ID_SC), which the firmware probes at boot; use %d..%d", *b.GPIO, MinGPIO, MaxGPIO)
+		}
+	}
+}
+
+// checkPins refuses a GPIO used twice, by two buses or a bus and a meter,
+// naming both uses.
+func (v *validator) checkPins(c *Config) {
+	type use struct {
+		path string
+		line int
+	}
+	at := map[int]use{}
+	claim := func(gpio *int, u use) {
+		if gpio == nil {
+			return
+		}
+		if first, ok := at[*gpio]; ok {
+			v.add(u.line, u.path, "GPIO %d is already %s (line %d): each pin can be one thing", *gpio, first.path, first.line)
+			return
+		}
+		at[*gpio] = u
+	}
+	for i, b := range c.OneWire.Buses {
+		claim(b.GPIO, use{fmt.Sprintf("onewire.buses[%d]", i), v.lines.bus(i, "gpio")})
+	}
+	for i, m := range c.Meters {
+		claim(m.GPIO, use{fmt.Sprintf("meters[%d]", i), v.lines.meter(i, "gpio")})
 	}
 }
 

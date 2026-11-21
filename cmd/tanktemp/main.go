@@ -20,6 +20,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -58,6 +59,7 @@ func realMain(args []string, out io.Writer) int {
 	fl.SetOutput(out)
 	path := fl.String("config", "/etc/tanktemp/config.yaml", "config file")
 	check := fl.Bool("check-config", false, "validate the config and exit")
+	printW1 := fl.Bool("print-w1-gpios", false, "print the config's 1-Wire bus GPIOs (4,17) and exit; setup-pi.sh's source for config.txt")
 	showVersion := fl.Bool("version", false, "print the version and exit")
 	if err := fl.Parse(args); err != nil {
 		return 2
@@ -76,6 +78,19 @@ func realMain(args []string, out io.Writer) int {
 		fmt.Fprintf(out, "tanktemp: %s: %v\n", *path, err)
 		return 1
 	}
+	if *printW1 {
+		pins := cfg.OneWire.Pins()
+		if len(pins) == 0 {
+			fmt.Fprintf(out, "tanktemp: %s declares no 1-Wire buses: add onewire.buses, e.g. buses: [{gpio: 4}, {gpio: 17}]\n", *path)
+			return 2
+		}
+		s := make([]string, len(pins))
+		for i, p := range pins {
+			s[i] = strconv.Itoa(p)
+		}
+		fmt.Fprintln(out, strings.Join(s, ","))
+		return 0
+	}
 	if *check {
 		n := 0
 		for _, t := range cfg.Tanks {
@@ -93,8 +108,8 @@ func realMain(args []string, out io.Writer) int {
 			meters += fmt.Sprintf(", meter %s on %s:%d (%s, closed reads %s; %v L/pulse, debounce %s, hold %s, min interval %s)",
 				m.DeviceID, m.Chip, *m.GPIO, m.Bias, m.ClosedLevel, m.LitresPerPulse, shortDuration(m.Debounce), shortDuration(m.Hold), shortDuration(m.MinInterval))
 		}
-		fmt.Fprintf(out, "%s: ok: %d tank%s, %d sensor%s, %s, verbose log %s%s, publishing to %s on %s\n",
-			*path, len(cfg.Tanks), plural(len(cfg.Tanks)), n, plural(n), cadenceSummary(cfg.Sweep), verbose, meters, cfg.MQTT.TopicPrefix, cfg.MQTT.Broker)
+		fmt.Fprintf(out, "%s: ok: %d tank%s, %d sensor%s, %s, verbose log %s, %s%s, publishing to %s on %s\n",
+			*path, len(cfg.Tanks), plural(len(cfg.Tanks)), n, plural(n), cadenceSummary(cfg.Sweep), verbose, busSummary(cfg.OneWire), meters, cfg.MQTT.TopicPrefix, cfg.MQTT.Broker)
 		return 0
 	}
 	if err := serve(cfg); err != nil {
@@ -102,6 +117,28 @@ func realMain(args []string, out io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// busSummary is -check-config's account of the 1-Wire buses (#10):
+// "1-Wire buses on GPIO 4 (D1) and 17", or a warning when none are
+// declared ("NOT DECLARED" in capitals, the one to notice).
+func busSummary(o config.OneWire) string {
+	if len(o.Buses) == 0 {
+		return "1-Wire bus pins NOT DECLARED (onewire.buses; setup-pi.sh needs them)"
+	}
+	var s []string
+	for _, b := range o.Buses {
+		p := strconv.Itoa(*b.GPIO)
+		if b.Label != "" {
+			p += " (" + b.Label + ")"
+		}
+		s = append(s, p)
+	}
+	list := s[0]
+	if len(s) > 1 {
+		list = strings.Join(s[:len(s)-1], ", ") + " and " + s[len(s)-1]
+	}
+	return fmt.Sprintf("1-Wire bus%s on GPIO %s", map[bool]string{true: "es", false: ""}[len(s) > 1], list)
 }
 
 // cadenceSummary is -check-config's account of the cadence (issue #1), so a
