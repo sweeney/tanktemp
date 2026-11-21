@@ -100,19 +100,46 @@ func TestLoopSweepNeverOvertakesAQueuedEdgeWhileBusy(t *testing.T) {
 	}
 }
 
-// A sweep is as of its now (WIRE: "as of the sweep's start"): an edge
-// stamped after it, already queued, comes after the sweep's state.
-func TestLoopSweepTakesNoEdgeAfterItsNow(t *testing.T) {
-	h := start(t, meter.Open)
-	h.src.Push(1000*ms, meter.Closed)
-	h.src.Push(1400*ms, meter.Open)
-	if !h.loop.Sweep(context.Background(), 1010*ms) {
-		t.Fatal("Sweep failed")
-	}
-	a, b := h.next(t), h.next(t)
-	if a.ev.Kind != meter.Swept || a.snap.Level != meter.Closed || a.snap.Count != 0 || b.ev.Kind != meter.Pulse {
-		t.Errorf("emitted %s (level %v, count %d) then %s; want the sweep as of 1.01 s, then the pulse",
-			a.ev.Kind, a.snap.Level, a.snap.Count, b.ev.Kind)
+// A sweep's state never includes an edge after the time it is stamped
+// with (review on #9): the loop may take a queued edge before the request,
+// whatever its now, so the Swept event is stamped at the later of its now
+// and the latest edge it includes. Over many rounds, both orders happen.
+func TestLoopSweepIsNeverStampedBeforeAnEdgeItIncludes(t *testing.T) {
+	for round := range 50 {
+		src := metertest.NewFake(meter.Open)
+		k, _ := meter.New(meter.Config{Hold: 20 * ms, MinInterval: 600 * ms}, meter.Open)
+		var latest time.Duration // the latest edge the loop has taken: Run's goroutine only
+		swept := make(chan meter.Event, 1)
+		l := meter.NewLoop(k, src, nil, func(e meter.Event) {
+			if e.Kind == meter.Swept {
+				if e.At < latest {
+					t.Errorf("round %d: sweep stamped %v includes an edge at %v", round, e.At, latest)
+				}
+				swept <- e
+			}
+		})
+		l.Trace = func(st meter.Step) {
+			if st.Edge != nil && st.Edge.At > latest {
+				latest = st.Edge.At
+			}
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() { defer close(done); l.Run(ctx) }()
+		src.Push(1000*ms, meter.Closed)
+		src.Push(1400*ms, meter.Open)
+		if !l.Sweep(context.Background(), 1010*ms) {
+			t.Fatal("Sweep failed")
+		}
+		e := <-swept
+		if e.Snap.Count == 1 && e.At < 1400*ms {
+			t.Errorf("round %d: a sweep with the litre is stamped %v, before the opening that confirmed it", round, e.At)
+		}
+		if e.Snap.Count == 0 && e.At != 1010*ms {
+			t.Errorf("round %d: a sweep before the edges is stamped %v, want its now", round, e.At)
+		}
+		cancel()
+		<-done
 	}
 }
 

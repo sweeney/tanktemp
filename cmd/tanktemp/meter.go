@@ -51,8 +51,11 @@ type meterRun struct {
 	since time.Time
 	loop  *meter.Loop
 
-	sweepAt time.Time // the sweep being asked for: written before, read on, the loop's goroutine
-	seq     uint64    // the publisher's alone
+	// The sweep being asked for, on the wall clock and on Mono: written
+	// before, read on, the loop's goroutine.
+	sweepAt   time.Time
+	sweepMono time.Duration
+	seq       uint64 // the publisher's alone
 
 	mu    sync.Mutex
 	queue []payload.MeterInput
@@ -153,14 +156,20 @@ func (m *meterRun) emit(e meter.Event) {
 	case meter.Opened:
 		m.publishAt(payload.TriggerOpen, off.Add(e.At), e.Snap, off)
 	case meter.Swept:
-		m.publishAt(payload.TriggerSweep, m.sweepAt, e.Snap, off)
+		// Stamped with the sweep's start, as its tank states are, unless
+		// the state includes an edge after it: then that edge's time.
+		at := m.sweepAt
+		if e.At > m.sweepMono {
+			at = at.Add(e.At - m.sweepMono)
+		}
+		m.publishAt(payload.TriggerSweep, at, e.Snap, off)
 	}
 }
 
 // sweep publishes the meter as of a sweep's start, stamped like its states.
 func (m *meterRun) sweep(ctx context.Context, at time.Time) {
-	m.sweepAt = at
-	m.loop.Sweep(ctx, m.d.Mono())
+	m.sweepAt, m.sweepMono = at, m.d.Mono()
+	m.loop.Sweep(ctx, m.sweepMono)
 }
 
 // clockOffset is wall time at mono 0, read once: wall now − mono now.

@@ -22,13 +22,14 @@ import (
 // no more than the delivery latency (microseconds to a millisecond or
 // two), counts. That is harmless: a real closing is at least about 150 ms.
 type Loop struct {
-	k     *Counter
-	src   Source
-	ticks <-chan time.Duration
-	emit  func(Event)
-	reqs  chan request
-	done  chan struct{}
-	held  *Edge // taken from the Source but stamped after a request's now: next
+	k      *Counter
+	src    Source
+	ticks  <-chan time.Duration
+	emit   func(Event)
+	reqs   chan request
+	done   chan struct{}
+	held   *Edge         // taken from the Source but stamped after a request's now: next
+	latest time.Duration // the latest edge observed
 
 	// Trace, if set before Run, is called on Run's goroutine after each
 	// edge and each tick (or request's now) with what the counter made of
@@ -50,6 +51,9 @@ func (l *Loop) observe(e Edge) {
 	var before Snapshot
 	if l.Trace != nil {
 		before = l.k.Snapshot()
+	}
+	if e.At > l.latest {
+		l.latest = e.At
 	}
 	evs := l.k.Observe(e)
 	l.publish(evs)
@@ -115,15 +119,20 @@ func (l *Loop) Run(ctx context.Context) error {
 			l.tick(now)
 		case r := <-l.reqs:
 			// Likewise up to its now, then confirm what now confirms: "as
-			// of now". An edge stamped later waits (in held) until after.
+			// of now". An edge stamped later and still queued waits (in
+			// held) until after. But this select may already have taken a
+			// later edge before the request (both ready, or the request
+			// sent while Run was busy): then the state is as of that edge,
+			// and says so, so it never includes an edge after its time.
 			if !l.drain(r.now) {
 				close(r.reply)
 				return l.closed()
 			}
-			l.tick(r.now)
+			at := max(r.now, l.latest)
+			l.tick(at)
 			s := l.k.Snapshot()
 			if r.sweep {
-				l.emit(Event{Kind: Swept, At: r.now, Snap: s})
+				l.emit(Event{Kind: Swept, At: at, Snap: s})
 			}
 			r.reply <- s
 		}
@@ -182,7 +191,9 @@ func (l *Loop) Snapshot(ctx context.Context, now time.Duration) (Snapshot, bool)
 
 // Sweep is Snapshot that also emits the state as a Swept event, on Run's
 // goroutine, in order with the litres: what a caller publishes in emit
-// order is then in the counter's order.
+// order is then in the counter's order. The event's At is now, or the
+// latest edge the state includes if that is later (the loop may have taken
+// an edge before the request): never before an edge it includes.
 func (l *Loop) Sweep(ctx context.Context, now time.Duration) bool {
 	_, ok := l.ask(ctx, request{now: now, sweep: true, reply: make(chan Snapshot, 1)})
 	return ok

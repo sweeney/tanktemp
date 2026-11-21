@@ -425,3 +425,20 @@ func TestMeterMessageTimesAgree(t *testing.T) {
 		t.Errorf("timestamp %s, last_pulse_at %s: one pulse, two instants", got.Timestamp, got.LastPulseAt)
 	}
 }
+
+// A sweep message is stamped with the sweep's start, unless the loop took
+// an edge stamped after it into that state; then it moves on to that edge,
+// so the state never includes a litre after its timestamp (review on #9).
+func TestMeterSweepIsStampedNoEarlierThanItsLatestEdge(t *testing.T) {
+	pub := &mqttpubtest.Fake{}
+	m, _ := newTestMeter(t, pub)
+	m.sweepAt, m.sweepMono = wallAt, monoAt
+	m.emit(meter.Event{Kind: meter.Swept, At: monoAt, Snap: meter.Snapshot{Level: meter.Open}})
+	published(t, pub, 1) // one at a time: a waiting sweep message is replaced by the next
+	m.emit(meter.Event{Kind: meter.Swept, At: monoAt + 3*time.Second, Snap: meter.Snapshot{Level: meter.Open}})
+	all := published(t, pub, 2)
+	want0, want1 := `"timestamp":"`+wallAt.UTC().Format(time.RFC3339)+`"`, `"timestamp":"`+wallAt.Add(3*time.Second).UTC().Format(time.RFC3339)+`"`
+	if !strings.Contains(all[0].Payload, want0) || !strings.Contains(all[1].Payload, want1) {
+		t.Errorf("published\n%s\n%s\nwant %s, then %s", all[0].Payload, all[1].Payload, want0, want1)
+	}
+}

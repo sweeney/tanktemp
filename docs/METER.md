@@ -203,7 +203,9 @@ and **drains every queued edge before handling a tick or a request** (for
 a request, every edge stamped up to its `now`; a later one waits until
 after). So a tick can't confirm a closing ahead of the edge that would
 have made it `short`, a snapshot never misses an edge already received,
-and a sweep's state is as of the sweep's start. Each event carries its
+and a sweep's state is as of the sweep's start, or, if the loop took an
+edge stamped after that first, as of that edge and stamped with its time:
+never including an edge after its own timestamp. Each event carries its
 own snapshot, taken as it happened. An optional `Trace` hook sees every
 edge and tick with what it did; that's how pulsewatch reports from the
 same loop.
