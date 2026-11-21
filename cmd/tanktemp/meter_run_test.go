@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/sweeney/common/health/sysinfo"
+	"github.com/sweeney/common/mqttpub"
 	"github.com/sweeney/common/mqttpub/mqttpubtest"
 	"github.com/sweeney/tanktemp/internal/config"
 	"github.com/sweeney/tanktemp/internal/meter"
@@ -79,6 +80,13 @@ func (r *meterRig) stop(t *testing.T) {
 // wall t0.
 func startMeterRig(t *testing.T, cfg config.Config, openErr error) *meterRig {
 	t.Helper()
+	return startMeterRigWith(t, cfg, openErr, nil)
+}
+
+// startMeterRigWith is startMeterRig with run's publisher wrapped (nil:
+// the rig's Fake as it is).
+func startMeterRigWith(t *testing.T, cfg config.Config, openErr error, wrap func(publisher) publisher) *meterRig {
+	t.Helper()
 	r := &meterRig{
 		rig:   &rig{pub: &mqttpubtest.Fake{}, tick: make(chan time.Time), hb: make(chan time.Time), sig: make(chan os.Signal, 1), done: make(chan error, 1), logs: &syncBuf{}},
 		line:  metertest.NewFake(meter.Open),
@@ -105,6 +113,9 @@ func startMeterRig(t *testing.T, cfg config.Config, openErr error) *meterRig {
 	d.Listener, r.url = ln, "http://"+ln.Addr().String()
 	d.SysFS = fstest.MapFS{"proc/loadavg": {Data: []byte("0.1 0.2 0.3 1/1 1\n")}}
 	d.Disk = func() (sysinfo.Disk, error) { return sysinfo.Disk{TotalBytes: 1 << 30, FreeBytes: 1 << 29}, nil }
+	if wrap != nil {
+		d.Pub = wrap(d.Pub)
+	}
 	go func() { r.done <- run(context.Background(), cfg, d) }()
 	t.Cleanup(func() { r.stop(t) })
 	return r
@@ -214,6 +225,55 @@ func TestRunFlushesTheMeterAtShutdown(t *testing.T) {
 	}
 	if n := len(r.pub.All(meterTopic)); n != 1+6+1 {
 		t.Errorf("%d meter messages, want 8: the first sweep, 3 pulses and 3 opens, the last state", n)
+	}
+}
+
+// hookPub calls on with each message once it is published, before
+// Publish returns (as a QoS 1 publish waits for its PUBACK).
+type hookPub struct {
+	publisher
+	on func(mqttpub.Message)
+}
+
+func (h hookPub) Publish(m mqttpub.Message) error {
+	err := h.publisher.Publish(m)
+	h.on(m)
+	return err
+}
+
+// Nothing on the meter topic after SHUTDOWN (review on #9, a blocker): the
+// meter used to keep counting until run's deferred stop, so an edge and a
+// tick while SHUTDOWN waited for its PUBACK published a retained pulse
+// after the "last" state (20 of 20 runs).
+func TestRunPublishesNoMeterMessageAfterShutdown(t *testing.T) {
+	var r *meterRig
+	r = startMeterRigWith(t, meterConfig(t), nil, func(p publisher) publisher {
+		return hookPub{p, func(m mqttpub.Message) {
+			if m.Topic != prefix+"/status" || !strings.Contains(m.Payload, `"event":"SHUTDOWN"`) {
+				return
+			}
+			r.line.Push(95*time.Second, meter.Closed)
+			select {
+			case r.ticks <- 96 * time.Second: // well past the hold
+			case <-time.After(100 * time.Millisecond): // the loop has stopped: good
+			}
+			time.Sleep(20 * time.Millisecond)
+		}}
+	})
+	r.meterMsgs(t, 1)
+	r.stop(t)
+	msgs := r.pub.Snapshot()
+	shutdown := -1
+	for i, m := range msgs {
+		if m.Topic == prefix+"/status" && strings.Contains(m.Payload, `"event":"SHUTDOWN"`) {
+			shutdown = i
+		}
+		if shutdown >= 0 && m.Topic == meterTopic {
+			t.Errorf("a meter message after SHUTDOWN: %s", m.Payload)
+		}
+	}
+	if shutdown < 0 {
+		t.Fatal("no SHUTDOWN")
 	}
 }
 

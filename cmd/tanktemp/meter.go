@@ -58,6 +58,16 @@ type meterRun struct {
 	busy  bool // a message is being published
 	drops int
 	wake  chan struct{}
+
+	// The loop and the publisher stop in that order, and only once each:
+	// at SHUTDOWN finish stops the loop (no more litres), flushes, then
+	// stops the publisher; otherwise Run does when its ctx ends. Run
+	// returns only once both have, so no meter Publish can follow Run, or
+	// follow finish (and so SHUTDOWN): mqttpub's Close chooses a clean
+	// disconnect or the last will from the last Publish on any goroutine.
+	stopLoop, stopPub context.CancelFunc
+	loopCtx, pubCtx   context.Context
+	loopDone, pubDone chan struct{}
 }
 
 // newMeter is the meter on src, counting from now.
@@ -66,54 +76,83 @@ func newMeter(cfg config.Meter, src meter.Source, d meterDeps) (*meterRun, error
 	if err != nil {
 		return nil, err
 	}
-	m := &meterRun{cfg: cfg, d: d, since: d.Wall(), wake: make(chan struct{}, 1)}
+	m := &meterRun{cfg: cfg, d: d, since: d.Wall(), wake: make(chan struct{}, 1),
+		loopDone: make(chan struct{}), pubDone: make(chan struct{})}
+	m.loopCtx, m.stopLoop = context.WithCancel(context.Background())
+	m.pubCtx, m.stopPub = context.WithCancel(context.Background())
 	m.loop = meter.NewLoop(k, src, d.Ticks, m.emit)
 	return m, nil
 }
 
-// Run counts and publishes until ctx ends or the line stops (logged).
+// Run counts and publishes until ctx ends or finish stops it, and returns
+// once its publisher has stopped. A line that stops is logged and reported
+// (OnStop); what's queued is still published until then.
 func (m *meterRun) Run(ctx context.Context) {
-	go m.publisher(ctx)
-	if err := m.loop.Run(ctx); err != nil {
+	go func() {
+		select {
+		case <-ctx.Done():
+			m.stopLoop()
+			m.stopPub()
+		case <-m.pubDone:
+		}
+	}()
+	go func() { defer close(m.pubDone); m.publisher() }()
+	err := m.loop.Run(m.loopCtx)
+	close(m.loopDone)
+	if err != nil {
 		m.d.Logger.Printf("meter %s: %v; not counting until tanktemp restarts", m.cfg.DeviceID, err)
 		if m.d.OnStop != nil {
 			m.d.OnStop(err)
 		}
 	}
+	<-m.pubDone
 }
 
 // finish is the meter's part of SHUTDOWN: a last sweep-type message as of
-// now (at, on the wall clock), then everything queued published, waiting
-// at most timeout, before the status says SHUTDOWN.
+// now (at, on the wall clock), then the loop stopped, so no litre can
+// follow; then everything queued published, waiting at most timeout; then
+// the publisher stopped. Once it returns, no meter message can be
+// published, so SHUTDOWN is the last word on the status topic's side too.
 func (m *meterRun) finish(at time.Time, timeout time.Duration) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	m.sweep(ctx, at)
+	m.stopLoop()
+	select {
+	case <-m.loopDone:
+	case <-ctx.Done():
+	}
 	for {
 		m.mu.Lock()
 		idle := len(m.queue) == 0 && !m.busy
 		m.mu.Unlock()
 		if idle {
-			return
+			break
 		}
 		select {
 		case <-ctx.Done():
 			m.d.Logger.Printf("meter %s: %d messages not published by shutdown", m.cfg.DeviceID, m.queued())
-			return
 		case <-time.After(5 * time.Millisecond):
+			continue
 		}
+		break
 	}
+	m.stopPub()
+	<-m.pubDone // a Publish in flight ends within mqttpub's own timeout
 }
 
-// emit is the Loop's: a counted litre or the opening that ends one.
+// emit is the Loop's: a counted litre, the opening that ends one, or a
+// sweep's state. Each message's times are converted with one reading of
+// the clocks, so a pulse's timestamp and last_pulse_at agree exactly.
 func (m *meterRun) emit(e meter.Event) {
+	off := m.offset()
 	switch e.Kind {
 	case meter.Pulse:
-		m.publish(payload.TriggerPulse, m.wallOf(e.At), e.Snap)
+		m.publishAt(payload.TriggerPulse, off.Add(e.At), e.Snap, off)
 	case meter.Opened:
-		m.publish(payload.TriggerOpen, m.wallOf(e.At), e.Snap)
+		m.publishAt(payload.TriggerOpen, off.Add(e.At), e.Snap, off)
 	case meter.Swept:
-		m.publish(payload.TriggerSweep, m.sweepAt, e.Snap)
+		m.publishAt(payload.TriggerSweep, m.sweepAt, e.Snap, off)
 	}
 }
 
@@ -123,13 +162,25 @@ func (m *meterRun) sweep(ctx context.Context, at time.Time) {
 	m.loop.Sweep(ctx, m.d.Mono())
 }
 
-// wallOf turns a time on the edges' clock into wall time.
-func (m *meterRun) wallOf(mono time.Duration) time.Time {
-	return m.d.Wall().Add(mono - m.d.Mono())
+// clockOffset is wall time at mono 0, read once: wall now − mono now.
+type clockOffset time.Time
+
+// Add is the wall time of mono.
+func (o clockOffset) Add(mono time.Duration) time.Time { return time.Time(o).Add(mono) }
+
+func (m *meterRun) offset() clockOffset {
+	return clockOffset(m.d.Wall().Add(-m.d.Mono()))
 }
+
+// wallOf turns a time on the edges' clock into wall time.
+func (m *meterRun) wallOf(mono time.Duration) time.Time { return m.offset().Add(mono) }
 
 // publish queues a message (numbered when it's published).
 func (m *meterRun) publish(tr payload.Trigger, at time.Time, s meter.Snapshot) {
+	m.publishAt(tr, at, s, m.offset())
+}
+
+func (m *meterRun) publishAt(tr payload.Trigger, at time.Time, s meter.Snapshot, off clockOffset) {
 	in := payload.MeterInput{
 		DeviceID: m.cfg.DeviceID, Trigger: tr, At: at, ClockSynced: m.d.Synced(),
 		LitresPerPulse: m.cfg.LitresPerPulse, Level: s.Level, CountingSince: m.since, Count: s.Count,
@@ -137,7 +188,7 @@ func (m *meterRun) publish(tr payload.Trigger, at time.Time, s meter.Snapshot) {
 		Noise: s.Noise, Short: s.Short, Glitches: s.Glitches, Lost: s.Lost,
 	}
 	if s.LastPulseAt != nil {
-		w := m.wallOf(*s.LastPulseAt)
+		w := off.Add(*s.LastPulseAt)
 		in.LastPulseAt = &w
 	}
 	m.mu.Lock()
@@ -161,14 +212,18 @@ func (m *meterRun) publish(tr payload.Trigger, at time.Time, s meter.Snapshot) {
 	}
 }
 
-// publisher sends the queue, in order, until ctx ends.
-func (m *meterRun) publisher(ctx context.Context) {
+// publisher sends the queue, in order, until stopPub; it checks before
+// taking each message, so it stops between messages, not after the queue.
+func (m *meterRun) publisher() {
 	for {
+		if m.pubCtx.Err() != nil {
+			return
+		}
 		m.mu.Lock()
 		if len(m.queue) == 0 {
 			m.mu.Unlock()
 			select {
-			case <-ctx.Done():
+			case <-m.pubCtx.Done():
 				return
 			case <-m.wake:
 			}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log"
 	"slices"
@@ -181,6 +182,62 @@ func (b *blockingPub) Publish(m mqttpub.Message) error {
 	return b.Fake.Publish(m)
 }
 
+// gatePub holds every Publish until released, and records whether each
+// came after done was closed.
+type gatePub struct {
+	mqttpubtest.Fake
+	release, done chan struct{}
+	mu            sync.Mutex
+	late          int
+}
+
+func (g *gatePub) Publish(m mqttpub.Message) error {
+	<-g.release
+	select {
+	case <-g.done:
+		g.mu.Lock()
+		g.late++
+		g.mu.Unlock()
+	default:
+	}
+	return g.Fake.Publish(m)
+}
+
+// Run doesn't return while its publisher can still publish (review on #9, a
+// blocker): mqttpub's Close picks a clean disconnect or the last will from
+// the last Publish, from any goroutine, so a meter message after Run (and
+// so after SHUTDOWN) could flip it. The publisher used to drain its whole
+// queue after Run had returned.
+func TestMeterRunOutlivesItsPublisher(t *testing.T) {
+	pub := &gatePub{release: make(chan struct{}), done: make(chan struct{})}
+	src := metertest.NewFake(meter.Open)
+	m, err := newMeter(testMeterCfg(), src, meterDeps{
+		Pub: pub, Prefix: "water/hot/tanktemp",
+		Wall: func() time.Time { return wallAt }, Mono: func() time.Duration { return monoAt },
+		Synced: func() bool { return true }, Logger: log.New(io.Discard, "", 0),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	ran := make(chan struct{})
+	go func() { defer close(ran); m.Run(ctx) }()
+	for range 5 {
+		m.publish(payload.TriggerSweep+"x", wallAt, meter.Snapshot{Level: meter.Open}) // not coalesced
+	}
+	waitQueued(t, m, 4) // one is in the gated Publish
+	cancel()
+	go func() { time.Sleep(20 * time.Millisecond); close(pub.release) }()
+	<-ran
+	close(pub.done)
+	time.Sleep(150 * time.Millisecond) // the gate is open: anything left would publish now
+	pub.mu.Lock()
+	defer pub.mu.Unlock()
+	if pub.late != 0 {
+		t.Errorf("%d meter messages published after Run returned", pub.late)
+	}
+}
+
 // A stalled broker must not stall the counting (review on 1a037c4): with
 // every publish blocked, edges keep being counted, and once it frees up
 // the messages go, in order.
@@ -327,5 +384,44 @@ func TestMeterSeqHasNoGaps(t *testing.T) {
 		if seqOf(t, p.Payload) != strconv.Itoa(i+1) {
 			t.Errorf("message %d has seq %s", i, seqOf(t, p.Payload))
 		}
+	}
+}
+
+// One message's times come from one reading of the clocks (review on #9):
+// with a wall clock that moves a second on every read, a pulse's timestamp
+// and last_pulse_at still name the same instant.
+func TestMeterMessageTimesAgree(t *testing.T) {
+	pub := &mqttpubtest.Fake{}
+	src := metertest.NewFake(meter.Open)
+	var mu sync.Mutex
+	w := wallAt
+	m, err := newMeter(testMeterCfg(), src, meterDeps{
+		Pub: pub, Prefix: "water/hot/tanktemp",
+		Wall: func() time.Time {
+			mu.Lock()
+			defer mu.Unlock()
+			w = w.Add(time.Second)
+			return w
+		},
+		Mono: func() time.Duration { return monoAt }, Synced: func() bool { return true }, Logger: log.New(io.Discard, "", 0),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.emit(meter.Event{Kind: meter.Pulse, At: monoAt, Snap: meter.Snapshot{Level: meter.Closed, Count: 1, LastPulseAt: ptrDur(monoAt)}})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { defer close(done); m.Run(ctx) }()
+	t.Cleanup(func() { cancel(); <-done })
+	p := published(t, pub, 1)[0].Payload
+	var got struct {
+		Timestamp   string `json:"timestamp"`
+		LastPulseAt string `json:"last_pulse_at"`
+	}
+	if err := json.Unmarshal([]byte(p), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.LastPulseAt[:19] != got.Timestamp[:19] {
+		t.Errorf("timestamp %s, last_pulse_at %s: one pulse, two instants", got.Timestamp, got.LastPulseAt)
 	}
 }
