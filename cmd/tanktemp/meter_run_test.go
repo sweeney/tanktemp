@@ -364,12 +364,20 @@ func TestRunReportsTheMeter(t *testing.T) {
 	r.line.Push(99*time.Second, meter.Closed)
 	r.ticks <- 99*time.Second + 50*time.Millisecond
 	r.meterMsgs(t, 2)
-	if m := r.apiMeters(t); !strings.HasPrefix(m, `[{"device_id":"hot_water_meter","line":"gpiochip0:27","state":"counting","reason":null,"level":"closed","count":1,"counting_since":"2026-11-02T21:00:00Z","last_pulse_at":"2026-11-02T20:59:59.000Z","noise":0,"short":0,"glitches":0,"lost":0,"publish_dropped":0,"queued":0}]`) {
+	if m := r.apiMeters(t); !strings.HasPrefix(m, `[{"device_id":"hot_water_meter","line":"gpiochip0:27","state":"counting","reason":null,"litres_per_pulse":1,"level":"closed","count":1,"counting_since":"2026-11-02T21:00:00Z","last_pulse_at":"2026-11-02T20:59:59.000Z","last_interval_ms":null,"noise":0,"short":0,"glitches":0,"lost":0,"publish_dropped":0,"queued":0}]`) {
+		t.Errorf("counting: %s", m)
+	}
+	// The status page shows the gap between the last two litres.
+	r.line.Push(99*time.Second+400*time.Millisecond, meter.Open)
+	r.line.Push(99*time.Second+1840*time.Millisecond, meter.Closed)
+	r.ticks <- 99*time.Second + 1900*time.Millisecond
+	r.meterMsgs(t, 4)
+	if m := r.apiMeters(t); !strings.Contains(m, `"count":2,`) || !strings.Contains(m, `"last_interval_ms":1840,`) {
 		t.Errorf("counting: %s", m)
 	}
 	r.line.Close()
 	deadline := time.Now().Add(3 * time.Second)
-	for m := r.apiMeters(t); !strings.HasPrefix(m, nospace(`[{"device_id":"hot_water_meter","line":"gpiochip0:27","state":"stopped","reason":"meter: the line's edges stopped","level":null,"count":null`)); m = r.apiMeters(t) {
+	for m := r.apiMeters(t); !strings.HasPrefix(m, nospace(`[{"device_id":"hot_water_meter","line":"gpiochip0:27","state":"stopped","reason":"meter: the line's edges stopped","litres_per_pulse":1,"level":null,"count":null`)); m = r.apiMeters(t) {
 		if time.Now().After(deadline) {
 			t.Fatalf("stopped: %s", m)
 		}
@@ -380,7 +388,7 @@ func TestRunReportsTheMeter(t *testing.T) {
 func TestRunReportsAFailedMeter(t *testing.T) {
 	r := startMeterRig(t, meterConfig(t), errors.New("GPIO 27 on gpiochip0: device or resource busy"))
 	r.waitFor(t, 3)
-	if m := r.apiMeters(t); !strings.HasPrefix(m, nospace(`[{"device_id":"hot_water_meter","line":"gpiochip0:27","state":"failed","reason":"GPIO 27 on gpiochip0: device or resource busy","level":null,"count":null,"counting_since":null,"last_pulse_at":null,"noise":null,"short":null,"glitches":null,"lost":null,"publish_dropped":0,"queued":0}]`)) {
+	if m := r.apiMeters(t); !strings.HasPrefix(m, nospace(`[{"device_id":"hot_water_meter","line":"gpiochip0:27","state":"failed","reason":"GPIO 27 on gpiochip0: device or resource busy","litres_per_pulse":1,"level":null,"count":null,"counting_since":null,"last_pulse_at":null,"last_interval_ms":null,"noise":null,"short":null,"glitches":null,"lost":null,"publish_dropped":0,"queued":0}]`)) {
 		t.Errorf("failed: %s", m)
 	}
 }

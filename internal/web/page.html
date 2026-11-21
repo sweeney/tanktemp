@@ -39,6 +39,11 @@ h1 { font-size: 20px; margin: 0; }
 .temp { font-variant-numeric: tabular-nums; font-size: 20px; font-weight: 600; text-align: right; }
 .err { color: var(--bad); font-size: 13px; font-weight: 600; text-align: right; }
 .flag { color: var(--warn); font-size: 12px; text-align: right; }
+.meters { margin-top: 16px; }
+.meters:empty { display: none; }
+.tank h2 .pill { margin-left: 8px; vertical-align: 1px; }
+.litres { font-variant-numeric: tabular-nums; font-size: 28px; font-weight: 600; margin: 2px 0 6px; }
+.warn { color: var(--warn); font-size: 13px; font-weight: 600; }
 footer { margin-top: 24px; color: var(--muted); font-size: 12px; }
 code { font-size: 12px; }
 </style>
@@ -53,6 +58,7 @@ code { font-size: 12px; }
   </header>
   <ul class="notes" id="notes"></ul>
   <section class="tanks" id="tanks"></section>
+  <section class="tanks meters" id="meters"></section>
   <footer>
     Build <code>{{.Version}}</code> · <span id="prefix"></span> ·
     <a href="/healthz">/healthz</a> · <a href="/api/status">/api/status</a>
@@ -122,6 +128,22 @@ function render(s) {
     }
     tanks.appendChild(card);
   }
+  const meters = document.getElementById("meters");
+  meters.replaceChildren();
+  const now = Date.now();
+  for (const m of (s.meters || [])) {
+    const v = meterView(m, now);
+    const card = el("article", "tank");
+    const h = el("h2", "", m.device_id);
+    h.appendChild(el("span", "pill " + v.cls, v.state));
+    card.appendChild(h);
+    card.appendChild(el("div", "litres", v.headline));
+    if (m.counting_since) card.appendChild(el("div", "sub", "since " + new Date(m.counting_since).toLocaleString()));
+    for (const l of v.lines) card.appendChild(el("div", "sub", l));
+    for (const w of (v.warnings || [])) card.appendChild(el("div", "warn", w));
+    meters.appendChild(card);
+  }
+
   document.getElementById("when").textContent = newest
     ? "last sweep " + new Date(newest).toLocaleTimeString()
     : "waiting for the first sweep";
@@ -165,6 +187,52 @@ function schedulePoll(nextInS) {
   let delay;
   [delay, overdueBackoff] = pollDelay(nextInS, overdueBackoff, interval);
   pending = setTimeout(poll, delay);
+}
+
+// The water meter's card (docs/METER.md). meterView, ago and litres are
+// pure, so internal/web/pagemeter_test.go runs them under node, from the
+// page as served. meterView takes a meter as /api/status gives it and now
+// (ms since the epoch), and returns what its card says: the state and its
+// pill class, a headline, lines, and warnings (none: left out).
+function ago(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60) return s + " s";
+  if (s < 3600) return Math.floor(s / 60) + " min";
+  if (s < 86400) return Math.floor(s / 3600) + " h";
+  return Math.floor(s / 86400) + " d";
+}
+
+function litres(count, k) {
+  return parseFloat((count * k).toFixed(3)).toString() + " L";
+}
+
+function meterView(m, now) {
+  const v = {state: m.state, cls: "degraded", headline: "not counting", lines: [m.line]};
+  const warnings = [];
+  if (m.reason) warnings.push(m.reason);
+  if (m.state === "starting") { v.cls = "starting"; v.headline = "starting"; }
+  if (m.state === "counting") {
+    v.cls = "ok";
+    v.headline = litres(m.count, m.litres_per_pulse);
+    let last = "no litre yet";
+    if (m.last_pulse_at) {
+      const since = now - Date.parse(m.last_pulse_at);
+      last = "last litre " + ago(since) + " ago";
+      // The flow only while it can still be flowing: a gap under 36 s
+      // (about the meter's slowest accurate flow) and the last litre within
+      // twice the gap, or a minute. An old gap isn't a flow now.
+      const gap = m.last_interval_ms;
+      if (gap && gap < 36000 && since <= Math.max(2 * gap, 60000)) {
+        last += ", " + (gap / 1000).toFixed(1) + " s after the one before (" + (m.litres_per_pulse * 60000 / gap).toFixed(1) + " L/min)";
+      }
+    }
+    v.lines = [last, "reed " + m.level + " · " + m.line];
+    for (const k of ["noise", "short", "glitches"]) if (m[k] > 0) warnings.push(k + " " + m[k]);
+    if (m.lost > 0) warnings.push("lost " + m.lost + ": the count is a lower bound");
+  }
+  if (m.publish_dropped > 0) warnings.push(m.publish_dropped + (m.publish_dropped === 1 ? " message" : " messages") + " dropped by a slow broker");
+  if (warnings.length) v.warnings = warnings;
+  return v;
 }
 
 // pollDelay: begin

@@ -51,11 +51,13 @@ type MeterStatus struct {
 	DeviceID       string  `json:"device_id"`
 	Line           string  `json:"line"` // chip:gpio
 	State          string  `json:"state"`
-	Reason         *string `json:"reason"` // why failed or stopped
+	Reason         *string `json:"reason"`           // why failed or stopped
+	LitresPerPulse float64 `json:"litres_per_pulse"` // the meter's K, from the config
 	Level          *string `json:"level"`
 	Count          *int64  `json:"count"`
 	CountingSince  *string `json:"counting_since"`
 	LastPulseAt    *string `json:"last_pulse_at"`
+	LastIntervalMS *int64  `json:"last_interval_ms"` // between the last two litres; the page shows the flow it implies
 	Noise          *int64  `json:"noise"`
 	Short          *int64  `json:"short"`
 	Glitches       *int64  `json:"glitches"`
