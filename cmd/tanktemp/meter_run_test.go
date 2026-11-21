@@ -113,7 +113,8 @@ func startMeterRigWith(t *testing.T, cfg config.Config, openErr error, wrap func
 	d.Listener, r.url = ln, "http://"+ln.Addr().String()
 	d.SysFS = fstest.MapFS{"proc/loadavg": {Data: []byte("0.1 0.2 0.3 1/1 1\n")},
 		// One w1-gpio overlay loaded, on GPIO 4 (#10).
-		"sys/firmware/devicetree/base/onewire@4/gpios": {Data: []byte{0, 0, 0, 7, 0, 0, 0, 4, 0, 0, 0, 0}}}
+		"sys/firmware/devicetree/base/onewire@4/gpios": {Data: []byte{0, 0, 0, 7, 0, 0, 0, 4, 0, 0, 0, 0}},
+		"sys/devices/platform/onewire@4/driver":        {Data: []byte("w1-gpio")}}
 	d.Disk = func() (sysinfo.Disk, error) { return sysinfo.Disk{TotalBytes: 1 << 30, FreeBytes: 1 << 29}, nil }
 	if wrap != nil {
 		d.Pub = wrap(d.Pub)

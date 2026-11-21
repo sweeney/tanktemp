@@ -18,6 +18,9 @@ func TestBusPins(t *testing.T) {
 	}{
 		{"rig-2026-11-21", []int{4, 17}, false},
 		{"none", nil, false},
+		// A node is a bus only if enabled and bound to its driver (review on #11).
+		{"disabled", []int{4}, false},
+		{"unbound", []int{4}, false},
 		{"malformed", nil, true},
 	} {
 		got, err := BusPins(os.DirFS("testdata/devicetree/" + tt.dir))

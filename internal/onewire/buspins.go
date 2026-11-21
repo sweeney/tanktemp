@@ -12,11 +12,15 @@ import (
 // filesystem rooted at "/" (/proc/device-tree is a link to it).
 const deviceTree = "sys/firmware/devicetree/base"
 
-// BusPins returns the GPIO of each loaded w1-gpio overlay (#10), sorted:
-// what config.txt's dtoverlay=w1-gpio,gpiopin=N lines made of the device
-// tree at boot. Each overlay is a node "onewire@<pin in hex>" whose gpios
-// property is <phandle pin flags>, big-endian 32-bit cells; the pin is read
-// from the property, which is what the driver uses, not from the name.
+// BusPins returns the GPIO of each loaded w1-gpio bus (#10), sorted: what
+// config.txt's dtoverlay=w1-gpio,gpiopin=N lines made of the device tree at
+// boot. Each overlay is a node "onewire@<pin in hex>" whose gpios property
+// is <phandle pin flags>, big-endian 32-bit cells; the pin is read from the
+// property, which is what the driver uses, not from the name.
+//
+// "Loaded" means the node is enabled (no status, or not "disabled") and a
+// driver has bound its platform device (sys/devices/platform/<node>/driver
+// exists): a bus the kernel is actually running.
 //
 // It says nothing about which w1_bus_masterN is which: there is no link
 // from a master back to its node, and their numbering isn't stable
@@ -30,6 +34,12 @@ func BusPins(root fs.FS) ([]int, error) {
 	for _, e := range entries {
 		if !e.IsDir() || !strings.HasPrefix(e.Name(), "onewire@") {
 			continue
+		}
+		if st, err := fs.ReadFile(root, deviceTree+"/"+e.Name()+"/status"); err == nil && strings.TrimRight(string(st), "\x00") == "disabled" {
+			continue
+		}
+		if _, err := fs.Stat(root, "sys/devices/platform/"+e.Name()+"/driver"); err != nil {
+			continue // no driver bound: not a running bus
 		}
 		b, err := fs.ReadFile(root, deviceTree+"/"+e.Name()+"/gpios")
 		if err != nil {
