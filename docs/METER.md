@@ -162,7 +162,7 @@ What the kernel does, which the counter relies on:
 | With debounce, an event is sent only when the debounced level **changes** | same-level events (`noise`) are expected only without debounce |
 | A debounced event is stamped when the debounce completes | every meter time is about `debounce` (20 ms) after the reed moved. Intervals and closed times are unaffected |
 | The event buffer (a kfifo) drops its **oldest** event when full | the line sequence number jumps: `lost`. tanktemp's own handler is non-blocking, with a 256-event buffer, and expects 0 |
-| Event stamps are `CLOCK_MONOTONIC` | `gpioedge.Now` reads the same clock, so tanktemp can turn an edge's time into wall time: wall now − (mono now − edge time) |
+| Event stamps are `CLOCK_MONOTONIC` | `gpioedge.Now` reads the same clock, so tanktemp can turn an edge's time into wall time with one offset, wall − mono. It keeps the offset it read until a fresh reading moves by more than 50 ms (the wall clock stepped, as NTP does at boot), so a litre's `last_pulse_at` prints the same in every message and on the status page. Two readings differ by microseconds, enough to flip a time printed to the millisecond |
 
 Only `line_linux.go`'s request touches `go-gpiocdev` (and
 `golang.org/x/sys/unix`, for the clock). Everything else in gpioedge (the

@@ -442,3 +442,94 @@ func TestMeterSweepIsStampedNoEarlierThanItsLatestEdge(t *testing.T) {
 		t.Errorf("published\n%s\n%s\nwant %s, then %s", all[0].Payload, all[1].Payload, want0, want1)
 	}
 }
+
+// One litre's last_pulse_at prints the same in every message, and on the
+// status page, though each reading of the two clocks differs by a few
+// microseconds. Here the closing lands 1 µs before a millisecond (wall
+// 07:05:04.006999) and the reads alternate between exact and 3 µs late:
+// converted afresh each time, it printed .006 in one message and .007 in
+// the next (washhouse, 22 Nov: a pulse at .228, its open at .227).
+func TestMeterLastPulseAtIsOneInstant(t *testing.T) {
+	pub := &mqttpubtest.Fake{}
+	src := metertest.NewFake(meter.Open)
+	var mu sync.Mutex
+	reads := 0
+	m, err := newMeter(testMeterCfg(), src, meterDeps{
+		Pub: pub, Prefix: "water/hot/tanktemp",
+		Wall: func() time.Time {
+			mu.Lock()
+			defer mu.Unlock()
+			reads++
+			return wallAt.Add(time.Duration(reads%2) * 3 * time.Microsecond)
+		},
+		Mono: func() time.Duration { return monoAt }, Synced: func() bool { return true }, Logger: log.New(io.Discard, "", 0),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	closing := 4007*ms - time.Microsecond
+	snap := meter.Snapshot{Level: meter.Closed, Count: 1, LastPulseAt: ptrDur(closing)}
+	m.emit(meter.Event{Kind: meter.Pulse, At: closing, Snap: snap})
+	open := snap
+	open.Level, open.LastClosed = meter.Open, ptrDur(1541*ms)
+	m.emit(meter.Event{Kind: meter.Opened, At: closing + 1541*ms, Snap: open})
+	m.sweepAt, m.sweepMono = wallAt, monoAt
+	m.emit(meter.Event{Kind: meter.Swept, At: monoAt, Snap: open})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { defer close(done); m.Run(ctx) }()
+	t.Cleanup(func() { cancel(); src.Close(); <-done })
+	var got []string
+	for _, msg := range published(t, pub, 3) {
+		var p struct {
+			LastPulseAt string `json:"last_pulse_at"`
+		}
+		if err := json.Unmarshal([]byte(msg.Payload), &p); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, p.LastPulseAt)
+	}
+	for range 2 {
+		got = append(got, m.wallOf(closing).UTC().Format("2006-01-02T15:04:05.000Z07:00"))
+	}
+	for _, g := range got[1:] {
+		if g != got[0] {
+			t.Fatalf("one litre's last_pulse_at as pulse, open, sweep, status, status: %q", got)
+		}
+	}
+}
+
+// The wall clock can still step (NTP at boot, with no RTC): a step is
+// taken up, so times after it, and the last litre's, are on the new clock.
+func TestMeterFollowsAWallClockStep(t *testing.T) {
+	pub := &mqttpubtest.Fake{}
+	src := metertest.NewFake(meter.Open)
+	var mu sync.Mutex
+	step := time.Duration(0)
+	m, err := newMeter(testMeterCfg(), src, meterDeps{
+		Pub: pub, Prefix: "water/hot/tanktemp",
+		Wall: func() time.Time {
+			mu.Lock()
+			defer mu.Unlock()
+			return wallAt.Add(step)
+		},
+		Mono: func() time.Duration { return monoAt }, Synced: func() bool { return true }, Logger: log.New(io.Discard, "", 0),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { defer close(done); m.Run(ctx) }()
+	t.Cleanup(func() { cancel(); src.Close(); <-done })
+	m.emit(meter.Event{Kind: meter.Pulse, At: 4007 * ms, Snap: meter.Snapshot{Level: meter.Closed, Count: 1, LastPulseAt: ptrDur(4007 * ms)}})
+	published(t, pub, 1)
+	mu.Lock()
+	step = 2 * time.Second
+	mu.Unlock()
+	m.emit(meter.Event{Kind: meter.Opened, At: 5548 * ms, Snap: meter.Snapshot{Level: meter.Open, Count: 1, LastPulseAt: ptrDur(4007 * ms), LastClosed: ptrDur(1541 * ms)}})
+	all := published(t, pub, 2)
+	if !contains(all[1].Payload, `"timestamp":"2026-11-20T07:05:07Z"`, `"last_pulse_at":"2026-11-20T07:05:06.007Z"`) {
+		t.Errorf("after a 2 s step, published %s", all[1].Payload)
+	}
+}

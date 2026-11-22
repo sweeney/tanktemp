@@ -138,7 +138,7 @@ what a rejected edge means are for consumers (washhouse).
 | `level` | the reed now, after debounce: `open` or `closed`. Closed for hours means the pointer is resting on the magnet. A new closing reads `closed` for up to `meter.hold` + 50 ms before its `pulse`, and the opening that ends a litre reads `open` as long before its `open`, while each is being held; that is not a fault. Never unknown: tanktemp reads it when it requests the line, and a line it can't read is `gpio_request_failed` |
 | `counting_since` | when this count started: when tanktemp requested the line. A new value is a reset; anything between the two runs went unseen |
 | `count` | litres counted since `counting_since`, as pulses: litres = `count` × `litres_per_pulse`. A message lost in delivery loses nothing: the next one carries the total |
-| `last_pulse_at` | the last counted closing, **to the millisecond** (unlike other times). The kernel stamps an edge once its debounce has confirmed it, so this, like every meter time, is about `meter.debounce` (20 ms) after the reed moved; intervals and closed times are unaffected. `null` before the first |
+| `last_pulse_at` | the last counted closing, **to the millisecond** (unlike other times). The kernel stamps an edge once its debounce has confirmed it, so this, like every meter time, is about `meter.debounce` (20 ms) after the reed moved; intervals and closed times are unaffected. One litre's `last_pulse_at` is the same string in every message that carries it (its `pulse`, its `open` and later `sweep`s), unless the wall clock steps in between: then it moves with the clock. `null` before the first |
 | `last_interval_ms` | between the last two counted closings, on the monotonic clock. `null` before the second |
 | `last_closed_ms` | how long the reed stayed closed in the last counted litre that has ended, on the monotonic clock. The reed is closed for a roughly fixed share of each turn (about 0.23 on the rig), so this gives the flow within one litre; tanktemp doesn't interpret it. Minutes or hours means the pointer rested on the magnet (the rig's first night had 4 h 26 m): it is not a flow. `null` until one has |
 | `noise` | edges reporting the level the reed already had: a spike shorter than the kernel could read (or, should the kernel ever send one, an event out of order). They change nothing. Expected 0 with the kernel debounce on; a rise means it isn't holding |
@@ -213,6 +213,12 @@ What MQTT does and doesn't guarantee here:
   either way.
 
 ## Changes
+
+- **2026-11-22, fix, no shape change:** one litre's `last_pulse_at` could
+  differ by 1 ms between its messages (`…44.228Z` in its `pulse` and
+  `sweep`s, `…44.227Z` in its `open`), because each message re-read the
+  clocks. It is now one string, unless the wall clock steps (Meter,
+  `last_pulse_at`). Reported by washhouse.
 
 - **Additive (#10):** `startup_problems` gains `w1_bus_missing`,
   `w1_bus_undeclared` and `w1_bus_check_failed` (`rom` `null`), reported

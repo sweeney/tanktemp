@@ -57,6 +57,9 @@ type meterRun struct {
 	sweepMono time.Duration
 	seq       uint64 // the publisher's alone
 
+	offMu sync.Mutex
+	off   time.Time // offset's: the clock offset held (zero: none yet)
+
 	mu    sync.Mutex
 	queue []payload.MeterInput
 	busy  bool // a message is being published
@@ -172,14 +175,31 @@ func (m *meterRun) sweep(ctx context.Context, at time.Time) {
 	m.loop.Sweep(ctx, m.sweepMono)
 }
 
-// clockOffset is wall time at mono 0, read once: wall now − mono now.
+// clockOffset is wall time at mono 0: wall now − mono now.
 type clockOffset time.Time
 
 // Add is the wall time of mono.
 func (o clockOffset) Add(mono time.Duration) time.Time { return time.Time(o).Add(mono) }
 
+// clockStep is how far a fresh reading of the offset must move before it
+// replaces the one held. Two readings of the clocks differ by microseconds
+// (more if the goroutine is preempted between them), and a time printed to
+// the millisecond can flip either side of one on that; the wall clock
+// otherwise moves against the monotonic one only when it steps (NTP at
+// boot: Linux slews both clocks alike).
+const clockStep = 50 * time.Millisecond
+
+// offset is the offset held, unless the wall clock has stepped since: so a
+// litre's last_pulse_at prints the same in every message and on the status
+// page, and a step is still taken up.
 func (m *meterRun) offset() clockOffset {
-	return clockOffset(m.d.Wall().Add(-m.d.Mono()))
+	fresh := time.Time(clockOffset(m.d.Wall().Add(-m.d.Mono())))
+	m.offMu.Lock()
+	defer m.offMu.Unlock()
+	if d := fresh.Sub(m.off); m.off.IsZero() || d > clockStep || d < -clockStep {
+		m.off = fresh
+	}
+	return clockOffset(m.off)
 }
 
 // wallOf turns a time on the edges' clock into wall time.
